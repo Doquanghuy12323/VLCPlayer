@@ -21,7 +21,6 @@ android {
             signingConfig signingConfigs.debug
         }
         debug {
-            applicationIdSuffix '.debug'
         }
     }
 
