@@ -6,7 +6,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -31,7 +30,6 @@ import java.util.concurrent.Executors;
 
 public class UpdateManager {
 
-    // ⚠️ Đổi thành username GitHub của bạn
     private static final String GITHUB_USER = "Doquanghuy12323";
     private static final String GITHUB_REPO = "VLCPlayer";
     private static final String API_URL =
@@ -45,18 +43,23 @@ public class UpdateManager {
         this.activity = activity;
     }
 
-    // Gọi khi app mở — kiểm tra update ngầm
     public void checkForUpdate(boolean silent) {
         executor.execute(() -> {
             try {
-                HttpURLConnection conn = (HttpURLConnection)
-                    new URL(API_URL).openConnection();
+                // Bước 1: Gọi API
+                HttpURLConnection conn = (HttpURLConnection) new URL(API_URL).openConnection();
                 conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
+                conn.setRequestProperty("User-Agent", "VLCPlayer-Android");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
 
-                if (conn.getResponseCode() != 200) return;
+                int responseCode = conn.getResponseCode();
+                if (responseCode != 200) {
+                    showToast("Lỗi API: HTTP " + responseCode);
+                    return;
+                }
 
+                // Bước 2: Đọc response
                 BufferedReader br = new BufferedReader(
                     new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
@@ -65,53 +68,88 @@ public class UpdateManager {
                 br.close();
 
                 JSONObject json = new JSONObject(sb.toString());
-                String tagName = json.getString("tag_name"); // "v202503231045"
-                String latestVersion = tagName.replace("v", "");
+                String tagName = json.getString("tag_name");
+                String latestVersion = tagName.replace("v", "").trim();
 
-                // Lấy current versionName
-                String currentVersion = activity.getPackageManager()
-                    .getPackageInfo(activity.getPackageName(), 0).versionName;
-
-                long latest  = Long.parseLong(latestVersion);
-                long current = Long.parseLong(currentVersion);
-
-                if (latest > current) {
-                    // Lấy download URL của APK
-                    JSONArray assets = json.getJSONArray("assets");
-                    String downloadUrl = null;
-                    for (int i = 0; i < assets.length(); i++) {
-                        JSONObject asset = assets.getJSONObject(i);
-                        if (asset.getString("name").endsWith(".apk")) {
-                            downloadUrl = asset.getString("browser_download_url");
-                            break;
-                        }
-                    }
-                    if (downloadUrl == null) return;
-
-                    final String url = downloadUrl;
-                    final String version = latestVersion;
-                    mainHandler.post(() -> showUpdateDialog(version, url));
-                } else if (!silent) {
-                    mainHandler.post(() ->
-                        Toast.makeText(activity, "Đang dùng phiên bản mới nhất!",
-                            Toast.LENGTH_SHORT).show());
+                // Bước 3: So sánh version
+                String currentVersion;
+                try {
+                    currentVersion = activity.getPackageManager()
+                        .getPackageInfo(activity.getPackageName(), 0).versionName;
+                } catch (Exception e) {
+                    showToast("Lỗi lấy version hiện tại: " + e.getMessage());
+                    return;
                 }
+
+                if (!silent) {
+                    showToast("Hiện tại: " + currentVersion + " | Mới nhất: " + latestVersion);
+                }
+
+                // So sánh dạng số
+                long latest, current;
+                try {
+                    latest  = Long.parseLong(latestVersion);
+                    current = Long.parseLong(currentVersion);
+                } catch (NumberFormatException e) {
+                    // Fallback: so sánh string
+                    if (latestVersion.compareTo(currentVersion) <= 0) {
+                        if (!silent) showToast("Đang dùng phiên bản mới nhất!");
+                        return;
+                    }
+                    latest  = 1;
+                    current = 0;
+                }
+
+                if (latest <= current) {
+                    if (!silent) showToast("Đang dùng phiên bản mới nhất!");
+                    return;
+                }
+
+                // Bước 4: Lấy download URL
+                JSONArray assets = json.getJSONArray("assets");
+                String downloadUrl = null;
+
+                if (assets.length() == 0) {
+                    // Không có asset → dùng source download URL
+                    showToast("Không có APK trong release. Vui lòng tải thủ công.");
+                    return;
+                }
+
+                for (int i = 0; i < assets.length(); i++) {
+                    JSONObject asset = assets.getJSONObject(i);
+                    String name = asset.getString("name");
+                    if (name.endsWith(".apk")) {
+                        downloadUrl = asset.getString("browser_download_url");
+                        break;
+                    }
+                }
+
+                if (downloadUrl == null) {
+                    showToast("Không tìm thấy file APK trong release");
+                    return;
+                }
+
+                final String url = downloadUrl;
+                final String ver = latestVersion;
+                mainHandler.post(() -> showUpdateDialog(ver, url));
 
             } catch (Exception e) {
                 if (!silent) {
-                    mainHandler.post(() ->
-                        Toast.makeText(activity, "Không kiểm tra được update",
-                            Toast.LENGTH_SHORT).show());
+                    showToast("Lỗi kiểm tra update: " + e.getMessage());
                 }
             }
         });
+    }
+
+    private void showToast(String msg) {
+        mainHandler.post(() -> Toast.makeText(activity, msg, Toast.LENGTH_LONG).show());
     }
 
     private void showUpdateDialog(String newVersion, String downloadUrl) {
         if (activity.isFinishing()) return;
         new AlertDialog.Builder(activity)
             .setTitle("🎉 Có bản cập nhật mới!")
-            .setMessage("Phiên bản " + newVersion + " sẵn sàng.\nBạn có muốn tải và cài đặt ngay không?")
+            .setMessage("Phiên bản " + newVersion + " sẵn sàng.\nBấm Cập nhật để tải và cài đặt.")
             .setPositiveButton("Cập nhật", (d, w) -> downloadAndInstall(downloadUrl))
             .setNegativeButton("Để sau", null)
             .setCancelable(false)
@@ -132,21 +170,20 @@ public class UpdateManager {
 
         DownloadManager.Request req = new DownloadManager.Request(Uri.parse(downloadUrl))
             .setTitle("VLC Player Update")
-            .setDescription("Đang tải bản cập nhật...")
+            .setDescription("Đang tải...")
             .setNotificationVisibility(
                 DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationUri(Uri.fromFile(outFile));
 
         long downloadId = dm.enqueue(req);
 
-        // Lắng nghe khi tải xong
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context ctx, Intent intent) {
                 long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
                 if (id == downloadId) {
                     activity.unregisterReceiver(this);
-                    checkDownloadAndInstall(dm, downloadId, outFile);
+                    checkAndInstall(dm, downloadId, outFile);
                 }
             }
         };
@@ -154,21 +191,17 @@ public class UpdateManager {
             new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
     }
 
-    private void checkDownloadAndInstall(DownloadManager dm, long downloadId, File file) {
-        DownloadManager.Query query = new DownloadManager.Query()
-            .setFilterById(downloadId);
-        Cursor cursor = dm.query(query);
+    private void checkAndInstall(DownloadManager dm, long downloadId, File file) {
+        Cursor cursor = dm.query(
+            new DownloadManager.Query().setFilterById(downloadId));
         if (cursor != null && cursor.moveToFirst()) {
             int status = cursor.getInt(
                 cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
             cursor.close();
-
             if (status == DownloadManager.STATUS_SUCCESSFUL) {
                 installApk(file);
             } else {
-                mainHandler.post(() ->
-                    Toast.makeText(activity, "Tải thất bại, thử lại sau",
-                        Toast.LENGTH_SHORT).show());
+                showToast("Tải thất bại, thử lại sau");
             }
         }
     }
@@ -191,8 +224,7 @@ public class UpdateManager {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity.startActivity(intent);
         } catch (Exception e) {
-            Toast.makeText(activity, "Lỗi cài đặt: " + e.getMessage(),
-                Toast.LENGTH_LONG).show();
+            showToast("Lỗi cài đặt: " + e.getMessage());
         }
     }
 }
