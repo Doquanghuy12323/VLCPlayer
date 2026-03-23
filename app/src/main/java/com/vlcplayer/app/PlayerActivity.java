@@ -36,7 +36,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
-    private ParcelFileDescriptor currentPfd; // giữ PFD sống suốt quá trình phát
+    private ParcelFileDescriptor currentPfd;
 
     private SeekBar seekBar;
     private TextView tvCurrent, tvTotal, tvTitle;
@@ -115,16 +115,20 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
-        // Audio session cho Wavelet — KHÔNG truyền vào libVLC option
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         audioSessionId = am.generateAudioSessionId();
 
-        // Khởi tạo LibVLC — chỉ dùng options an toàn
+        // Options tối ưu performance
         ArrayList<String> options = new ArrayList<>();
         options.add("--no-drop-late-frames");
         options.add("--no-skip-frames");
         options.add("--rtsp-tcp");
         options.add("--audio-time-stretch");
+        options.add("--avcodec-skiploopfilter=0");
+        options.add("--avcodec-skip-frame=0");
+        options.add("--avcodec-skip-idct=0");
+        options.add("--avcodec-fast");
+        options.add("--avcodec-threads=0");   // tự chọn số thread tối ưu
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
@@ -136,6 +140,9 @@ public class PlayerActivity extends AppCompatActivity {
                 case MediaPlayer.Event.Playing:
                     runOnUiThread(() -> {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
+                        // Fit video vừa màn hình sau khi bắt đầu phát
+                        mediaPlayer.setAspectRatio(null);
+                        mediaPlayer.setScale(0);   // 0 = fit best (không crop, không letterbox)
                         scheduleHideControls();
                     });
                     break;
@@ -153,7 +160,6 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
-        // Attach view TRƯỚC khi play — thứ tự quan trọng
         mediaPlayer.attachViews(videoLayout, null, false, false);
 
         if (uriString != null) {
@@ -172,33 +178,30 @@ public class PlayerActivity extends AppCompatActivity {
             Uri uri = Uri.parse(uriString);
             Media media;
 
-            String scheme = uri.getScheme();
-            if ("content".equals(scheme)) {
-                // Android 13: mở qua ContentResolver, GIỮ PFD sống
-                closePfd(); // đóng cái cũ nếu có
+            if ("content".equals(uri.getScheme())) {
+                closePfd();
                 currentPfd = getContentResolver().openFileDescriptor(uri, "r");
                 if (currentPfd == null) {
                     Toast.makeText(this, "Không mở được file", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 media = new Media(libVLC, currentPfd.getFileDescriptor());
-            } else if ("file".equals(scheme)) {
-                media = new Media(libVLC, uri);
             } else {
-                // http, rtsp, v.v.
                 media = new Media(libVLC, uri);
             }
 
-            media.setHWDecoderEnabled(true, false);
+            // Hardware decode ưu tiên — fallback software nếu lỗi
+            media.setHWDecoderEnabled(true, true);
             media.addOption(":file-caching=1500");
             media.addOption(":network-caching=3000");
+            media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
+
             mediaPlayer.setMedia(media);
             media.release();
             mediaPlayer.play();
 
         } catch (Exception e) {
-            Toast.makeText(this,
-                "Lỗi mở file: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Lỗi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
