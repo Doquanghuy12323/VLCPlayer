@@ -2,10 +2,14 @@ package com.vlcplayer.app;
 
 import android.app.Dialog;
 import android.content.Context;
+import android.graphics.SurfaceTexture;
+import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
+import android.view.Surface;
+import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -19,12 +23,6 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.request.RequestOptions;
 
-import org.videolan.libvlc.LibVLC;
-import org.videolan.libvlc.Media;
-import org.videolan.libvlc.MediaPlayer;
-import org.videolan.libvlc.util.VLCVideoLayout;
-
-import java.util.ArrayList;
 import java.util.List;
 
 public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHolder> {
@@ -38,7 +36,6 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private Dialog previewDialog = null;
-    private LibVLC previewLibVLC = null;
     private MediaPlayer previewPlayer = null;
     private Runnable stopRunnable = null;
 
@@ -85,79 +82,82 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     private void showPreview(Context ctx, VideoItem video) {
         stopPreview();
 
-        // Tạo dialog
         previewDialog = new Dialog(ctx);
         previewDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        // Inflate layout chứa VLCVideoLayout
         View dialogView = LayoutInflater.from(ctx).inflate(R.layout.dialog_preview, null);
         previewDialog.setContentView(dialogView);
 
-        // Set kích thước dialog
         Window window = previewDialog.getWindow();
         if (window != null) {
-            int screenW = ctx.getResources().getDisplayMetrics().widthPixels;
-            int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
-            window.setLayout(screenW, screenH / 2);
+            int w = ctx.getResources().getDisplayMetrics().widthPixels;
+            int h = ctx.getResources().getDisplayMetrics().heightPixels;
+            window.setLayout(w, h / 2);
             window.setBackgroundDrawableResource(android.R.color.black);
-            // Vị trí giữa màn hình
-            WindowManager.LayoutParams params = window.getAttributes();
-            params.y = -screenH / 6;
-            window.setAttributes(params);
         }
 
-        // Lấy VLCVideoLayout từ layout
-        VLCVideoLayout videoLayout = dialogView.findViewById(R.id.vlc_preview);
-
-        // Đóng khi bấm vào
+        TextureView textureView = dialogView.findViewById(R.id.texture_preview);
         dialogView.setOnClickListener(v -> stopPreview());
-        previewDialog.setOnDismissListener(d -> stopPreview());
+        previewDialog.setOnDismissListener(d -> releasePlayer());
         previewDialog.show();
 
-        // Khởi tạo VLC và play ngay khi dialog đã hiện
-        // Quan trọng: attachViews PHẢI gọi sau khi View đã được attach vào window
-        videoLayout.post(() -> startVLC(ctx, video.getUri(), videoLayout));
+        // TextureView callback — Surface sẵn sàng mới play
+        textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+            @Override
+            public void onSurfaceTextureAvailable(@NonNull SurfaceTexture st, int w, int h) {
+                Surface surface = new Surface(st);
+                startMediaPlayer(ctx, video.getUri(), surface, textureView);
+            }
+            @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture st, int w, int h) {}
+            @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture st) {
+                releasePlayer();
+                return true;
+            }
+            @Override public void onSurfaceTextureUpdated(@NonNull SurfaceTexture st) {}
+        });
 
         // Tự đóng sau 10 giây
         stopRunnable = this::stopPreview;
         handler.postDelayed(stopRunnable, 10000);
     }
 
-    private void startVLC(Context ctx, Uri uri, VLCVideoLayout layout) {
+    private void startMediaPlayer(Context ctx, Uri uri, Surface surface, TextureView tv) {
         try {
-            ArrayList<String> opts = new ArrayList<>();
-            opts.add("--no-audio");
-            opts.add("--clock-jitter=0");
-            opts.add("--clock-synchro=0");
-            opts.add("--avcodec-threads=0");
-
-            previewLibVLC = new LibVLC(ctx, opts);
-            previewPlayer = new MediaPlayer(previewLibVLC);
-
-            // attachViews TRƯỚC setMedia và play
-            previewPlayer.attachViews(layout, null, false, false);
-
-            Media media = new Media(previewLibVLC, uri);
-            media.setHWDecoderEnabled(true, true);
-            previewPlayer.setMedia(media);
-            media.release();
-
-            previewPlayer.setEventListener(event -> {
-                if (event.type == MediaPlayer.Event.Playing) {
-                    // Seek đến 10% để tránh màn đen đầu video
-                    long len = previewPlayer.getLength();
-                    if (len > 10000) {
-                        previewPlayer.setTime(len / 10);
+            previewPlayer = new MediaPlayer();
+            previewPlayer.setDataSource(ctx, uri);
+            previewPlayer.setSurface(surface);
+            previewPlayer.setVolume(0, 0); // tắt âm thanh
+            previewPlayer.setOnVideoSizeChangedListener((mp, width, height) -> {
+                // Điều chỉnh tỉ lệ TextureView
+                if (width > 0 && height > 0 && tv.getWidth() > 0) {
+                    float scaleX = 1f;
+                    float scaleY = (float)(tv.getWidth() * height) / (float)(width * tv.getHeight());
+                    if (scaleY < 1f) {
+                        scaleX = 1f / scaleY;
+                        scaleY = 1f;
                     }
-                    previewPlayer.setAspectRatio(null);
-                    previewPlayer.setScale(0);
+                    tv.setScaleX(scaleX);
+                    tv.setScaleY(scaleY);
                 }
             });
-
-            previewPlayer.play();
-
+            previewPlayer.setOnPreparedListener(mp -> {
+                // Seek đến 10% thời lượng
+                int dur = mp.getDuration();
+                if (dur > 10000) mp.seekTo(dur / 10);
+                mp.start();
+            });
+            previewPlayer.prepareAsync();
         } catch (Exception e) {
             stopPreview();
+        }
+    }
+
+    private void releasePlayer() {
+        if (previewPlayer != null) {
+            try {
+                previewPlayer.stop();
+                previewPlayer.release();
+            } catch (Exception ignored) {}
+            previewPlayer = null;
         }
     }
 
@@ -166,18 +166,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             handler.removeCallbacks(stopRunnable);
             stopRunnable = null;
         }
-        if (previewPlayer != null) {
-            try {
-                previewPlayer.stop();
-                previewPlayer.detachViews();
-                previewPlayer.release();
-            } catch (Exception ignored) {}
-            previewPlayer = null;
-        }
-        if (previewLibVLC != null) {
-            try { previewLibVLC.release(); } catch (Exception ignored) {}
-            previewLibVLC = null;
-        }
+        releasePlayer();
         if (previewDialog != null) {
             try {
                 if (previewDialog.isShowing()) previewDialog.dismiss();
@@ -203,7 +192,6 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     static class VideoViewHolder extends RecyclerView.ViewHolder {
         TextView tvName, tvDuration, tvSize;
         ImageView ivThumbnail;
-
         VideoViewHolder(@NonNull View v) {
             super(v);
             tvName      = v.findViewById(R.id.tv_video_name);

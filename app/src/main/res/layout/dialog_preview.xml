@@ -5,13 +5,13 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <org.videolan.libvlc.util.VLCVideoLayout
-        android:id="@+id/vlc_preview"
+    <TextureView
+        android:id="@+id/texture_preview"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
     <TextView
-        android:id="@+id/tv_preview_hint"
+        android:id="@+id/tv_hint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
