@@ -1,6 +1,7 @@
 package com.vlcplayer.app;
 
 import android.content.Context;
+import android.graphics.drawable.Drawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -8,10 +9,15 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.DataSource;
+import com.bumptech.glide.load.engine.GlideException;
+import com.bumptech.glide.request.RequestListener;
 import com.bumptech.glide.request.RequestOptions;
+import com.bumptech.glide.request.target.Target;
 
 import java.util.List;
 
@@ -44,14 +50,34 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         holder.tvSize.setText(video.getFormattedSize());
         holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
 
-        // RequestOptions.frameOf() là cú pháp đúng của Glide 4
-        // để extract frame tại microsecond cụ thể từ video
+        // Reset về trạng thái mặc định trước khi load
+        holder.ivThumbnail.setImageTintList(null);
+        holder.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+
         Glide.with(holder.itemView.getContext())
             .asBitmap()
             .load(video.getUri())
             .apply(RequestOptions.frameOf(3_000_000L).centerCrop())
-            .placeholder(android.R.drawable.ic_media_play)
-            .error(android.R.drawable.ic_media_play)
+            .listener(new RequestListener<android.graphics.Bitmap>() {
+                @Override
+                public boolean onLoadFailed(@Nullable GlideException e,
+                        Object model, Target<android.graphics.Bitmap> target,
+                        boolean isFirstResource) {
+                    // Load thất bại → hiện icon play màu accent
+                    holder.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                    holder.ivThumbnail.setColorFilter(0xFFE94560);
+                    return false;
+                }
+                @Override
+                public boolean onResourceReady(android.graphics.Bitmap resource,
+                        Object model, Target<android.graphics.Bitmap> target,
+                        DataSource dataSource, boolean isFirstResource) {
+                    // Load thành công → xóa tint để hiện đúng màu thumbnail
+                    holder.ivThumbnail.clearColorFilter();
+                    holder.ivThumbnail.setImageTintList(null);
+                    return false;
+                }
+            })
             .into(holder.ivThumbnail);
     }
 
@@ -59,6 +85,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     public void onViewRecycled(@NonNull VideoViewHolder holder) {
         super.onViewRecycled(holder);
         Glide.with(holder.itemView.getContext()).clear(holder.ivThumbnail);
+        holder.ivThumbnail.setImageTintList(null);
     }
 
     @Override public int getItemCount() { return videoList.size(); }
