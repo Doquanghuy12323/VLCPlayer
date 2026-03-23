@@ -45,17 +45,17 @@ jobs:
         run: |
           CODE=$(date +%Y%m%d%H%M)
           echo "code=$CODE" >> $GITHUB_OUTPUT
-          python3 - << PYEOF
+          python3 -c "
 import re
-code = "$CODE"
-with open("app/build.gradle", "r") as f:
+code = '$CODE'
+with open('app/build.gradle', 'r') as f:
     content = f.read()
-content = re.sub(r'versionCode\s+\d+', f'versionCode {code}', content)
-content = re.sub(r"versionName\s+'[^']*'", f"versionName '{code}'", content)
-with open("app/build.gradle", "w") as f:
+content = re.sub(r'versionCode\s+\d+', 'versionCode ' + code, content)
+content = re.sub(r\"versionName\s+'[^']*'\", \"versionName '\" + code + \"'\", content)
+with open('app/build.gradle', 'w') as f:
     f.write(content)
-print(f"Version set to: {code}")
-PYEOF
+print('Version set to: ' + code)
+"
 
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
@@ -70,7 +70,7 @@ PYEOF
         with:
           tag_name: v${{ steps.ts.outputs.code }}
           name: "VLC Player v${{ steps.ts.outputs.code }}"
-          body: "Auto build từ commit ${{ github.sha }}"
+          body: "Auto build tu commit ${{ github.sha }}"
           files: app/build/outputs/apk/release/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
