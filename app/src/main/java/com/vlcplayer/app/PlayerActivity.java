@@ -1,7 +1,9 @@
 package com.vlcplayer.app;
 
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
+import android.media.AudioManager;
 import android.media.audiofx.AudioEffect;
 import android.net.Uri;
 import android.os.Bundle;
@@ -112,19 +114,23 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
-        // Khởi tạo LibVLC
+        // Tạo audio session ID từ AudioManager cho Wavelet
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        audioSessionId = am.generateAudioSessionId();
+
+        // Khởi tạo LibVLC với audio session
         ArrayList<String> options = new ArrayList<>();
         options.add("--no-drop-late-frames");
         options.add("--no-skip-frames");
         options.add("--rtsp-tcp");
-        options.add("--aout=opensles");          // Android audio output
+        options.add("--aout=opensles");
         options.add("--audio-time-stretch");
+        options.add("--opensles-audio-session-id=" + audioSessionId);
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        // Lấy audio session ID để Wavelet nhận diện
-        audioSessionId = mediaPlayer.getAudioSessionId();
+        // Broadcast cho Wavelet
         broadcastAudioSessionOpen();
 
         mediaPlayer.setEventListener(event -> {
@@ -147,7 +153,7 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
-        // Attach view TRƯỚC khi play — thứ tự này rất quan trọng
+        // Attach view TRƯỚC khi play
         mediaPlayer.attachViews(videoLayout, null, false, false);
         playMedia(uriString);
 
@@ -160,7 +166,6 @@ public class PlayerActivity extends AppCompatActivity {
             Uri uri = Uri.parse(uriString);
             Media media;
 
-            // Android 13+: content:// URI cần mở qua FileDescriptor
             if ("content".equals(uri.getScheme())) {
                 ContentResolver cr = getContentResolver();
                 ParcelFileDescriptor pfd = cr.openFileDescriptor(uri, "r");
@@ -186,31 +191,27 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
 
-    // Gửi broadcast để Wavelet và các audio effect app nhận audioSessionId
     private void broadcastAudioSessionOpen() {
         if (audioSessionId == AudioEffect.ERROR_BAD_VALUE) return;
-        Intent intent = new Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION);
-        intent.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId);
-        intent.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
-        intent.putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC);
-        sendBroadcast(intent);
+        Intent i = new Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION);
+        i.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId);
+        i.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
+        i.putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC);
+        sendBroadcast(i);
     }
 
     private void broadcastAudioSessionClose() {
         if (audioSessionId == AudioEffect.ERROR_BAD_VALUE) return;
-        Intent intent = new Intent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION);
-        intent.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId);
-        intent.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
-        sendBroadcast(intent);
+        Intent i = new Intent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION);
+        i.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId);
+        i.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
+        sendBroadcast(i);
     }
 
     private void togglePlayPause() {
         if (mediaPlayer == null) return;
-        if (mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
-        } else {
-            mediaPlayer.play();
-        }
+        if (mediaPlayer.isPlaying()) mediaPlayer.pause();
+        else mediaPlayer.play();
     }
 
     private void toggleControls() {
