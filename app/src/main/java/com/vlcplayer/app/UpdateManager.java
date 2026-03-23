@@ -46,7 +46,6 @@ public class UpdateManager {
     public void checkForUpdate(boolean silent) {
         executor.execute(() -> {
             try {
-                // Bước 1: Gọi API
                 HttpURLConnection conn = (HttpURLConnection) new URL(API_URL).openConnection();
                 conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
                 conn.setRequestProperty("User-Agent", "VLCPlayer-Android");
@@ -55,11 +54,10 @@ public class UpdateManager {
 
                 int responseCode = conn.getResponseCode();
                 if (responseCode != 200) {
-                    showToast("Lỗi API: HTTP " + responseCode);
+                    if (!silent) showToast("Lỗi API: HTTP " + responseCode);
                     return;
                 }
 
-                // Bước 2: Đọc response
                 BufferedReader br = new BufferedReader(
                     new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
@@ -71,13 +69,12 @@ public class UpdateManager {
                 String tagName = json.getString("tag_name");
                 String latestVersion = tagName.replace("v", "").trim();
 
-                // Bước 3: So sánh version
                 String currentVersion;
                 try {
                     currentVersion = activity.getPackageManager()
                         .getPackageInfo(activity.getPackageName(), 0).versionName;
                 } catch (Exception e) {
-                    showToast("Lỗi lấy version hiện tại: " + e.getMessage());
+                    if (!silent) showToast("Lỗi lấy version: " + e.getMessage());
                     return;
                 }
 
@@ -85,47 +82,35 @@ public class UpdateManager {
                     showToast("Hiện tại: " + currentVersion + " | Mới nhất: " + latestVersion);
                 }
 
-                // So sánh dạng số
-                long latest, current;
+                // So sánh version dạng số
+                boolean hasUpdate;
                 try {
-                    latest  = Long.parseLong(latestVersion);
-                    current = Long.parseLong(currentVersion);
+                    long latest  = Long.parseLong(latestVersion);
+                    long current = Long.parseLong(currentVersion);
+                    hasUpdate = latest > current;
                 } catch (NumberFormatException e) {
                     // Fallback: so sánh string
-                    if (latestVersion.compareTo(currentVersion) <= 0) {
-                        if (!silent) showToast("Đang dùng phiên bản mới nhất!");
-                        return;
-                    }
-                    latest  = 1;
-                    current = 0;
+                    hasUpdate = latestVersion.compareTo(currentVersion) > 0;
                 }
 
-                if (latest <= current) // Đã là mới nhất {
+                if (!hasUpdate) {
                     if (!silent) showToast("Đang dùng phiên bản mới nhất!");
                     return;
                 }
 
-                // Bước 4: Lấy download URL
+                // Lấy download URL của APK
                 JSONArray assets = json.getJSONArray("assets");
                 String downloadUrl = null;
-
-                if (assets.length() == 0) {
-                    // Không có asset → dùng source download URL
-                    showToast("Không có APK trong release. Vui lòng tải thủ công.");
-                    return;
-                }
-
                 for (int i = 0; i < assets.length(); i++) {
                     JSONObject asset = assets.getJSONObject(i);
-                    String name = asset.getString("name");
-                    if (name.endsWith(".apk")) {
+                    if (asset.getString("name").endsWith(".apk")) {
                         downloadUrl = asset.getString("browser_download_url");
                         break;
                     }
                 }
 
                 if (downloadUrl == null) {
-                    showToast("Không tìm thấy file APK trong release");
+                    if (!silent) showToast("Không tìm thấy APK trong release");
                     return;
                 }
 
@@ -134,9 +119,7 @@ public class UpdateManager {
                 mainHandler.post(() -> showUpdateDialog(ver, url));
 
             } catch (Exception e) {
-                if (!silent) {
-                    showToast("Lỗi kiểm tra update: " + e.getMessage());
-                }
+                if (!silent) showToast("Lỗi: " + e.getMessage());
             }
         });
     }
