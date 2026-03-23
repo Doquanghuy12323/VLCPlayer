@@ -47,6 +47,7 @@ public class PlayerActivity extends AppCompatActivity {
     private final Handler handler = new Handler();
     private boolean controlsVisible = true;
     private boolean userSeeking = false;
+    private boolean waveletBroadcastSent = false;
     private int audioSessionId = AudioEffect.ERROR_BAD_VALUE;
     private int scaleMode = 0;
     private int screenW, screenH;
@@ -127,20 +128,23 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
+        // Tạo audio session ID
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         audioSessionId = am.generateAudioSessionId();
 
         ArrayList<String> options = new ArrayList<>();
-        // KHÔNG dùng --no-drop-late-frames và --no-skip-frames
-        // 2 option đó gây slowmotion vì VLC ép giữ mọi frame dù decode trễ
         options.add("--clock-jitter=0");
         options.add("--clock-synchro=0");
         options.add("--avcodec-threads=0");
         options.add("--network-caching=1500");
+        // Dùng android_audiotrack thay opensles
+        // AudioTrack được Android AudioEffect framework nhận diện
+        options.add("--aout=android_audiotrack");
+        // Truyền session ID vào libVLC
+        options.add("--audiotrack-session-id=" + audioSessionId);
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
-        broadcastAudioSessionOpen();
 
         mediaPlayer.setEventListener(event -> {
             switch (event.type) {
@@ -149,6 +153,12 @@ public class PlayerActivity extends AppCompatActivity {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
                         applyScaleMode();
                         scheduleHideControls();
+                        // Broadcast CHỈ sau khi audio thực sự phát
+                        // Wavelet cần nhận broadcast đúng lúc này
+                        if (!waveletBroadcastSent) {
+                            broadcastAudioSessionOpen();
+                            waveletBroadcastSent = true;
+                        }
                     });
                     break;
                 case MediaPlayer.Event.Paused:
@@ -238,7 +248,7 @@ public class PlayerActivity extends AppCompatActivity {
         Intent i = new Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION);
         i.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId);
         i.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
-        i.putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC);
+        i.putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MOVIE);
         sendBroadcast(i);
     }
 
