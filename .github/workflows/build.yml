@@ -24,26 +24,8 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: gradle-
-
-      - name: Get version code from timestamp
-        id: version
-        run: echo "code=$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
-
-      - name: Update versionCode and versionName safely
-        run: |
-          python3 - << 'PYEOF'
-          import re
-          code = "${{ steps.version.outputs.code }}"
-          with open("app/build.gradle", "r") as f:
-              content = f.read()
-          content = re.sub(r'versionCode\s+\d+', f'versionCode {code}', content)
-          content = re.sub(r"versionName\s+'[^']*'", f"versionName '{code}'", content)
-          with open("app/build.gradle", "w") as f:
-              f.write(content)
-          print(f"Updated to version: {code}")
-          PYEOF
 
       - run: chmod +x gradlew
 
@@ -56,11 +38,15 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Get timestamp
+        id: ts
+        run: echo "code=$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.version.outputs.code }}
-          name: "VLC Player v${{ steps.version.outputs.code }}"
+          tag_name: v${{ steps.ts.outputs.code }}
+          name: "VLC Player v${{ steps.ts.outputs.code }}"
           body: "Auto build từ commit ${{ github.sha }}"
           files: app/build/outputs/apk/release/app-release.apk
         env:
