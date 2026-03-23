@@ -23,7 +23,7 @@ import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 import org.videolan.libvlc.util.VLCVideoLayout;
 
-import java.io.FileDescriptor;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
@@ -36,6 +36,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
+    private ParcelFileDescriptor currentPfd; // giữ PFD sống suốt quá trình phát
 
     private SeekBar seekBar;
     private TextView tvCurrent, tvTotal, tvTitle;
@@ -114,23 +115,20 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
-        // Tạo audio session ID từ AudioManager cho Wavelet
+        // Audio session cho Wavelet — KHÔNG truyền vào libVLC option
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         audioSessionId = am.generateAudioSessionId();
 
-        // Khởi tạo LibVLC với audio session
+        // Khởi tạo LibVLC — chỉ dùng options an toàn
         ArrayList<String> options = new ArrayList<>();
         options.add("--no-drop-late-frames");
         options.add("--no-skip-frames");
         options.add("--rtsp-tcp");
-        options.add("--aout=opensles");
         options.add("--audio-time-stretch");
-        options.add("--opensles-audio-session-id=" + audioSessionId);
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
 
-        // Broadcast cho Wavelet
         broadcastAudioSessionOpen();
 
         mediaPlayer.setEventListener(event -> {
@@ -142,10 +140,12 @@ public class PlayerActivity extends AppCompatActivity {
                     });
                     break;
                 case MediaPlayer.Event.Paused:
-                    runOnUiThread(() -> btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
+                    runOnUiThread(() ->
+                        btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
                     break;
                 case MediaPlayer.Event.EncounteredError:
-                    runOnUiThread(() -> Toast.makeText(this, "Lỗi phát video", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() ->
+                        Toast.makeText(this, "Lỗi phát video", Toast.LENGTH_SHORT).show());
                     break;
                 case MediaPlayer.Event.EndReached:
                     runOnUiThread(this::finish);
@@ -153,9 +153,15 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
 
-        // Attach view TRƯỚC khi play
+        // Attach view TRƯỚC khi play — thứ tự quan trọng
         mediaPlayer.attachViews(videoLayout, null, false, false);
-        playMedia(uriString);
+
+        if (uriString != null) {
+            playMedia(uriString);
+        } else {
+            Toast.makeText(this, "Không có file để phát", Toast.LENGTH_SHORT).show();
+            finish();
+        }
 
         handler.post(updateSeekBar);
         scheduleHideControls();
@@ -166,28 +172,40 @@ public class PlayerActivity extends AppCompatActivity {
             Uri uri = Uri.parse(uriString);
             Media media;
 
-            if ("content".equals(uri.getScheme())) {
-                ContentResolver cr = getContentResolver();
-                ParcelFileDescriptor pfd = cr.openFileDescriptor(uri, "r");
-                if (pfd == null) {
+            String scheme = uri.getScheme();
+            if ("content".equals(scheme)) {
+                // Android 13: mở qua ContentResolver, GIỮ PFD sống
+                closePfd(); // đóng cái cũ nếu có
+                currentPfd = getContentResolver().openFileDescriptor(uri, "r");
+                if (currentPfd == null) {
                     Toast.makeText(this, "Không mở được file", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                FileDescriptor fd = pfd.getFileDescriptor();
-                media = new Media(libVLC, fd);
+                media = new Media(libVLC, currentPfd.getFileDescriptor());
+            } else if ("file".equals(scheme)) {
+                media = new Media(libVLC, uri);
             } else {
+                // http, rtsp, v.v.
                 media = new Media(libVLC, uri);
             }
 
             media.setHWDecoderEnabled(true, false);
-            media.addOption(":network-caching=1500");
             media.addOption(":file-caching=1500");
+            media.addOption(":network-caching=3000");
             mediaPlayer.setMedia(media);
             media.release();
             mediaPlayer.play();
 
         } catch (Exception e) {
-            Toast.makeText(this, "Lỗi: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this,
+                "Lỗi mở file: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void closePfd() {
+        if (currentPfd != null) {
+            try { currentPfd.close(); } catch (IOException ignored) {}
+            currentPfd = null;
         }
     }
 
@@ -265,5 +283,6 @@ public class PlayerActivity extends AppCompatActivity {
         handler.removeCallbacksAndMessages(null);
         mediaPlayer.release();
         libVLC.release();
+        closePfd();
     }
 }
