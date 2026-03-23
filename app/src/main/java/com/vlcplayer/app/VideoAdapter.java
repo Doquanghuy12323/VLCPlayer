@@ -1,13 +1,10 @@
 package com.vlcplayer.app;
 
 import android.content.Context;
-import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
@@ -17,12 +14,12 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.bumptech.glide.Glide;
-import com.bumptech.glide.load.resource.bitmap.VideoDecoder;
 import com.bumptech.glide.request.RequestOptions;
 
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
+import org.videolan.libvlc.util.VLCVideoLayout;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,11 +34,10 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     private final OnVideoClickListener listener;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    // Chỉ 1 preview chạy tại 1 thời điểm
-    private VideoViewHolder activePreviewHolder = null;
+    private VideoViewHolder activeHolder = null;
     private LibVLC previewLibVLC = null;
     private MediaPlayer previewPlayer = null;
-    private Runnable stopPreviewRunnable = null;
+    private Runnable stopRunnable = null;
 
     public VideoAdapter(List<VideoItem> videoList, OnVideoClickListener listener) {
         this.videoList = videoList;
@@ -62,7 +58,6 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         holder.tvDuration.setText(video.getFormattedDuration());
         holder.tvSize.setText(video.getFormattedSize());
 
-        // Load thumbnail bằng Glide
         holder.ivThumbnail.clearColorFilter();
         holder.ivThumbnail.setImageTintList(null);
         Glide.with(holder.itemView.getContext())
@@ -73,93 +68,78 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
                 .error(android.R.drawable.ic_media_play))
             .into(holder.ivThumbnail);
 
-        // Tap → mở player
         holder.itemView.setOnClickListener(v -> {
             stopPreview();
             listener.onVideoClick(video);
         });
 
-        // Long press → bắt đầu preview
         holder.itemView.setOnLongClickListener(v -> {
-            startPreview(holder, video, holder.itemView.getContext());
+            startPreview(holder, video);
             return true;
         });
     }
 
-    private void startPreview(VideoViewHolder holder, VideoItem video, Context ctx) {
-        // Dừng preview cũ nếu có
+    private void startPreview(VideoViewHolder holder, VideoItem video) {
         stopPreview();
+        activeHolder = holder;
 
-        activePreviewHolder = holder;
+        Context ctx = holder.itemView.getContext();
 
-        // Hiện SurfaceView, ẩn thumbnail
-        holder.surfacePreview.setVisibility(View.VISIBLE);
-        holder.ivPreviewIcon.setVisibility(View.VISIBLE);
+        holder.vlcPreview.setVisibility(View.VISIBLE);
         holder.ivThumbnail.setVisibility(View.INVISIBLE);
 
-        holder.surfacePreview.getHolder().addCallback(new SurfaceHolder.Callback() {
-            @Override
-            public void surfaceCreated(@NonNull SurfaceHolder sh) {
-                playPreview(ctx, video.getUri(), sh);
-            }
-            @Override public void surfaceChanged(@NonNull SurfaceHolder sh, int f, int w, int h) {}
-            @Override public void surfaceDestroyed(@NonNull SurfaceHolder sh) {}
-        });
-
-        // Tự dừng sau 8 giây
-        stopPreviewRunnable = () -> stopPreview();
-        handler.postDelayed(stopPreviewRunnable, 8000);
-    }
-
-    private void playPreview(Context ctx, Uri uri, SurfaceHolder holder) {
         try {
-            ArrayList<String> options = new ArrayList<>();
-            options.add("--no-audio");
-            options.add("--clock-jitter=0");
-            options.add("--clock-synchro=0");
+            ArrayList<String> opts = new ArrayList<>();
+            opts.add("--no-audio");
+            opts.add("--clock-jitter=0");
+            opts.add("--clock-synchro=0");
+            opts.add("--avcodec-threads=0");
 
-            previewLibVLC = new LibVLC(ctx, options);
+            previewLibVLC = new LibVLC(ctx, opts);
             previewPlayer = new MediaPlayer(previewLibVLC);
-            previewPlayer.getVLCVout().setVideoSurface(holder.getSurface(), holder);
-            previewPlayer.getVLCVout().attachViews();
 
-            Media media = new Media(previewLibVLC, uri);
+            // attachViews TRƯỚC khi play
+            previewPlayer.attachViews(holder.vlcPreview, null, false, false);
+
+            Media media = new Media(previewLibVLC, video.getUri());
             media.setHWDecoderEnabled(true, true);
-            // Seek đến 10% thời lượng để tránh màn đen
             previewPlayer.setMedia(media);
             media.release();
 
             previewPlayer.setEventListener(event -> {
                 if (event.type == MediaPlayer.Event.Playing) {
-                    // Seek đến 10% sau khi bắt đầu phát
                     long len = previewPlayer.getLength();
                     if (len > 0) {
+                        // Seek đến 10% để tránh màn đen đầu video
                         previewPlayer.setTime(len / 10);
                     }
-                    // Ẩn icon play khi đang phát
-                    handler.post(() -> {
-                        if (activePreviewHolder != null) {
-                            activePreviewHolder.ivPreviewIcon.setVisibility(View.GONE);
-                        }
-                    });
+                    // Set scale fill
+                    previewPlayer.setAspectRatio(null);
+                    previewPlayer.setScale(0);
                 }
             });
 
             previewPlayer.play();
+
         } catch (Exception e) {
             stopPreview();
+            return;
         }
+
+        // Tự dừng sau 8 giây
+        stopRunnable = this::stopPreview;
+        handler.postDelayed(stopRunnable, 8000);
     }
 
-    private void stopPreview() {
-        if (stopPreviewRunnable != null) {
-            handler.removeCallbacks(stopPreviewRunnable);
-            stopPreviewRunnable = null;
+    public void stopPreview() {
+        if (stopRunnable != null) {
+            handler.removeCallbacks(stopRunnable);
+            stopRunnable = null;
         }
         if (previewPlayer != null) {
             try {
                 previewPlayer.stop();
-                previewPlayer.getVLCVout().detachViews();
+                previewPlayer.detachViews();
                 previewPlayer.release();
             } catch (Exception ignored) {}
             previewPlayer = null;
@@ -168,21 +148,20 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             try { previewLibVLC.release(); } catch (Exception ignored) {}
             previewLibVLC = null;
         }
-        if (activePreviewHolder != null) {
-            final VideoViewHolder h = activePreviewHolder;
+        if (activeHolder != null) {
+            final VideoViewHolder h = activeHolder;
             handler.post(() -> {
-                h.surfacePreview.setVisibility(View.GONE);
-                h.ivPreviewIcon.setVisibility(View.GONE);
+                h.vlcPreview.setVisibility(View.GONE);
                 h.ivThumbnail.setVisibility(View.VISIBLE);
             });
-            activePreviewHolder = null;
+            activeHolder = null;
         }
     }
 
     @Override
     public void onViewRecycled(@NonNull VideoViewHolder holder) {
         super.onViewRecycled(holder);
-        if (holder == activePreviewHolder) stopPreview();
+        if (holder == activeHolder) stopPreview();
         Glide.with(holder.itemView.getContext()).clear(holder.ivThumbnail);
     }
 
@@ -196,17 +175,16 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
 
     static class VideoViewHolder extends RecyclerView.ViewHolder {
         TextView tvName, tvDuration, tvSize;
-        ImageView ivThumbnail, ivPreviewIcon;
-        SurfaceView surfacePreview;
+        ImageView ivThumbnail;
+        VLCVideoLayout vlcPreview;
 
         VideoViewHolder(@NonNull View v) {
             super(v);
-            tvName        = v.findViewById(R.id.tv_video_name);
-            tvDuration    = v.findViewById(R.id.tv_duration);
-            tvSize        = v.findViewById(R.id.tv_size);
-            ivThumbnail   = v.findViewById(R.id.iv_thumbnail);
-            surfacePreview = v.findViewById(R.id.surface_preview);
-            ivPreviewIcon  = v.findViewById(R.id.iv_preview_icon);
+            tvName     = v.findViewById(R.id.tv_video_name);
+            tvDuration = v.findViewById(R.id.tv_duration);
+            tvSize     = v.findViewById(R.id.tv_size);
+            ivThumbnail = v.findViewById(R.id.iv_thumbnail);
+            vlcPreview  = v.findViewById(R.id.vlc_preview);
         }
     }
 }

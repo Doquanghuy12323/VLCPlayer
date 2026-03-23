@@ -28,20 +28,13 @@
                 android:scaleType="centerCrop"
                 android:background="@color/surface_darker" />
 
-            <SurfaceView
-                android:id="@+id/surface_preview"
+            <org.videolan.libvlc.util.VLCVideoLayout
+                android:id="@+id/vlc_preview"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:visibility="gone" />
+                android:visibility="gone"
+                android:background="#000000" />
 
-            <ImageView
-                android:id="@+id/iv_preview_icon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_gravity="center"
-                android:src="@android:drawable/ic_media_play"
-                android:tint="#CCFFFFFF"
-                android:visibility="gone" />
         </FrameLayout>
 
         <LinearLayout

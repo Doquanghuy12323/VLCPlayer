@@ -100,7 +100,7 @@ public class UpdateManager {
                     current = 0;
                 }
 
-                if (latest <= current) {
+                if (latest <= current) // Đã là mới nhất {
                     if (!silent) showToast("Đang dùng phiên bản mới nhất!");
                     return;
                 }
