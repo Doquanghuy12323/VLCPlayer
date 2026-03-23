@@ -14,13 +14,20 @@ android {
         versionName '1'
     }
 
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("KEYSTORE_PATH") ?: "vlcplayer.keystore")
+            storePassword System.getenv("STORE_PASSWORD") ?: "vlcplayer123"
+            keyAlias System.getenv("KEY_ALIAS") ?: "vlcplayer"
+            keyPassword System.getenv("KEY_PASSWORD") ?: "vlcplayer123"
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.debug
-        }
-        debug {
+            signingConfig signingConfigs.release
         }
     }
 

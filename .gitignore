@@ -9,3 +9,5 @@
 .cxx
 local.properties
 app/build/
+vlcplayer.keystore
+vlcplayer_base64.txt

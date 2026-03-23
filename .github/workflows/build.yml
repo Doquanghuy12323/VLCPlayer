@@ -35,8 +35,17 @@ jobs:
           curl -L -o gradle/wrapper/gradle-wrapper.jar \
             https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar
 
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > vlcplayer.keystore
+
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/vlcplayer.keystore
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
 
       - name: Get timestamp
         id: ts
