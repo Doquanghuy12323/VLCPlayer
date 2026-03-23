@@ -52,6 +52,8 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
         fab.setOnClickListener(v -> openFilePicker());
 
         checkPermissionsAndLoad();
+        // Kiểm tra update ngầm khi mở app
+        new UpdateManager(this).checkForUpdate(true);
     }
 
     private void checkPermissionsAndLoad() {
@@ -155,6 +157,12 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == R.id.action_refresh) {
             checkPermissionsAndLoad();
+        // Kiểm tra update ngầm khi mở app
+        new UpdateManager(this).checkForUpdate(true);
+            return true;
+        }
+        if (item.getItemId() == R.id.action_update) {
+            new UpdateManager(this).checkForUpdate(false);
             return true;
         }
         return super.onOptionsItemSelected(item);

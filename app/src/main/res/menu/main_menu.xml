@@ -3,6 +3,10 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
         android:id="@+id/action_refresh"
-        android:title="@string/action_refresh"
-        app:showAsAction="ifRoom" />
+        android:title="Làm mới"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_update"
+        android:title="Kiểm tra cập nhật"
+        app:showAsAction="never" />
 </menu>
