@@ -77,55 +77,64 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         });
 
         holder.itemView.setOnLongClickListener(v -> {
-            showPreviewDialog(holder.itemView.getContext(), video);
+            showPreview(holder.itemView.getContext(), video);
             return true;
         });
     }
 
-    private void showPreviewDialog(Context ctx, VideoItem video) {
+    private void showPreview(Context ctx, VideoItem video) {
         stopPreview();
 
-        // Tạo Dialog fullscreen
+        // Tạo dialog
         previewDialog = new Dialog(ctx);
         previewDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        previewDialog.setContentView(new VLCVideoLayout(ctx));
 
+        // Inflate layout chứa VLCVideoLayout
+        View dialogView = LayoutInflater.from(ctx).inflate(R.layout.dialog_preview, null);
+        previewDialog.setContentView(dialogView);
+
+        // Set kích thước dialog
         Window window = previewDialog.getWindow();
         if (window != null) {
-            window.setLayout(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                (int)(ctx.getResources().getDisplayMetrics().heightPixels * 0.5f)
-            );
+            int screenW = ctx.getResources().getDisplayMetrics().widthPixels;
+            int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
+            window.setLayout(screenW, screenH / 2);
             window.setBackgroundDrawableResource(android.R.color.black);
+            // Vị trí giữa màn hình
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.y = -screenH / 6;
+            window.setAttributes(params);
         }
 
-        VLCVideoLayout videoLayout = (VLCVideoLayout) previewDialog.getCurrentFocus();
-        if (videoLayout == null) {
-            videoLayout = new VLCVideoLayout(ctx);
-            previewDialog.setContentView(videoLayout);
-        }
+        // Lấy VLCVideoLayout từ layout
+        VLCVideoLayout videoLayout = dialogView.findViewById(R.id.vlc_preview);
 
+        // Đóng khi bấm vào
+        dialogView.setOnClickListener(v -> stopPreview());
         previewDialog.setOnDismissListener(d -> stopPreview());
         previewDialog.show();
 
-        // Khởi tạo player sau khi dialog hiện
-        final VLCVideoLayout finalLayout = videoLayout;
-        handler.postDelayed(() -> startPlayback(ctx, video.getUri(), finalLayout), 200);
+        // Khởi tạo VLC và play ngay khi dialog đã hiện
+        // Quan trọng: attachViews PHẢI gọi sau khi View đã được attach vào window
+        videoLayout.post(() -> startVLC(ctx, video.getUri(), videoLayout));
 
         // Tự đóng sau 10 giây
-        stopRunnable = () -> stopPreview();
+        stopRunnable = this::stopPreview;
         handler.postDelayed(stopRunnable, 10000);
     }
 
-    private void startPlayback(Context ctx, Uri uri, VLCVideoLayout layout) {
+    private void startVLC(Context ctx, Uri uri, VLCVideoLayout layout) {
         try {
             ArrayList<String> opts = new ArrayList<>();
             opts.add("--no-audio");
             opts.add("--clock-jitter=0");
             opts.add("--clock-synchro=0");
+            opts.add("--avcodec-threads=0");
 
             previewLibVLC = new LibVLC(ctx, opts);
             previewPlayer = new MediaPlayer(previewLibVLC);
+
+            // attachViews TRƯỚC setMedia và play
             previewPlayer.attachViews(layout, null, false, false);
 
             Media media = new Media(previewLibVLC, uri);
@@ -135,14 +144,18 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
 
             previewPlayer.setEventListener(event -> {
                 if (event.type == MediaPlayer.Event.Playing) {
+                    // Seek đến 10% để tránh màn đen đầu video
                     long len = previewPlayer.getLength();
-                    if (len > 0) previewPlayer.setTime(len / 10);
+                    if (len > 10000) {
+                        previewPlayer.setTime(len / 10);
+                    }
                     previewPlayer.setAspectRatio(null);
                     previewPlayer.setScale(0);
                 }
             });
 
             previewPlayer.play();
+
         } catch (Exception e) {
             stopPreview();
         }
