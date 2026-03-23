@@ -11,7 +11,7 @@ android {
         minSdk 21
         targetSdk 34
         versionCode 1
-        versionName '202603231034'
+        versionName '1'
     }
 
     signingConfigs {
@@ -37,9 +37,7 @@ android {
     }
 
     packagingOptions {
-        jniLibs {
-            useLegacyPackaging true
-        }
+        jniLibs { useLegacyPackaging true }
     }
 }
 
@@ -52,4 +50,11 @@ dependencies {
     implementation 'androidx.media:media:1.7.0'
     implementation 'com.github.bumptech.glide:glide:4.16.0'
     annotationProcessor 'com.github.bumptech.glide:compiler:4.16.0'
+    // Room database cho History & Bookmark
+    implementation 'androidx.room:room-runtime:2.6.1'
+    annotationProcessor 'androidx.room:room-compiler:2.6.1'
+    // OkHttp cho AI translation & URL stream
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // JSON
+    implementation 'org.json:json:20231013'
 }
