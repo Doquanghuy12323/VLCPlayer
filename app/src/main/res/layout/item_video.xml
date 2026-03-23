@@ -22,8 +22,7 @@
             android:layout_width="72dp"
             android:layout_height="52dp"
             android:scaleType="centerCrop"
-            android:background="@color/surface_darker"
-            android:src="@android:drawable/ic_media_play"
+            android:background="@color/surface_darker" />
 
         <LinearLayout
             android:layout_width="0dp"
