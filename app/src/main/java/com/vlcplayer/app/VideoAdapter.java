@@ -11,7 +11,6 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.bumptech.glide.Glide;
-import com.bumptech.glide.load.resource.bitmap.VideoDecoder;
 import com.bumptech.glide.request.RequestOptions;
 
 import java.util.List;
@@ -45,24 +44,20 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         holder.tvSize.setText(video.getFormattedSize());
         holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
 
-        Context ctx = holder.itemView.getContext();
-
-        // Glide tự xử lý thumbnail video — cache + async + tất cả edge case
-        Glide.with(ctx)
+        // RequestOptions.frameOf() là cú pháp đúng của Glide 4
+        // để extract frame tại microsecond cụ thể từ video
+        Glide.with(holder.itemView.getContext())
             .asBitmap()
             .load(video.getUri())
-            .apply(new RequestOptions()
-                .frame(3_000_000L)          // lấy frame tại giây thứ 3
-                .centerCrop()
-                .placeholder(android.R.drawable.ic_media_play)
-                .error(android.R.drawable.ic_media_play))
+            .apply(RequestOptions.frameOf(3_000_000L).centerCrop())
+            .placeholder(android.R.drawable.ic_media_play)
+            .error(android.R.drawable.ic_media_play)
             .into(holder.ivThumbnail);
     }
 
     @Override
     public void onViewRecycled(@NonNull VideoViewHolder holder) {
         super.onViewRecycled(holder);
-        // Hủy request khi view bị recycle tránh memory leak
         Glide.with(holder.itemView.getContext()).clear(holder.ivThumbnail);
     }
 
