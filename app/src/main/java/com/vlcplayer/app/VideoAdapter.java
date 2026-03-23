@@ -3,9 +3,11 @@ package com.vlcplayer.app;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.media.MediaMetadataRetriever;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.util.Size;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -23,6 +25,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHolder> {
+
+    private static final String TAG = "VideoAdapter";
 
     public interface OnVideoClickListener {
         void onVideoClick(VideoItem video);
@@ -75,17 +79,59 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     }
 
     private Bitmap loadThumb(Context ctx, VideoItem video) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // API 29+ — loadThumbnail là cách chính thức, hoạt động với content URI
+
+        // Phương pháp 1: ContentResolver.loadThumbnail (API 29+ / Android 10+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
                 ContentResolver cr = ctx.getContentResolver();
-                return cr.loadThumbnail(
-                    video.getUri(),
-                    new Size(320, 180),
-                    null
-                );
+                Bitmap bmp = cr.loadThumbnail(video.getUri(), new Size(320, 180), null);
+                if (bmp != null) {
+                    Log.d(TAG, "Method1 OK: " + video.getName());
+                    return bmp;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Method1 fail: " + e.getMessage());
             }
-        } catch (Exception ignored) {}
+        }
+
+        // Phương pháp 2: MediaMetadataRetriever với content URI
+        try {
+            MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+            mmr.setDataSource(ctx, video.getUri());
+            Bitmap bmp = mmr.getFrameAtTime(
+                2_000_000L,
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            );
+            mmr.release();
+            if (bmp != null) {
+                Log.d(TAG, "Method2 OK: " + video.getName());
+                return bmp;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Method2 fail: " + e.getMessage());
+        }
+
+        // Phương pháp 3: MediaMetadataRetriever với file path
+        try {
+            String path = video.getPath();
+            if (path != null && !path.isEmpty()) {
+                MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+                mmr.setDataSource(path);
+                Bitmap bmp = mmr.getFrameAtTime(
+                    2_000_000L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                );
+                mmr.release();
+                if (bmp != null) {
+                    Log.d(TAG, "Method3 OK: " + video.getName());
+                    return bmp;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Method3 fail: " + e.getMessage());
+        }
+
+        Log.e(TAG, "All methods failed: " + video.getName());
         return null;
     }
 
