@@ -27,14 +27,23 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
-      - name: Get version code
+      - name: Get version code from timestamp
         id: version
         run: echo "code=$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
 
-      - name: Update versionCode & versionName
+      - name: Update versionCode and versionName safely
         run: |
-          sed -i "s/versionCode [0-9]*/versionCode ${{ steps.version.outputs.code }}/" app/build.gradle
-          sed -i "s/versionName '[^']*'/versionName '${{ steps.version.outputs.code }}'/" app/build.gradle
+          python3 - << 'PYEOF'
+          import re
+          code = "${{ steps.version.outputs.code }}"
+          with open("app/build.gradle", "r") as f:
+              content = f.read()
+          content = re.sub(r'versionCode\s+\d+', f'versionCode {code}', content)
+          content = re.sub(r"versionName\s+'[^']*'", f"versionName '{code}'", content)
+          with open("app/build.gradle", "w") as f:
+              f.write(content)
+          print(f"Updated to version: {code}")
+          PYEOF
 
       - run: chmod +x gradlew
 
@@ -52,8 +61,7 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.code }}
           name: "VLC Player v${{ steps.version.outputs.code }}"
-          body: "Auto build from commit ${{ github.sha }}"
+          body: "Auto build từ commit ${{ github.sha }}"
           files: app/build/outputs/apk/release/app-release.apk
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
