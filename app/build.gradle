@@ -56,5 +56,4 @@ dependencies {
     // OkHttp cho AI translation & URL stream
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     // JSON
-    implementation 'org.json:json:20231013'
 }
