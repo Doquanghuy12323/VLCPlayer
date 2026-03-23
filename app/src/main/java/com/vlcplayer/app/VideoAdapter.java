@@ -1,12 +1,10 @@
 package com.vlcplayer.app;
 
+import android.content.Context;
 import android.graphics.Bitmap;
-import android.media.ThumbnailUtils;
-import android.os.Build;
+import android.media.MediaMetadataRetriever;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.MediaStore;
-import android.util.Size;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -16,7 +14,6 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,18 +54,16 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         holder.itemView.setTag(video.getId());
         holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
 
-        // Kiểm tra cache
         if (thumbCache.containsKey(video.getId())) {
             applyThumb(holder, thumbCache.get(video.getId()));
             return;
         }
 
-        // Default icon trước
         applyThumb(holder, null);
+        Context appCtx = holder.itemView.getContext().getApplicationContext();
 
-        // Load async
         executor.execute(() -> {
-            Bitmap bmp = loadThumbnail(video);
+            Bitmap bmp = loadThumb(appCtx, video);
             thumbCache.put(video.getId(), bmp);
             mainHandler.post(() -> {
                 if (Long.valueOf(video.getId()).equals(holder.itemView.getTag())) {
@@ -76,6 +71,32 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
                 }
             });
         });
+    }
+
+    private Bitmap loadThumb(Context ctx, VideoItem video) {
+        MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+        try {
+            // Dùng content URI — cách duy nhất ổn định trên Android 10+
+            mmr.setDataSource(ctx, video.getUri());
+
+            // Thử lấy frame tại giây 3
+            Bitmap bmp = mmr.getFrameAtTime(
+                3_000_000L,
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            );
+            if (bmp == null) {
+                // Fallback: frame đầu tiên
+                bmp = mmr.getFrameAtTime(
+                    0L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                );
+            }
+            return bmp;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            try { mmr.release(); } catch (Exception ignored) {}
+        }
     }
 
     private void applyThumb(VideoViewHolder holder, Bitmap bmp) {
@@ -88,33 +109,6 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             holder.ivThumbnail.setImageResource(android.R.drawable.ic_media_play);
             holder.ivThumbnail.setColorFilter(0xFFE94560);
         }
-    }
-
-    private Bitmap loadThumbnail(VideoItem video) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Android 10+ — dùng ThumbnailUtils với File path
-                String path = video.getPath();
-                if (path != null && !path.isEmpty()) {
-                    return ThumbnailUtils.createVideoThumbnail(
-                        new File(path),
-                        new Size(320, 180),
-                        null
-                    );
-                }
-            }
-            // Fallback cho Android < 10
-            String path = video.getPath();
-            if (path != null && !path.isEmpty()) {
-                return ThumbnailUtils.createVideoThumbnail(
-                    path,
-                    MediaStore.Images.Thumbnails.MINI_KIND
-                );
-            }
-        } catch (Exception e) {
-            // ignore
-        }
-        return null;
     }
 
     @Override
