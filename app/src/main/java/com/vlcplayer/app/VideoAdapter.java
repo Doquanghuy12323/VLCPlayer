@@ -1,15 +1,6 @@
 package com.vlcplayer.app;
 
-import android.content.ContentResolver;
-import android.content.ContentUris;
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.net.Uri;
-import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
-import android.provider.MediaStore;
-import android.util.Size;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,11 +10,11 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.util.HashMap;
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.resource.bitmap.VideoDecoder;
+import com.bumptech.glide.request.RequestOptions;
+
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHolder> {
 
@@ -33,9 +24,6 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
 
     private final List<VideoItem> videoList;
     private final OnVideoClickListener listener;
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final Map<Long, Bitmap> cache = new HashMap<>();
 
     public VideoAdapter(List<VideoItem> videoList, OnVideoClickListener listener) {
         this.videoList = videoList;
@@ -55,91 +43,27 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         holder.tvName.setText(video.getName());
         holder.tvDuration.setText(video.getFormattedDuration());
         holder.tvSize.setText(video.getFormattedSize());
-        holder.itemView.setTag(video.getId());
         holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
 
-        if (cache.containsKey(video.getId())) {
-            setThumb(holder, cache.get(video.getId()));
-            return;
-        }
+        Context ctx = holder.itemView.getContext();
 
-        setThumb(holder, null);
-        Context ctx = holder.itemView.getContext().getApplicationContext();
-
-        executor.execute(() -> {
-            Bitmap bmp = loadFromMediaStore(ctx, video.getId());
-            cache.put(video.getId(), bmp);
-            mainHandler.post(() -> {
-                if (Long.valueOf(video.getId()).equals(holder.itemView.getTag())) {
-                    setThumb(holder, bmp);
-                }
-            });
-        });
+        // Glide tự xử lý thumbnail video — cache + async + tất cả edge case
+        Glide.with(ctx)
+            .asBitmap()
+            .load(video.getUri())
+            .apply(new RequestOptions()
+                .frame(3_000_000L)          // lấy frame tại giây thứ 3
+                .centerCrop()
+                .placeholder(android.R.drawable.ic_media_play)
+                .error(android.R.drawable.ic_media_play))
+            .into(holder.ivThumbnail);
     }
 
-    @SuppressWarnings("deprecation")
-    private Bitmap loadFromMediaStore(Context ctx, long videoId) {
-        ContentResolver cr = ctx.getContentResolver();
-
-        // Phương pháp 1 — API 29+ (Android 10+)
-        // loadThumbnail dùng MediaStore cache, KHÔNG đọc file video
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                Uri uri = ContentUris.withAppendedId(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, videoId);
-                Bitmap bmp = cr.loadThumbnail(uri, new Size(320, 180), null);
-                if (bmp != null) return bmp;
-            } catch (Exception ignored) {}
-        }
-
-        // Phương pháp 2 — dùng video ID lấy từ MediaStore.Video.Thumbnails
-        // Hoạt động tốt mọi Android version, đọc từ thumbnail database sẵn có
-        try {
-            Bitmap bmp = MediaStore.Video.Thumbnails.getThumbnail(
-                cr,
-                videoId,
-                MediaStore.Video.Thumbnails.MINI_KIND,
-                null
-            );
-            if (bmp != null) return bmp;
-        } catch (Exception ignored) {}
-
-        // Phương pháp 3 — query trực tiếp bảng Thumbnails
-        try {
-            String[] proj = { MediaStore.Video.Thumbnails.DATA };
-            String sel    = MediaStore.Video.Thumbnails.VIDEO_ID + "=?";
-            String[] args = { String.valueOf(videoId) };
-
-            android.database.Cursor c = cr.query(
-                MediaStore.Video.Thumbnails.EXTERNAL_CONTENT_URI,
-                proj, sel, args, null
-            );
-            if (c != null) {
-                if (c.moveToFirst()) {
-                    String path = c.getString(0);
-                    c.close();
-                    if (path != null && !path.isEmpty()) {
-                        return android.graphics.BitmapFactory.decodeFile(path);
-                    }
-                } else {
-                    c.close();
-                }
-            }
-        } catch (Exception ignored) {}
-
-        return null;
-    }
-
-    private void setThumb(VideoViewHolder h, Bitmap bmp) {
-        if (bmp != null) {
-            h.ivThumbnail.clearColorFilter();
-            h.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            h.ivThumbnail.setImageBitmap(bmp);
-        } else {
-            h.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-            h.ivThumbnail.setImageResource(android.R.drawable.ic_media_play);
-            h.ivThumbnail.setColorFilter(0xFFE94560);
-        }
+    @Override
+    public void onViewRecycled(@NonNull VideoViewHolder holder) {
+        super.onViewRecycled(holder);
+        // Hủy request khi view bị recycle tránh memory leak
+        Glide.with(holder.itemView.getContext()).clear(holder.ivThumbnail);
     }
 
     @Override public int getItemCount() { return videoList.size(); }
