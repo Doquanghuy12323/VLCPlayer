@@ -52,6 +52,7 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
         fab.setOnClickListener(v -> openFilePicker());
 
         checkPermissionsAndLoad();
+
         // Kiểm tra update ngầm khi mở app
         new UpdateManager(this).checkForUpdate(true);
     }
@@ -83,11 +84,11 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
 
         try (Cursor cursor = cr.query(uri, projection, null, null, sortOrder)) {
             if (cursor != null && cursor.moveToFirst()) {
-                int idCol    = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
-                int nameCol  = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
-                int durCol   = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
-                int sizeCol  = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
-                int pathCol  = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA);
+                int idCol   = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
+                int nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
+                int durCol  = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
+                int sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
+                int pathCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA);
 
                 do {
                     long id       = cursor.getLong(idCol);
@@ -95,7 +96,8 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
                     long duration = cursor.getLong(durCol);
                     long size     = cursor.getLong(sizeCol);
                     String path   = cursor.getString(pathCol);
-                    Uri contentUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+                    Uri contentUri = Uri.withAppendedPath(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
                     videoList.add(new VideoItem(id, name, duration, size, path, contentUri));
                 } while (cursor.moveToNext());
             }
@@ -103,7 +105,8 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
 
         adapter.notifyDataSetChanged();
         if (videoList.isEmpty()) {
-            Toast.makeText(this, "Không tìm thấy video. Dùng nút + để chọn file.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Không tìm thấy video. Dùng nút + để chọn file.",
+                Toast.LENGTH_LONG).show();
         }
     }
 
@@ -137,13 +140,12 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] results) {
+    public void onRequestPermissionsResult(int requestCode,
+            @NonNull String[] permissions, @NonNull int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == PERMISSION_REQUEST && results.length > 0
                 && results[0] == PackageManager.PERMISSION_GRANTED) {
             loadVideos();
-        } else {
-            Toast.makeText(this, "Cần quyền đọc bộ nhớ để tải video", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -157,8 +159,6 @@ public class MainActivity extends AppCompatActivity implements VideoAdapter.OnVi
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == R.id.action_refresh) {
             checkPermissionsAndLoad();
-        // Kiểm tra update ngầm khi mở app
-        new UpdateManager(this).checkForUpdate(true);
             return true;
         }
         if (item.getItemId() == R.id.action_update) {
