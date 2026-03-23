@@ -1,10 +1,12 @@
 package com.vlcplayer.app;
 
-import android.content.Context;
 import android.graphics.Bitmap;
-import android.media.MediaMetadataRetriever;
+import android.media.ThumbnailUtils;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
+import android.util.Size;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,6 +16,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +33,6 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     private final OnVideoClickListener listener;
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    // Cache thumbnail tránh load lại
     private final Map<Long, Bitmap> thumbCache = new HashMap<>();
 
     public VideoAdapter(List<VideoItem> videoList, OnVideoClickListener listener) {
@@ -52,74 +54,67 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         holder.tvName.setText(video.getName());
         holder.tvDuration.setText(video.getFormattedDuration());
         holder.tvSize.setText(video.getFormattedSize());
+        holder.itemView.setTag(video.getId());
+        holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
 
-        // Kiểm tra cache trước
+        // Kiểm tra cache
         if (thumbCache.containsKey(video.getId())) {
-            Bitmap cached = thumbCache.get(video.getId());
-            if (cached != null) {
-                holder.ivThumbnail.setColorFilter(null);
-                holder.ivThumbnail.setImageBitmap(cached);
-            } else {
-                setDefaultThumb(holder);
-            }
-            holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
+            applyThumb(holder, thumbCache.get(video.getId()));
             return;
         }
 
-        // Chưa có cache → load async
-        setDefaultThumb(holder);
-        holder.itemView.setTag(video.getId());
+        // Default icon trước
+        applyThumb(holder, null);
 
-        Context ctx = holder.itemView.getContext().getApplicationContext();
+        // Load async
         executor.execute(() -> {
-            // Dùng URI thay vì path — Android 13 chặn truy cập file trực tiếp
-            Bitmap thumb = extractThumbnailFromUri(ctx, video);
-            thumbCache.put(video.getId(), thumb);
-
+            Bitmap bmp = loadThumbnail(video);
+            thumbCache.put(video.getId(), bmp);
             mainHandler.post(() -> {
-                Object tag = holder.itemView.getTag();
-                if (tag != null && tag.equals(video.getId())) {
-                    if (thumb != null) {
-                        holder.ivThumbnail.setColorFilter(null);
-                        holder.ivThumbnail.setImageBitmap(thumb);
-                    } else {
-                        setDefaultThumb(holder);
-                    }
+                if (Long.valueOf(video.getId()).equals(holder.itemView.getTag())) {
+                    applyThumb(holder, bmp);
                 }
             });
         });
-
-        holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
     }
 
-    private void setDefaultThumb(VideoViewHolder holder) {
-        holder.ivThumbnail.setImageResource(android.R.drawable.ic_media_play);
-        holder.ivThumbnail.setColorFilter(0xFFE94560);
+    private void applyThumb(VideoViewHolder holder, Bitmap bmp) {
+        if (bmp != null) {
+            holder.ivThumbnail.clearColorFilter();
+            holder.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            holder.ivThumbnail.setImageBitmap(bmp);
+        } else {
+            holder.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            holder.ivThumbnail.setImageResource(android.R.drawable.ic_media_play);
+            holder.ivThumbnail.setColorFilter(0xFFE94560);
+        }
     }
 
-    private Bitmap extractThumbnailFromUri(Context ctx, VideoItem video) {
-        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+    private Bitmap loadThumbnail(VideoItem video) {
         try {
-            // Dùng content URI — hoạt động tốt trên Android 10+
-            retriever.setDataSource(ctx, video.getUri());
-
-            // Lấy frame giây thứ 3, fallback về giây 0
-            Bitmap bmp = retriever.getFrameAtTime(
-                3_000_000L,
-                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-            );
-            if (bmp == null) {
-                bmp = retriever.getFrameAtTime(
-                    0L,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+ — dùng ThumbnailUtils với File path
+                String path = video.getPath();
+                if (path != null && !path.isEmpty()) {
+                    return ThumbnailUtils.createVideoThumbnail(
+                        new File(path),
+                        new Size(320, 180),
+                        null
+                    );
+                }
+            }
+            // Fallback cho Android < 10
+            String path = video.getPath();
+            if (path != null && !path.isEmpty()) {
+                return ThumbnailUtils.createVideoThumbnail(
+                    path,
+                    MediaStore.Images.Thumbnails.MINI_KIND
                 );
             }
-            return bmp;
         } catch (Exception e) {
-            return null;
-        } finally {
-            try { retriever.release(); } catch (Exception ignored) {}
+            // ignore
         }
+        return null;
     }
 
     @Override
