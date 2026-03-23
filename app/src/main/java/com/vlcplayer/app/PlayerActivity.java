@@ -106,7 +106,6 @@ public class PlayerActivity extends AppCompatActivity {
         controlsOverlay = findViewById(R.id.controls_overlay);
 
         tvTitle.setText(title != null ? title : "Video");
-
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
         btnPlayPause.setOnClickListener(v -> togglePlayPause());
         videoLayout.setOnClickListener(v -> toggleControls());
@@ -117,7 +116,6 @@ public class PlayerActivity extends AppCompatActivity {
         findViewById(R.id.btn_rewind).setOnClickListener(v -> {
             if (mediaPlayer != null) mediaPlayer.setTime(Math.max(0, mediaPlayer.getTime() - 10000));
         });
-
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
                 if (fromUser) tvCurrent.setText(formatTime(p));
@@ -132,17 +130,13 @@ public class PlayerActivity extends AppCompatActivity {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         audioSessionId = am.generateAudioSessionId();
 
-        // ── Options quan trọng fix slowmotion ──
         ArrayList<String> options = new ArrayList<>();
-        options.add("--no-drop-late-frames");
-        options.add("--no-skip-frames");
-        // Fix clock lệch gây slowmotion
+        // KHÔNG dùng --no-drop-late-frames và --no-skip-frames
+        // 2 option đó gây slowmotion vì VLC ép giữ mọi frame dù decode trễ
         options.add("--clock-jitter=0");
         options.add("--clock-synchro=0");
-        // Decode nhanh hơn
         options.add("--avcodec-threads=0");
         options.add("--network-caching=1500");
-        options.add("--rtsp-tcp");
 
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
@@ -172,13 +166,11 @@ public class PlayerActivity extends AppCompatActivity {
         });
 
         mediaPlayer.attachViews(videoLayout, null, false, false);
-
         if (uriString != null) {
             playMedia(uriString);
         } else {
             finish();
         }
-
         handler.post(updateSeekBar);
         scheduleHideControls();
     }
@@ -187,7 +179,6 @@ public class PlayerActivity extends AppCompatActivity {
         try {
             Uri uri = Uri.parse(uriString);
             Media media;
-
             if ("content".equals(uri.getScheme())) {
                 closePfd();
                 currentPfd = getContentResolver().openFileDescriptor(uri, "r");
@@ -199,18 +190,12 @@ public class PlayerActivity extends AppCompatActivity {
             } else {
                 media = new Media(libVLC, uri);
             }
-
-            // HW decode bật, KHÔNG fallback software
-            // (fallback gây ra software decode chậm hơn)
             media.setHWDecoderEnabled(true, false);
             media.addOption(":file-caching=1500");
-            // Dùng MediaCodec NDK — nhanh nhất trên Android
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-
             mediaPlayer.setMedia(media);
             media.release();
             mediaPlayer.play();
-
         } catch (Exception e) {
             Toast.makeText(this, "Lỗi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
@@ -315,15 +300,13 @@ public class PlayerActivity extends AppCompatActivity {
         if (hasFocus) hideSystemUI();
     }
 
-    @Override
-    protected void onStop() {
+    @Override protected void onStop() {
         super.onStop();
         mediaPlayer.stop();
         mediaPlayer.detachViews();
     }
 
-    @Override
-    protected void onDestroy() {
+    @Override protected void onDestroy() {
         super.onDestroy();
         broadcastAudioSessionClose();
         handler.removeCallbacksAndMessages(null);

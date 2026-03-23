@@ -1,10 +1,12 @@
 package com.vlcplayer.app;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.media.MediaMetadataRetriever;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Size;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -30,19 +32,18 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     private final OnVideoClickListener listener;
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final Map<Long, Bitmap> thumbCache = new HashMap<>();
+    private final Map<Long, Bitmap> cache = new HashMap<>();
 
     public VideoAdapter(List<VideoItem> videoList, OnVideoClickListener listener) {
         this.videoList = videoList;
         this.listener  = listener;
     }
 
-    @NonNull
-    @Override
+    @NonNull @Override
     public VideoViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View view = LayoutInflater.from(parent.getContext())
+        View v = LayoutInflater.from(parent.getContext())
                 .inflate(R.layout.item_video, parent, false);
-        return new VideoViewHolder(view);
+        return new VideoViewHolder(v);
     }
 
     @Override
@@ -54,76 +55,63 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         holder.itemView.setTag(video.getId());
         holder.itemView.setOnClickListener(v -> listener.onVideoClick(video));
 
-        if (thumbCache.containsKey(video.getId())) {
-            applyThumb(holder, thumbCache.get(video.getId()));
+        if (cache.containsKey(video.getId())) {
+            setThumb(holder, cache.get(video.getId()));
             return;
         }
 
-        applyThumb(holder, null);
-        Context appCtx = holder.itemView.getContext().getApplicationContext();
+        setThumb(holder, null);
+        Context ctx = holder.itemView.getContext().getApplicationContext();
 
         executor.execute(() -> {
-            Bitmap bmp = loadThumb(appCtx, video);
-            thumbCache.put(video.getId(), bmp);
+            Bitmap bmp = loadThumb(ctx, video);
+            cache.put(video.getId(), bmp);
             mainHandler.post(() -> {
                 if (Long.valueOf(video.getId()).equals(holder.itemView.getTag())) {
-                    applyThumb(holder, bmp);
+                    setThumb(holder, bmp);
                 }
             });
         });
     }
 
     private Bitmap loadThumb(Context ctx, VideoItem video) {
-        MediaMetadataRetriever mmr = new MediaMetadataRetriever();
         try {
-            // Dùng content URI — cách duy nhất ổn định trên Android 10+
-            mmr.setDataSource(ctx, video.getUri());
-
-            // Thử lấy frame tại giây 3
-            Bitmap bmp = mmr.getFrameAtTime(
-                3_000_000L,
-                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-            );
-            if (bmp == null) {
-                // Fallback: frame đầu tiên
-                bmp = mmr.getFrameAtTime(
-                    0L,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // API 29+ — loadThumbnail là cách chính thức, hoạt động với content URI
+                ContentResolver cr = ctx.getContentResolver();
+                return cr.loadThumbnail(
+                    video.getUri(),
+                    new Size(320, 180),
+                    null
                 );
             }
-            return bmp;
-        } catch (Exception e) {
-            return null;
-        } finally {
-            try { mmr.release(); } catch (Exception ignored) {}
-        }
+        } catch (Exception ignored) {}
+        return null;
     }
 
-    private void applyThumb(VideoViewHolder holder, Bitmap bmp) {
+    private void setThumb(VideoViewHolder h, Bitmap bmp) {
         if (bmp != null) {
-            holder.ivThumbnail.clearColorFilter();
-            holder.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            holder.ivThumbnail.setImageBitmap(bmp);
+            h.ivThumbnail.clearColorFilter();
+            h.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            h.ivThumbnail.setImageBitmap(bmp);
         } else {
-            holder.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-            holder.ivThumbnail.setImageResource(android.R.drawable.ic_media_play);
-            holder.ivThumbnail.setColorFilter(0xFFE94560);
+            h.ivThumbnail.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            h.ivThumbnail.setImageResource(android.R.drawable.ic_media_play);
+            h.ivThumbnail.setColorFilter(0xFFE94560);
         }
     }
 
-    @Override
-    public int getItemCount() { return videoList.size(); }
+    @Override public int getItemCount() { return videoList.size(); }
 
     static class VideoViewHolder extends RecyclerView.ViewHolder {
         TextView tvName, tvDuration, tvSize;
         ImageView ivThumbnail;
-
-        VideoViewHolder(@NonNull View itemView) {
-            super(itemView);
-            tvName      = itemView.findViewById(R.id.tv_video_name);
-            tvDuration  = itemView.findViewById(R.id.tv_duration);
-            tvSize      = itemView.findViewById(R.id.tv_size);
-            ivThumbnail = itemView.findViewById(R.id.iv_thumbnail);
+        VideoViewHolder(@NonNull View v) {
+            super(v);
+            tvName      = v.findViewById(R.id.tv_video_name);
+            tvDuration  = v.findViewById(R.id.tv_duration);
+            tvSize      = v.findViewById(R.id.tv_size);
+            ivThumbnail = v.findViewById(R.id.iv_thumbnail);
         }
     }
 }
