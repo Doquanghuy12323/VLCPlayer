@@ -40,6 +40,23 @@ jobs:
           echo "${{ secrets.KEYSTORE_BASE64 }}" | tr -d '\n' | base64 -d > vlcplayer.keystore
           echo "Keystore size: $(wc -c < vlcplayer.keystore) bytes"
 
+      - name: Set version from timestamp
+        id: ts
+        run: |
+          CODE=$(date +%Y%m%d%H%M)
+          echo "code=$CODE" >> $GITHUB_OUTPUT
+          python3 - << PYEOF
+import re
+code = "$CODE"
+with open("app/build.gradle", "r") as f:
+    content = f.read()
+content = re.sub(r'versionCode\s+\d+', f'versionCode {code}', content)
+content = re.sub(r"versionName\s+'[^']*'", f"versionName '{code}'", content)
+with open("app/build.gradle", "w") as f:
+    f.write(content)
+print(f"Version set to: {code}")
+PYEOF
+
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
         env:
@@ -47,10 +64,6 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-
-      - name: Get timestamp
-        id: ts
-        run: echo "code=$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

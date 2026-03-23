@@ -1,5 +1,6 @@
 package com.vlcplayer.app;
 
+import android.app.Dialog;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Handler;
@@ -7,6 +8,8 @@ import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -34,7 +37,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     private final OnVideoClickListener listener;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    private VideoViewHolder activeHolder = null;
+    private Dialog previewDialog = null;
     private LibVLC previewLibVLC = null;
     private MediaPlayer previewPlayer = null;
     private Runnable stopRunnable = null;
@@ -74,34 +77,58 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         });
 
         holder.itemView.setOnLongClickListener(v -> {
-            startPreview(holder, video);
+            showPreviewDialog(holder.itemView.getContext(), video);
             return true;
         });
     }
 
-    private void startPreview(VideoViewHolder holder, VideoItem video) {
+    private void showPreviewDialog(Context ctx, VideoItem video) {
         stopPreview();
-        activeHolder = holder;
 
-        Context ctx = holder.itemView.getContext();
+        // Tạo Dialog fullscreen
+        previewDialog = new Dialog(ctx);
+        previewDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        previewDialog.setContentView(new VLCVideoLayout(ctx));
 
-        holder.vlcPreview.setVisibility(View.VISIBLE);
-        holder.ivThumbnail.setVisibility(View.INVISIBLE);
+        Window window = previewDialog.getWindow();
+        if (window != null) {
+            window.setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                (int)(ctx.getResources().getDisplayMetrics().heightPixels * 0.5f)
+            );
+            window.setBackgroundDrawableResource(android.R.color.black);
+        }
 
+        VLCVideoLayout videoLayout = (VLCVideoLayout) previewDialog.getCurrentFocus();
+        if (videoLayout == null) {
+            videoLayout = new VLCVideoLayout(ctx);
+            previewDialog.setContentView(videoLayout);
+        }
+
+        previewDialog.setOnDismissListener(d -> stopPreview());
+        previewDialog.show();
+
+        // Khởi tạo player sau khi dialog hiện
+        final VLCVideoLayout finalLayout = videoLayout;
+        handler.postDelayed(() -> startPlayback(ctx, video.getUri(), finalLayout), 200);
+
+        // Tự đóng sau 10 giây
+        stopRunnable = () -> stopPreview();
+        handler.postDelayed(stopRunnable, 10000);
+    }
+
+    private void startPlayback(Context ctx, Uri uri, VLCVideoLayout layout) {
         try {
             ArrayList<String> opts = new ArrayList<>();
             opts.add("--no-audio");
             opts.add("--clock-jitter=0");
             opts.add("--clock-synchro=0");
-            opts.add("--avcodec-threads=0");
 
             previewLibVLC = new LibVLC(ctx, opts);
             previewPlayer = new MediaPlayer(previewLibVLC);
+            previewPlayer.attachViews(layout, null, false, false);
 
-            // attachViews TRƯỚC khi play
-            previewPlayer.attachViews(holder.vlcPreview, null, false, false);
-
-            Media media = new Media(previewLibVLC, video.getUri());
+            Media media = new Media(previewLibVLC, uri);
             media.setHWDecoderEnabled(true, true);
             previewPlayer.setMedia(media);
             media.release();
@@ -109,26 +136,16 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             previewPlayer.setEventListener(event -> {
                 if (event.type == MediaPlayer.Event.Playing) {
                     long len = previewPlayer.getLength();
-                    if (len > 0) {
-                        // Seek đến 10% để tránh màn đen đầu video
-                        previewPlayer.setTime(len / 10);
-                    }
-                    // Set scale fill
+                    if (len > 0) previewPlayer.setTime(len / 10);
                     previewPlayer.setAspectRatio(null);
                     previewPlayer.setScale(0);
                 }
             });
 
             previewPlayer.play();
-
         } catch (Exception e) {
             stopPreview();
-            return;
         }
-
-        // Tự dừng sau 8 giây
-        stopRunnable = this::stopPreview;
-        handler.postDelayed(stopRunnable, 8000);
     }
 
     public void stopPreview() {
@@ -148,20 +165,17 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             try { previewLibVLC.release(); } catch (Exception ignored) {}
             previewLibVLC = null;
         }
-        if (activeHolder != null) {
-            final VideoViewHolder h = activeHolder;
-            handler.post(() -> {
-                h.vlcPreview.setVisibility(View.GONE);
-                h.ivThumbnail.setVisibility(View.VISIBLE);
-            });
-            activeHolder = null;
+        if (previewDialog != null) {
+            try {
+                if (previewDialog.isShowing()) previewDialog.dismiss();
+            } catch (Exception ignored) {}
+            previewDialog = null;
         }
     }
 
     @Override
     public void onViewRecycled(@NonNull VideoViewHolder holder) {
         super.onViewRecycled(holder);
-        if (holder == activeHolder) stopPreview();
         Glide.with(holder.itemView.getContext()).clear(holder.ivThumbnail);
     }
 
@@ -176,15 +190,13 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     static class VideoViewHolder extends RecyclerView.ViewHolder {
         TextView tvName, tvDuration, tvSize;
         ImageView ivThumbnail;
-        VLCVideoLayout vlcPreview;
 
         VideoViewHolder(@NonNull View v) {
             super(v);
-            tvName     = v.findViewById(R.id.tv_video_name);
-            tvDuration = v.findViewById(R.id.tv_duration);
-            tvSize     = v.findViewById(R.id.tv_size);
+            tvName      = v.findViewById(R.id.tv_video_name);
+            tvDuration  = v.findViewById(R.id.tv_duration);
+            tvSize      = v.findViewById(R.id.tv_size);
             ivThumbnail = v.findViewById(R.id.iv_thumbnail);
-            vlcPreview  = v.findViewById(R.id.vlc_preview);
         }
     }
 }
