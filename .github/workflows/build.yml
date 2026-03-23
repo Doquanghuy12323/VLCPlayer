@@ -13,12 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-
       - uses: actions/cache@v4
         with:
           path: |
@@ -26,37 +24,16 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ hashFiles('**/*.gradle*') }}
           restore-keys: gradle-
-
       - run: chmod +x gradlew
-
       - name: Download Gradle Wrapper
         run: |
           mkdir -p gradle/wrapper
-          curl -L -o gradle/wrapper/gradle-wrapper.jar \
-            https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar
-
+          curl -L -o gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar
       - name: Decode keystore
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | tr -d '\n' | base64 -d > vlcplayer.keystore
-          echo "Keystore size: $(wc -c < vlcplayer.keystore) bytes"
-
-      - name: Set version from timestamp
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | tr -d '\n' | base64 -d > vlcplayer.keystore
+      - name: Get timestamp
         id: ts
-        run: |
-          CODE=$(date +%Y%m%d%H%M)
-          echo "code=$CODE" >> $GITHUB_OUTPUT
-          python3 -c "
-import re
-code = '$CODE'
-with open('app/build.gradle', 'r') as f:
-    content = f.read()
-content = re.sub(r'versionCode\s+\d+', 'versionCode ' + code, content)
-content = re.sub(r\"versionName\s+'[^']*'\", \"versionName '\" + code + \"'\", content)
-with open('app/build.gradle', 'w') as f:
-    f.write(content)
-print('Version set to: ' + code)
-"
-
+        run: echo "code=$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
         env:
@@ -64,7 +41,6 @@ print('Version set to: ' + code)
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:

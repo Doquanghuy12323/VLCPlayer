@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -34,6 +35,8 @@ public class UpdateManager {
     private static final String GITHUB_REPO = "VLCPlayer";
     private static final String API_URL =
         "https://api.github.com/repos/" + GITHUB_USER + "/" + GITHUB_REPO + "/releases/latest";
+    private static final String PREF_NAME = "update_prefs";
+    private static final String PREF_LAST_NOTIFIED = "last_notified_version";
 
     private final Activity activity;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -52,9 +55,9 @@ public class UpdateManager {
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(10000);
 
-                int responseCode = conn.getResponseCode();
-                if (responseCode != 200) {
-                    if (!silent) showToast("Lỗi API: HTTP " + responseCode);
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    if (!silent) showToast("Loi API: HTTP " + code);
                     return;
                 }
 
@@ -69,36 +72,41 @@ public class UpdateManager {
                 String tagName = json.getString("tag_name");
                 String latestVersion = tagName.replace("v", "").trim();
 
-                String currentVersion;
-                try {
-                    currentVersion = activity.getPackageManager()
-                        .getPackageInfo(activity.getPackageName(), 0).versionName;
-                } catch (Exception e) {
-                    if (!silent) showToast("Lỗi lấy version: " + e.getMessage());
+                if (!silent) {
+                    showToast("Moi nhat: " + latestVersion);
+                }
+
+                // Kiem tra da thong bao version nay chua
+                SharedPreferences prefs = activity.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+                String lastNotified = prefs.getString(PREF_LAST_NOTIFIED, "");
+
+                // Neu da thong bao version nay roi thi bo qua (khi silent)
+                if (silent && latestVersion.equals(lastNotified)) {
                     return;
                 }
 
-                if (!silent) {
-                    showToast("Hiện tại: " + currentVersion + " | Mới nhất: " + latestVersion);
-                }
-
-                // So sánh version dạng số
+                // So sanh version dang cai vs moi nhat
                 boolean hasUpdate;
                 try {
                     long latest  = Long.parseLong(latestVersion);
-                    long current = Long.parseLong(currentVersion);
+                    // Lay versionCode hien tai
+                    long current = activity.getPackageManager()
+                        .getPackageInfo(activity.getPackageName(), 0).getLongVersionCode();
                     hasUpdate = latest > current;
-                } catch (NumberFormatException e) {
-                    // Fallback: so sánh string
-                    hasUpdate = latestVersion.compareTo(currentVersion) > 0;
+
+                    if (!silent) {
+                        showToast("Hien tai: " + current + " | Moi nhat: " + latest);
+                    }
+                } catch (Exception e) {
+                    hasUpdate = !latestVersion.equals(lastNotified);
                 }
 
                 if (!hasUpdate) {
-                    if (!silent) showToast("Đang dùng phiên bản mới nhất!");
+                    if (!silent) showToast("Dang dung phien ban moi nhat!");
                     return;
                 }
 
-                // Lấy download URL của APK
+                // Lay download URL
                 JSONArray assets = json.getJSONArray("assets");
                 String downloadUrl = null;
                 for (int i = 0; i < assets.length(); i++) {
@@ -110,16 +118,19 @@ public class UpdateManager {
                 }
 
                 if (downloadUrl == null) {
-                    if (!silent) showToast("Không tìm thấy APK trong release");
+                    if (!silent) showToast("Khong tim thay APK trong release");
                     return;
                 }
+
+                // Luu lai version da thong bao
+                prefs.edit().putString(PREF_LAST_NOTIFIED, latestVersion).apply();
 
                 final String url = downloadUrl;
                 final String ver = latestVersion;
                 mainHandler.post(() -> showUpdateDialog(ver, url));
 
             } catch (Exception e) {
-                if (!silent) showToast("Lỗi: " + e.getMessage());
+                if (!silent) showToast("Loi: " + e.getMessage());
             }
         });
     }
@@ -131,38 +142,30 @@ public class UpdateManager {
     private void showUpdateDialog(String newVersion, String downloadUrl) {
         if (activity.isFinishing()) return;
         new AlertDialog.Builder(activity)
-            .setTitle("🎉 Có bản cập nhật mới!")
-            .setMessage("Phiên bản " + newVersion + " sẵn sàng.\nBấm Cập nhật để tải và cài đặt.")
-            .setPositiveButton("Cập nhật", (d, w) -> downloadAndInstall(downloadUrl))
-            .setNegativeButton("Để sau", null)
-            .setCancelable(false)
+            .setTitle("Co ban cap nhat moi!")
+            .setMessage("Phien ban " + newVersion + " san sang.\nBam Cap nhat de tai va cai dat.")
+            .setPositiveButton("Cap nhat", (d, w) -> downloadAndInstall(downloadUrl))
+            .setNegativeButton("De sau", null)
             .show();
     }
 
     private void downloadAndInstall(String downloadUrl) {
-        Toast.makeText(activity, "Đang tải bản cập nhật...", Toast.LENGTH_SHORT).show();
-
-        DownloadManager dm = (DownloadManager)
-            activity.getSystemService(Context.DOWNLOAD_SERVICE);
-
+        Toast.makeText(activity, "Dang tai ban cap nhat...", Toast.LENGTH_SHORT).show();
+        DownloadManager dm = (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
         File outFile = new File(
             activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
-            "vlcplayer-update.apk"
-        );
+            "vlcplayer-update.apk");
         if (outFile.exists()) outFile.delete();
 
         DownloadManager.Request req = new DownloadManager.Request(Uri.parse(downloadUrl))
             .setTitle("VLC Player Update")
-            .setDescription("Đang tải...")
-            .setNotificationVisibility(
-                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDescription("Dang tai...")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationUri(Uri.fromFile(outFile));
-
         long downloadId = dm.enqueue(req);
 
         BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context ctx, Intent intent) {
+            @Override public void onReceive(Context ctx, Intent intent) {
                 long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
                 if (id == downloadId) {
                     activity.unregisterReceiver(this);
@@ -170,22 +173,16 @@ public class UpdateManager {
                 }
             }
         };
-        activity.registerReceiver(receiver,
-            new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+        activity.registerReceiver(receiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
     }
 
     private void checkAndInstall(DownloadManager dm, long downloadId, File file) {
-        Cursor cursor = dm.query(
-            new DownloadManager.Query().setFilterById(downloadId));
+        Cursor cursor = dm.query(new DownloadManager.Query().setFilterById(downloadId));
         if (cursor != null && cursor.moveToFirst()) {
-            int status = cursor.getInt(
-                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
             cursor.close();
-            if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                installApk(file);
-            } else {
-                showToast("Tải thất bại, thử lại sau");
-            }
+            if (status == DownloadManager.STATUS_SUCCESSFUL) installApk(file);
+            else showToast("Tai that bai, thu lai sau");
         }
     }
 
@@ -194,11 +191,8 @@ public class UpdateManager {
             Intent intent = new Intent(Intent.ACTION_VIEW);
             Uri apkUri;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                apkUri = FileProvider.getUriForFile(
-                    activity,
-                    activity.getPackageName() + ".provider",
-                    apkFile
-                );
+                apkUri = FileProvider.getUriForFile(activity,
+                    activity.getPackageName() + ".provider", apkFile);
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } else {
                 apkUri = Uri.fromFile(apkFile);
@@ -207,7 +201,7 @@ public class UpdateManager {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity.startActivity(intent);
         } catch (Exception e) {
-            showToast("Lỗi cài đặt: " + e.getMessage());
+            showToast("Loi cai dat: " + e.getMessage());
         }
     }
 }
