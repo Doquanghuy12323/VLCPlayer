@@ -262,7 +262,6 @@ public class PlayerActivity extends AppCompatActivity
             }
         });
         mediaPlayer.attachViews(videoLayout, null, false, false);
-        mediaPlayer.getVLCVout().addCallback(this);
         // Thong bao kich thuoc surface cho VLC
         videoLayout.post(() -> {
             org.videolan.libvlc.interfaces.IVLCVout vout = mediaPlayer.getVLCVout();
@@ -667,7 +666,6 @@ public class PlayerActivity extends AppCompatActivity
         broadcastAudioSessionClose();
         if (equalizer != null) equalizer.release();
         handler.removeCallbacksAndMessages(null);
-        mediaPlayer.getVLCVout().removeCallback(this);
         mediaPlayer.release();
         libVLC.release();
         closePfd();
