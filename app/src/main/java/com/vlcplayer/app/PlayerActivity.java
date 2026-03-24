@@ -241,7 +241,8 @@ public class PlayerActivity extends AppCompatActivity {
                 case MediaPlayer.Event.Playing:
                     runOnUiThread(() -> {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
-                        applyScaleMode();
+                        // Delay nho de dam bao VLC da san sang truoc khi set scale
+                        handler.postDelayed(() -> applyScaleMode(), 300);
                         scheduleHideControls();
                         if (!waveletSent) { broadcastAudioSessionOpen(); waveletSent = true; }
                     });
@@ -499,8 +500,8 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
             case 0: mediaPlayer.setAspectRatio(null); mediaPlayer.setScale(0); break;
-            case 1: mediaPlayer.setAspectRatio(screenW + ":" + screenH); mediaPlayer.setScale(0); break;
-            case 2: mediaPlayer.setAspectRatio(screenW + ":" + screenH); mediaPlayer.setScale(1); break;
+            case 1: mediaPlayer.setAspectRatio(null); mediaPlayer.setScale(1); break;
+            case 2: mediaPlayer.setAspectRatio(screenW + ":" + screenH); mediaPlayer.setScale(0); break;
         }
     }
 
