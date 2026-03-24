@@ -499,9 +499,21 @@ public class PlayerActivity extends AppCompatActivity {
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
-            case 0: mediaPlayer.setAspectRatio(null); mediaPlayer.setScale(0); break;
-            case 1: mediaPlayer.setAspectRatio(null); mediaPlayer.setScale(1); break;
-            case 2: mediaPlayer.setAspectRatio(screenW + ":" + screenH); mediaPlayer.setScale(0); break;
+            case 0:
+                // Fit - giu ty le, co the co vien den
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(0);
+                break;
+            case 1:
+                // Fill - lap day chuan xac bang ti le man hinh
+                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                mediaPlayer.setScale(1);
+                break;
+            case 2:
+                // Stretch - keo gian
+                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                mediaPlayer.setScale(0);
+                break;
         }
     }
 
