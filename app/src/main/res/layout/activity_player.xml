@@ -73,6 +73,12 @@
                 android:src="@android:drawable/ic_menu_zoom"
                 android:tint="#FFFFFF" android:contentDescription="aspect"/>
 
+            <ImageButton android:id="@+id/btn_translate"
+                android:layout_width="36dp" android:layout_height="36dp"
+                android:background="?selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_compass"
+                android:tint="#FFFFFF" android:contentDescription="translate"/>
+
             <ImageButton android:id="@+id/btn_lock"
                 android:layout_width="36dp" android:layout_height="36dp"
                 android:background="?selectableItemBackgroundBorderless"

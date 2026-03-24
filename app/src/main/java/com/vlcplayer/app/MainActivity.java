@@ -220,6 +220,7 @@ public class MainActivity extends AppCompatActivity
     @Override public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
         if (id == R.id.action_refresh) { checkPermissionsAndLoad(); return true; }
+        if (id == R.id.action_translate) { showTranslateLangDialog(); return true; }
         if (id == R.id.action_url) { showUrlDialog(); return true; }
         if (id == R.id.action_history) { showHistoryDialog(); return true; }
         if (id == R.id.action_privacy) { showPrivacyDialog(); return true; }
@@ -228,6 +229,7 @@ public class MainActivity extends AppCompatActivity
         return super.onOptionsItemSelected(item);
     }
 
+    private void showTranslateLangDialog() {
         TranslationManager tm = new TranslationManager(this);
         String[][] langs = TranslationManager.LANGUAGES;
         String[] names = new String[langs.length];
@@ -249,5 +251,4 @@ public class MainActivity extends AppCompatActivity
     }
 
 }
-// Phần này được thêm tự động - KHÔNG chạy lệnh này
 // Phần này được thêm tự động - KHÔNG chạy lệnh này
