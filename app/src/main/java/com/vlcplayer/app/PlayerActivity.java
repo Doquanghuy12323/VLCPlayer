@@ -518,28 +518,29 @@ public class PlayerActivity extends AppCompatActivity
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
-            case 0: // BEST FIT - giu ti le goc
+            case 0: // Best Fit - giu nguyen ti le
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(0);
                 break;
-            case 1: // FILL - lap day hoan toan, cat vien den
-                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                mediaPlayer.setScale(0);
-                break;
-            case 2: // FIT SCREEN - scale de lap day, giu ti le
+            case 1: // Fill - DUNG setScale(1) de fill man hinh
                 mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(1.0f);
+                mediaPlayer.setScale(1);
                 break;
-            case 3: // 16:9
+            case 2: // 16:9
                 mediaPlayer.setAspectRatio("16:9");
                 mediaPlayer.setScale(0);
                 break;
-            case 4: // 4:3
+            case 3: // 4:3
                 mediaPlayer.setAspectRatio("4:3");
                 mediaPlayer.setScale(0);
                 break;
-            case 5: // ORIGINAL - kich thuoc goc video
+            case 4: // Stretch toan man hinh
+                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                mediaPlayer.setScale(0);
+                break;
+            case 5: // Original
                 mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(0);
                 mediaPlayer.setScale(1);
                 break;
         }
@@ -547,9 +548,9 @@ public class PlayerActivity extends AppCompatActivity
 
 
     private void cycleAspectRatio() {
-        scaleMode = (scaleMode + 1) % SCALE_COUNT;
+        scaleMode = (scaleMode + 1) % 5;
         applyScaleMode();
-        String[] labels = {"Best Fit", "Fill (lap day)", "Fit Screen", "16:9", "4:3", "Original"};
+        String[] labels = {"Best Fit", "Fill", "16:9", "4:3", "Stretch"};
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
