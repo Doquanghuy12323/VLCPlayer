@@ -220,6 +220,7 @@ public class MainActivity extends AppCompatActivity
     @Override public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
         if (id == R.id.action_refresh) { checkPermissionsAndLoad(); return true; }
+        if (id == R.id.action_translate) { showTranslateLangDialog(); return true; }
         if (id == R.id.action_url) { showUrlDialog(); return true; }
         if (id == R.id.action_history) { showHistoryDialog(); return true; }
         if (id == R.id.action_privacy) { showPrivacyDialog(); return true; }
@@ -227,4 +228,28 @@ public class MainActivity extends AppCompatActivity
             new UpdateManager(this).checkForUpdate(false); return true; }
         return super.onOptionsItemSelected(item);
     }
+
+    private void showTranslateLangDialog() {
+        TranslationManager tm = new TranslationManager(this);
+        String[][] langs = TranslationManager.LANGUAGES;
+        String[] names = new String[langs.length];
+        String cur = tm.getTargetLanguage();
+        int curIdx = 0;
+        for (int i = 0; i < langs.length; i++) {
+            names[i] = langs[i][0];
+            if (langs[i][1].equals(cur)) curIdx = i;
+        }
+        final int[] sel = {curIdx};
+        new AlertDialog.Builder(this)
+            .setTitle("Ngon ngu dich AI")
+            .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
+            .setPositiveButton("Luu", (d, w) -> {
+                tm.setTargetLanguage(langs[sel[0]][1]);
+                Toast.makeText(this, "Da chon: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
 }
+// Phần này được thêm tự động - KHÔNG chạy lệnh này
+// Phần này được thêm tự động - KHÔNG chạy lệnh này

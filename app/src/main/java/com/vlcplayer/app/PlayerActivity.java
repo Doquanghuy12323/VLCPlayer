@@ -174,6 +174,8 @@ public class PlayerActivity extends AppCompatActivity {
 
         // Lock màn hình
         findViewById(R.id.btn_lock).setOnClickListener(v -> toggleLock());
+        if (findViewById(R.id.btn_translate) != null)
+            findViewById(R.id.btn_translate).setOnClickListener(v -> showTranslateSubtitleDialog());
 
         // Unlock button (chỉ hiện khi locked)
         findViewById(R.id.btn_unlock).setOnClickListener(v -> toggleLock());
@@ -583,4 +585,101 @@ public class PlayerActivity extends AppCompatActivity {
         libVLC.release();
         closePfd();
     }
+
+    private void showTranslateSubtitleDialog() {
+        TranslationManager tm = new TranslationManager(this);
+        String[] opts = {"Dich tu URL subtitle", "Doi ngon ngu: " + tm.getTargetLanguageName()};
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Dich Subtitle AI")
+            .setItems(opts, (d, which) -> {
+                if (which == 0) showSrtUrlInput();
+                else showChangeLangDialog();
+            }).show();
+    }
+
+    private void showChangeLangDialog() {
+        TranslationManager tm = new TranslationManager(this);
+        String[][] langs = TranslationManager.LANGUAGES;
+        String[] names = new String[langs.length];
+        String cur = tm.getTargetLanguage();
+        int curIdx = 0;
+        for (int i = 0; i < langs.length; i++) {
+            names[i] = langs[i][0];
+            if (langs[i][1].equals(cur)) curIdx = i;
+        }
+        final int[] sel = {curIdx};
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Chon ngon ngu dich")
+            .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
+            .setPositiveButton("Luu", (d, w) -> {
+                tm.setTargetLanguage(langs[sel[0]][1]);
+                Toast.makeText(this, "Da chon: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
+    private void showSrtUrlInput() {
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("https://example.com/subtitle.srt");
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("URL file SRT")
+            .setView(input)
+            .setPositiveButton("Dich", (d, w) -> {
+                String url = input.getText().toString().trim();
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
+    private void startSrtTranslation(String url) {
+        android.app.ProgressDialog pd = new android.app.ProgressDialog(this);
+        pd.setMessage("Dang tai...");
+        pd.setCancelable(false);
+        pd.show();
+        new Thread(() -> {
+            try {
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                    new java.net.URL(url).openConnection();
+                conn.setConnectTimeout(10000);
+                java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String ln;
+                while ((ln = br.readLine()) != null) sb.append(ln).append("
+");
+                br.close();
+                String srt = sb.toString();
+                TranslationManager tm = new TranslationManager(this);
+                runOnUiThread(() -> pd.setMessage("Dang dich..."));
+                tm.translateSrt(srt, "auto",
+                    prog -> runOnUiThread(() -> pd.setMessage(prog)),
+                    new TranslationManager.TranslateCallback() {
+                        public void onSuccess(String t) {
+                            runOnUiThread(() -> { pd.dismiss(); saveSrtAndLoad(t); });
+                        }
+                        public void onError(String e) {
+                            runOnUiThread(() -> { pd.dismiss();
+                                Toast.makeText(PlayerActivity.this, e, Toast.LENGTH_SHORT).show(); });
+                        }
+                    });
+            } catch (Exception e) {
+                runOnUiThread(() -> { pd.dismiss();
+                    Toast.makeText(PlayerActivity.this, "Loi: " + e.getMessage(), Toast.LENGTH_SHORT).show(); });
+            }
+        }).start();
+    }
+
+    private void saveSrtAndLoad(String srtContent) {
+        try {
+            java.io.File f = new java.io.File(getExternalFilesDir(null), "translated.srt");
+            java.io.FileWriter fw = new java.io.FileWriter(f);
+            fw.write(srtContent);
+            fw.close();
+            if (mediaPlayer != null)
+                mediaPlayer.addSlave(Media.Slave.Type.Subtitle,
+                    android.net.Uri.fromFile(f).toString(), true);
+        } catch (Exception e) {
+            Toast.makeText(this, "Loi luu: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
 }
