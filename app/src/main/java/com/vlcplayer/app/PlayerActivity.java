@@ -44,7 +44,6 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -107,8 +106,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
             WindowManager.LayoutParams.FLAG_FULLSCREEN);
         hideSystemUI();
         setContentView(R.layout.activity_player);
@@ -180,11 +178,10 @@ public class PlayerActivity extends AppCompatActivity {
         gestureDetector = new GestureDetector(this,
             new GestureDetector.SimpleOnGestureListener() {
                 @Override
-                public boolean onScroll(MotionEvent e1, MotionEvent e2,
-                        float distX, float distY) {
+                public boolean onScroll(MotionEvent e1, MotionEvent e2, float dX, float dY) {
                     if (isLocked || e1 == null) return false;
-                    if (e1.getX() < screenW / 2f) adjustBrightness(distY * 0.005f);
-                    else adjustVolume(distY * 0.005f);
+                    if (e1.getX() < screenW / 2f) adjustBrightness(dY * 0.005f);
+                    else adjustVolume(dY * 0.005f);
                     return true;
                 }
                 @Override
@@ -200,7 +197,6 @@ public class PlayerActivity extends AppCompatActivity {
                     return true;
                 }
             });
-
         videoLayout.setOnTouchListener((v, event) -> {
             gestureDetector.onTouchEvent(event);
             if (event.getAction() == MotionEvent.ACTION_UP && !isLocked) toggleControls();
@@ -212,7 +208,7 @@ public class PlayerActivity extends AppCompatActivity {
         WindowManager.LayoutParams p = getWindow().getAttributes();
         p.screenBrightness = Math.max(0.01f, Math.min(1.0f, p.screenBrightness + delta));
         getWindow().setAttributes(p);
-        Toast.makeText(this, "Sáng: " + (int)(p.screenBrightness * 100) + "%", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Sang: " + (int)(p.screenBrightness * 100) + "%", Toast.LENGTH_SHORT).show();
     }
 
     private void adjustVolume(float delta) {
@@ -227,7 +223,6 @@ public class PlayerActivity extends AppCompatActivity {
     private void setupVLC() {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         audioSessionId = am.generateAudioSessionId();
-
         ArrayList<String> options = new ArrayList<>();
         options.add("--clock-jitter=0");
         options.add("--clock-synchro=0");
@@ -235,15 +230,12 @@ public class PlayerActivity extends AppCompatActivity {
         options.add("--network-caching=1500");
         options.add("--aout=android_audiotrack");
         options.add("--audiotrack-session-id=" + audioSessionId);
-
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
-
         try {
             equalizer = new Equalizer(0, audioSessionId);
             equalizer.setEnabled(true);
         } catch (Exception ignored) {}
-
         mediaPlayer.setEventListener(event -> {
             switch (event.type) {
                 case MediaPlayer.Event.Playing:
@@ -291,11 +283,11 @@ public class PlayerActivity extends AppCompatActivity {
                     if (resumePos > 0) {
                         handler.postDelayed(() -> {
                             mediaPlayer.setTime(resumePos);
-                            Toast.makeText(this, "Tiếp tục từ " + formatTime(resumePos), Toast.LENGTH_SHORT).show();
+                            Toast.makeText(this, "Tiep tuc tu " + formatTime(resumePos), Toast.LENGTH_SHORT).show();
                         }, 1000);
                     }
                 } catch (Exception e) {
-                    Toast.makeText(this, "Lỗi: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 }
             });
         });
@@ -318,17 +310,17 @@ public class PlayerActivity extends AppCompatActivity {
         EditText input = new EditText(this);
         input.setText("Bookmark " + formatTime(pos));
         new AlertDialog.Builder(this)
-            .setTitle("Đánh dấu thời điểm")
+            .setTitle("Danh dau thoi diem")
             .setView(input)
-            .setPositiveButton("Lưu", (d, w) -> {
+            .setPositiveButton("Luu", (d, w) -> {
                 String label = input.getText().toString().trim();
                 if (label.isEmpty()) label = "Bookmark " + formatTime(pos);
                 final String fl = label;
                 dbExecutor.execute(() -> AppDatabase.get(this).dao().insertBookmark(
                     new BookmarkItem(uriString, videoTitle != null ? videoTitle : "Video", pos, fl)));
-                Toast.makeText(this, "Đã đánh dấu: " + fl, Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Da danh dau: " + fl, Toast.LENGTH_SHORT).show();
             })
-            .setNegativeButton("Hủy", null).show();
+            .setNegativeButton("Huy", null).show();
     }
 
     private void showSpeedDialog() {
@@ -337,7 +329,7 @@ public class PlayerActivity extends AppCompatActivity {
         int cur = 3;
         for (int i = 0; i < vals.length; i++) if (Math.abs(vals[i]-playbackSpeed)<0.01f) { cur=i; break; }
         new AlertDialog.Builder(this)
-            .setTitle("Tốc độ phát")
+            .setTitle("Toc do phat")
             .setSingleChoiceItems(speeds, cur, (d, w) -> {
                 playbackSpeed = vals[w];
                 if (mediaPlayer != null) mediaPlayer.setRate(playbackSpeed);
@@ -347,16 +339,15 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void showEqualizerDialog() {
-        if (equalizer == null) { Toast.makeText(this, "EQ không khả dụng", Toast.LENGTH_SHORT).show(); return; }
+        if (equalizer == null) { Toast.makeText(this, "EQ khong kha dung", Toast.LENGTH_SHORT).show(); return; }
         short presets = equalizer.getNumberOfPresets();
         String[] names = new String[presets + 1];
-        names[0] = "Mặc định";
+        names[0] = "Mac dinh";
         for (short i = 0; i < presets; i++) names[i+1] = equalizer.getPresetName(i);
         new AlertDialog.Builder(this)
             .setTitle("Equalizer")
             .setItems(names, (d, w) -> {
                 if (w > 0) equalizer.usePreset((short)(w-1));
-                else { equalizer.setEnabled(false); equalizer.setEnabled(true); }
                 Toast.makeText(this, names[w], Toast.LENGTH_SHORT).show();
             }).show();
     }
@@ -367,7 +358,7 @@ public class PlayerActivity extends AppCompatActivity {
                 enterPictureInPictureMode(new PictureInPictureParams.Builder()
                     .setAspectRatio(new Rational(16, 9)).build());
             } catch (Exception e) {
-                Toast.makeText(this, "PiP không khả dụng", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "PiP khong kha dung", Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -378,27 +369,27 @@ public class PlayerActivity extends AppCompatActivity {
             controlsOverlay.setVisibility(View.GONE);
             lockOverlay.setVisibility(View.VISIBLE);
             handler.removeCallbacks(hideControls);
-            Toast.makeText(this, "Màn hình đã khóa", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Man hinh da khoa", Toast.LENGTH_SHORT).show();
         } else {
             lockOverlay.setVisibility(View.GONE);
             controlsOverlay.setVisibility(View.VISIBLE);
             controlsOverlay.setAlpha(1f);
             controlsVisible = true;
             scheduleHideControls();
-            Toast.makeText(this, "Đã mở khóa", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Da mo khoa", Toast.LENGTH_SHORT).show();
         }
     }
 
-    // ==================== DỊCH AI ====================
+    // ========== DICH AI ==========
 
     private void showTranslateDialog() {
         TranslationManager tm = new TranslationManager(this);
         String[] opts = {
-            "Dịch subtitle từ URL",
-            "Đổi ngôn ngữ dịch (hiện tại: " + tm.getTargetLanguageName() + ")"
+            "Dich subtitle tu URL",
+            "Doi ngon ngu (hien tai: " + tm.getTargetLanguageName() + ")"
         };
         new AlertDialog.Builder(this)
-            .setTitle("Dịch AI")
+            .setTitle("Dich AI")
             .setItems(opts, (d, which) -> {
                 if (which == 0) showSrtUrlInput();
                 else showChangeLangDialog();
@@ -417,13 +408,13 @@ public class PlayerActivity extends AppCompatActivity {
         }
         final int[] sel = {curIdx};
         new AlertDialog.Builder(this)
-            .setTitle("Chọn ngôn ngữ dịch")
+            .setTitle("Chon ngon ngu dich")
             .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
-            .setPositiveButton("Lưu", (d, w) -> {
+            .setPositiveButton("Luu", (d, w) -> {
                 tm.setTargetLanguage(langs[sel[0]][1]);
-                Toast.makeText(this, "Đã chọn: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Da chon: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
             })
-            .setNegativeButton("Hủy", null).show();
+            .setNegativeButton("Huy", null).show();
     }
 
     private void showSrtUrlInput() {
@@ -432,16 +423,16 @@ public class PlayerActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
             .setTitle("URL file SRT")
             .setView(input)
-            .setPositiveButton("Dịch", (d, w) -> {
+            .setPositiveButton("Dich", (d, w) -> {
                 String url = input.getText().toString().trim();
                 if (!url.isEmpty()) startSrtDownloadAndTranslate(url);
             })
-            .setNegativeButton("Hủy", null).show();
+            .setNegativeButton("Huy", null).show();
     }
 
     private void startSrtDownloadAndTranslate(String url) {
         ProgressDialog pd = new ProgressDialog(this);
-        pd.setMessage("Đang tải subtitle...");
+        pd.setMessage("Dang tai subtitle...");
         pd.setCancelable(false);
         pd.show();
 
@@ -456,31 +447,33 @@ public class PlayerActivity extends AppCompatActivity {
                     sb.append(ln).append("\n");
                 }
                 br.close();
-                String srt = sb.toString();
+                final String srt = sb.toString();
+
+                runOnUiThread(() -> pd.setMessage("Dang dich..."));
 
                 TranslationManager tm = new TranslationManager(this);
-                runOnUiThread(() -> pd.setMessage("Đang dịch..."));
-
                 tm.translateSrt(srt, "auto",
-                    prog -> runOnUiThread(() -> pd.setMessage(prog)),
+                    msg -> runOnUiThread(() -> pd.setMessage(msg)),
                     new TranslationManager.TranslateCallback() {
+                        @Override
                         public void onSuccess(String translated) {
                             runOnUiThread(() -> {
                                 pd.dismiss();
                                 saveSrtAndLoad(translated);
                             });
                         }
-                        public void onError(String err) {
+                        @Override
+                        public void onError(String error) {
                             runOnUiThread(() -> {
                                 pd.dismiss();
-                                Toast.makeText(PlayerActivity.this, err, Toast.LENGTH_SHORT).show();
+                                Toast.makeText(PlayerActivity.this, error, Toast.LENGTH_SHORT).show();
                             });
                         }
                     });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     pd.dismiss();
-                    Toast.makeText(this, "Lỗi: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Loi tai: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                 });
             }
         }).start();
@@ -494,13 +487,13 @@ public class PlayerActivity extends AppCompatActivity {
             fw.close();
             if (mediaPlayer != null)
                 mediaPlayer.addSlave(Media.Slave.Type.Subtitle, Uri.fromFile(f).toString(), true);
-            Toast.makeText(this, "Đã dịch và load subtitle!", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Da dich va load subtitle!", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Toast.makeText(this, "Lỗi lưu: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Loi luu: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
-    // ==================== UTILS ====================
+    // ========== UTILS ==========
 
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
@@ -514,7 +507,7 @@ public class PlayerActivity extends AppCompatActivity {
     private void cycleAspectRatio() {
         scaleMode = (scaleMode + 1) % 3;
         applyScaleMode();
-        String[] labels = {"Vừa màn hình", "Lấp đầy", "Kéo dãn"};
+        String[] labels = {"Vua man hinh", "Lap day", "Keo dan"};
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 

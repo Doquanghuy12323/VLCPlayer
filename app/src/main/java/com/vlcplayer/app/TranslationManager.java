@@ -1,7 +1,6 @@
 package com.vlcplayer.app;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -25,27 +24,26 @@ public class TranslationManager {
     private final ExecutorService executor = Executors.newFixedThreadPool(3);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    // Danh sách ngôn ngữ hỗ trợ
     public static final String[][] LANGUAGES = {
-        {"Tiếng Việt",      "vi"},
+        {"Tieng Viet",       "vi"},
         {"English",          "en"},
-        {"中文 (Chinese)",   "zh"},
-        {"日本語 (Japanese)","ja"},
-        {"한국어 (Korean)",  "ko"},
-        {"Français",         "fr"},
-        {"Español",          "es"},
+        {"Chinese",          "zh"},
+        {"Japanese",         "ja"},
+        {"Korean",           "ko"},
+        {"Francais",         "fr"},
+        {"Espanol",          "es"},
         {"Deutsch",          "de"},
-        {"Português",        "pt"},
-        {"Русский",          "ru"},
-        {"العربية",          "ar"},
-        {"हिन्दी",           "hi"},
+        {"Portugues",        "pt"},
+        {"Russian",          "ru"},
+        {"Arabic",           "ar"},
+        {"Hindi",            "hi"},
         {"Italiano",         "it"},
-        {"ภาษาไทย",         "th"},
-        {"Bahasa Indonesia", "id"},
+        {"Thai",             "th"},
+        {"Indonesian",       "id"},
     };
 
     public interface TranslateCallback {
-        void onSuccess(String translated);
+        void onSuccess(String result);
         void onError(String error);
     }
 
@@ -73,7 +71,7 @@ public class TranslationManager {
 
     public void translate(String text, String sourceLang, TranslateCallback callback) {
         if (text == null || text.trim().isEmpty()) {
-            callback.onError("Văn bản trống");
+            callback.onError("Van ban trong");
             return;
         }
         String targetLang = getTargetLanguage();
@@ -81,115 +79,83 @@ public class TranslationManager {
             callback.onSuccess(text);
             return;
         }
-
         executor.execute(() -> {
             try {
                 String encoded = URLEncoder.encode(text, "UTF-8");
                 String langPair = sourceLang + "|" + targetLang;
                 String urlStr = API_URL + "?q=" + encoded + "&langpair=" + langPair;
-
                 HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(8000);
                 conn.setReadTimeout(8000);
-
-                BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream()));
+                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
                 br.close();
-
                 JSONObject json = new JSONObject(sb.toString());
-                int status = json.getInt("responseStatus");
-                if (status == 200) {
-                    String translated = json.getJSONObject("responseData")
-                        .getString("translatedText");
+                if (json.getInt("responseStatus") == 200) {
+                    String translated = json.getJSONObject("responseData").getString("translatedText");
                     mainHandler.post(() -> callback.onSuccess(translated));
                 } else {
-                    mainHandler.post(() -> callback.onError("Lỗi dịch: " + status));
+                    mainHandler.post(() -> callback.onError("Loi dich: " + json.getInt("responseStatus")));
                 }
             } catch (Exception e) {
-                mainHandler.post(() -> callback.onError("Lỗi: " + e.getMessage()));
+                mainHandler.post(() -> callback.onError("Loi: " + e.getMessage()));
             }
         });
     }
 
-    // Dịch file SRT
     public void translateSrt(String srtContent, String sourceLang,
-            TranslateCallback progressCallback, TranslateCallback doneCallback) {
+            ProgressCallback progressCallback, TranslateCallback doneCallback) {
         executor.execute(() -> {
             try {
                 String[] blocks = srtContent.split("\n\n");
                 StringBuilder result = new StringBuilder();
                 int total = blocks.length;
-
                 for (int i = 0; i < blocks.length; i++) {
                     String block = blocks[i].trim();
                     if (block.isEmpty()) continue;
-
                     String[] lines = block.split("\n");
                     if (lines.length < 3) {
                         result.append(block).append("\n\n");
                         continue;
                     }
-
-                    // Giữ nguyên số thứ tự và timestamp
-                    String index     = lines[0];
+                    String index = lines[0];
                     String timestamp = lines[1];
-
-                    // Ghép các dòng text
                     StringBuilder textBuilder = new StringBuilder();
                     for (int j = 2; j < lines.length; j++) {
                         if (j > 2) textBuilder.append(" ");
-                        // Loại bỏ thẻ HTML như <i>, <b>
-                        textBuilder.append(lines[j]
-                            .replaceAll("<[^>]+>", "")
-                            .trim());
+                        textBuilder.append(lines[j].replaceAll("<[^>]+>", "").trim());
                     }
                     String text = textBuilder.toString().trim();
-
-                    // Dịch text
                     String encoded = URLEncoder.encode(text, "UTF-8");
-                    String langPair = URLEncoder.encode(sourceLang + "|" + getTargetLanguage(), "UTF-8");
+                    String langPair = sourceLang + "|" + getTargetLanguage();
                     String urlStr = API_URL + "?q=" + encoded + "&langpair=" + langPair;
-
                     HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
                     conn.setConnectTimeout(8000);
                     conn.setReadTimeout(8000);
-
-                    BufferedReader br = new BufferedReader(
-                        new InputStreamReader(conn.getInputStream()));
+                    BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                     StringBuilder sb = new StringBuilder();
                     String line;
                     while ((line = br.readLine()) != null) sb.append(line);
                     br.close();
-
                     JSONObject json = new JSONObject(sb.toString());
                     String translated = text;
                     if (json.getInt("responseStatus") == 200) {
-                        translated = json.getJSONObject("responseData")
-                            .getString("translatedText");
+                        translated = json.getJSONObject("responseData").getString("translatedText");
                     }
-
                     result.append(index).append("\n")
                           .append(timestamp).append("\n")
                           .append(translated).append("\n\n");
-
-                    // Thông báo tiến độ
                     final int progress = (int)((i + 1) * 100.0 / total);
-                    mainHandler.post(() ->
-                        progressCallback.onSuccess("Đang dịch: " + progress + "%"));
-
-                    // Tránh rate limit
+                    mainHandler.post(() -> progressCallback.onProgress("Dang dich: " + progress + "%"));
                     Thread.sleep(200);
                 }
-
                 final String finalSrt = result.toString();
                 mainHandler.post(() -> doneCallback.onSuccess(finalSrt));
-
             } catch (Exception e) {
-                mainHandler.post(() -> doneCallback.onError("Lỗi dịch SRT: " + e.getMessage()));
+                mainHandler.post(() -> doneCallback.onError("Loi dich SRT: " + e.getMessage()));
             }
         });
     }
