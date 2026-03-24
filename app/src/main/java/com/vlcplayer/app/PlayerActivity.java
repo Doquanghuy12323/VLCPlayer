@@ -111,17 +111,11 @@ public class PlayerActivity extends AppCompatActivity {
         hideSystemUI();
         setContentView(R.layout.activity_player);
 
-        // Lay kich thuoc man hinh chinh xac nhat
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            android.graphics.Rect bounds = getWindowManager().getCurrentWindowMetrics().getBounds();
-            screenW = bounds.width();
-            screenH = bounds.height();
-        } else {
-            DisplayMetrics dm = new DisplayMetrics();
-            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-            screenW = dm.widthPixels;
-            screenH = dm.heightPixels;
-        }
+        DisplayMetrics dm = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+        // Dam bao W > H (landscape)
+        screenW = Math.max(dm.widthPixels, dm.heightPixels);
+        screenH = Math.min(dm.widthPixels, dm.heightPixels);
 
         uriString  = getIntent().getStringExtra(EXTRA_URI);
         videoTitle = getIntent().getStringExtra(EXTRA_TITLE);
@@ -513,20 +507,19 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
-        try {
-            org.videolan.libvlc.interfaces.IVLCVout vout = mediaPlayer.getVLCVout();
-            vout.setWindowSize(screenW, screenH);
-        } catch (Exception ignored) {}
         switch (scaleMode) {
             case 0:
+                // Fit - giu ty le goc, co vien den
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(0);
                 break;
             case 1:
+                // Fill - buoc fill toan man hinh landscape
                 mediaPlayer.setAspectRatio(screenW + ":" + screenH);
                 mediaPlayer.setScale(0);
                 break;
             case 2:
+                // Zoom crop
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(1);
                 break;
