@@ -78,6 +78,12 @@
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_lock_lock"
                 android:tint="#FFFFFF" android:contentDescription="lock"/>
+
+            <ImageButton android:id="@+id/btn_translate"
+                android:layout_width="36dp" android:layout_height="36dp"
+                android:background="?selectableItemBackgroundBorderless"
+                android:src="@android:drawable/ic_menu_edit"
+                android:tint="#FFFFFF" android:contentDescription="translate"/>
         </LinearLayout>
 
         <!-- Center controls -->
