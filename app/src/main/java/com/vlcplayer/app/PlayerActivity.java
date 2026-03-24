@@ -71,7 +71,7 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean userSeeking = false;
     private boolean waveletSent = false;
     private int audioSessionId = AudioEffect.ERROR_BAD_VALUE;
-    private int scaleMode = 0;
+    private int scaleMode = 1;
     private int screenW, screenH;
     private float playbackSpeed = 1.0f;
 

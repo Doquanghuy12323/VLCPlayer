@@ -16,7 +16,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:background="#88000000">
+        android:background="#66000000">
 
         <!-- Top bar -->
         <LinearLayout
@@ -24,7 +24,7 @@
             android:layout_height="52dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingHorizontal="8dp">
+            android:paddingHorizontal="4dp">
 
             <ImageButton android:id="@+id/btn_back"
                 android:layout_width="40dp" android:layout_height="40dp"
@@ -41,7 +41,7 @@
             <TextView android:id="@+id/tv_speed"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="1.0x" android:textColor="#FFFFFF" android:textSize="12sp"
-                android:paddingHorizontal="4dp"/>
+                android:paddingHorizontal="2dp"/>
 
             <ImageButton android:id="@+id/btn_speed"
                 android:layout_width="36dp" android:layout_height="36dp"
@@ -73,12 +73,6 @@
                 android:src="@android:drawable/ic_menu_zoom"
                 android:tint="#FFFFFF" android:contentDescription="aspect"/>
 
-            <ImageButton android:id="@+id/btn_translate"
-                android:layout_width="36dp" android:layout_height="36dp"
-                android:background="?selectableItemBackgroundBorderless"
-                android:src="@android:drawable/ic_menu_compass"
-                android:tint="#FFFFFF" android:contentDescription="translate"/>
-
             <ImageButton android:id="@+id/btn_lock"
                 android:layout_width="36dp" android:layout_height="36dp"
                 android:background="?selectableItemBackgroundBorderless"
@@ -89,7 +83,7 @@
                 android:layout_width="36dp" android:layout_height="36dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_edit"
-                android:tint="#FFFFFF" android:contentDescription="translate"/>
+                android:tint="#E94560" android:contentDescription="translate"/>
         </LinearLayout>
 
         <!-- Center controls -->
@@ -147,25 +141,31 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Lock overlay - chỉ hiện khi locked -->
-    <LinearLayout
+    <!-- Lock overlay -->
+    <FrameLayout
         android:id="@+id/lock_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:gravity="end|bottom"
-        android:padding="16dp"
         android:visibility="gone">
 
-        <ImageButton android:id="@+id/btn_unlock"
-            android:layout_width="48dp" android:layout_height="48dp"
-            android:background="@drawable/circle_button_bg"
-            android:src="@android:drawable/ic_lock_lock"
-            android:tint="#FFFFFF" android:contentDescription="unlock"/>
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end|center_vertical"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:padding="16dp">
 
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="Giữ để mở khóa" android:textColor="#88FFFFFF"
-            android:textSize="10sp" android:layout_gravity="center_horizontal"/>
-    </LinearLayout>
+            <ImageButton android:id="@+id/btn_unlock"
+                android:layout_width="48dp" android:layout_height="48dp"
+                android:background="@drawable/circle_button_bg"
+                android:src="@android:drawable/ic_lock_lock"
+                android:tint="#FFFFFF" android:contentDescription="unlock"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Mo khoa" android:textColor="#AAFFFFFF"
+                android:textSize="10sp" android:layout_marginTop="4dp"/>
+        </LinearLayout>
+    </FrameLayout>
 
 </FrameLayout>
