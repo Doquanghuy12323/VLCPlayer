@@ -509,17 +509,18 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
             case 0:
-                // Fit - giu ty le goc, co vien den
+                // Fit - giu nguyen ti le, co the co vien den
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(0);
                 break;
             case 1:
-                // Fill - buoc fill toan man hinh landscape
+                // Fill - lap day man hinh, cat vien den
+                // Dung aspectRatio chinh xac theo man hinh thuc te
                 mediaPlayer.setAspectRatio(screenW + ":" + screenH);
                 mediaPlayer.setScale(0);
                 break;
             case 2:
-                // Zoom crop
+                // Zoom 100% - phong to that su
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(1);
                 break;
@@ -529,7 +530,7 @@ public class PlayerActivity extends AppCompatActivity {
     private void cycleAspectRatio() {
         scaleMode = (scaleMode + 1) % 3;
         applyScaleMode();
-        String[] labels = {"Vua man hinh", "Lap day", "Keo dan"};
+        String[] labels = {"Fit (giu ti le)", "Fill (lap day)", "Zoom 100%"};
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
