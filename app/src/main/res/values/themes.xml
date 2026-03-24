@@ -16,3 +16,5 @@
         <item name="android:statusBarColor">#00000000</item>
     </style>
 </resources>
+
+<!-- Them nay duoc dinh nghia o cuoi file, truoc the </resources> -->

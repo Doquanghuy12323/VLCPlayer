@@ -30,6 +30,7 @@
             android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape"
             android:supportsPictureInPicture="true"
+            android:windowSoftInputMode="adjustNothing"
             android:theme="@style/Theme.VLCPlayer.Fullscreen" />
 
         <provider
