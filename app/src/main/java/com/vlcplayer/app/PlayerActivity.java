@@ -257,6 +257,9 @@ public class PlayerActivity extends AppCompatActivity {
                 case MediaPlayer.Event.Paused:
                     runOnUiThread(() -> btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
                     break;
+                case MediaPlayer.Event.Vout:
+                    runOnUiThread(() -> handler.postDelayed(() -> applyScaleMode(), 100));
+                    break;
                 case MediaPlayer.Event.EndReached:
                     saveHistory();
                     runOnUiThread(this::finish);
@@ -507,16 +510,17 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
             case 0:
+                // Fit - giu nguyen ti le
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(0);
                 break;
             case 1:
-                // Fill: ep dung ti le man hinh, scale=0 de VLC tu crop
-                String ratio = screenW + ":" + screenH;
-                mediaPlayer.setAspectRatio(ratio);
+                // Fill - lap day man hinh khong vien den
+                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
                 mediaPlayer.setScale(0);
                 break;
             case 2:
+                // Zoom
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(1);
                 break;
