@@ -49,7 +49,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-public class PlayerActivity extends AppCompatActivity {
+public class PlayerActivity extends AppCompatActivity
+        implements org.videolan.libvlc.interfaces.IVLCVout.OnNewVideoLayoutListener {
 
     public static final String EXTRA_URI   = "extra_uri";
     public static final String EXTRA_TITLE = "extra_title";
@@ -261,6 +262,7 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
         mediaPlayer.attachViews(videoLayout, null, false, false);
+        mediaPlayer.getVLCVout().addCallback(this);
         // Thong bao kich thuoc surface cho VLC
         videoLayout.post(() -> {
             org.videolan.libvlc.interfaces.IVLCVout vout = mediaPlayer.getVLCVout();
@@ -507,24 +509,22 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
-        switch (scaleMode) {
-            case 0:
-                // Fit - giu nguyen ti le, co the co vien den
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(0);
-                break;
-            case 1:
-                // Fill - lap day man hinh, cat vien den
-                // Dung aspectRatio chinh xac theo man hinh thuc te
-                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                mediaPlayer.setScale(0);
-                break;
-            case 2:
-                // Zoom 100% - phong to that su
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(1);
-                break;
-        }
+        new Thread(() -> {
+            switch (scaleMode) {
+                case 0:
+                    mediaPlayer.setAspectRatio(null);
+                    mediaPlayer.setScale(0);
+                    break;
+                case 1:
+                    mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                    mediaPlayer.setScale(0);
+                    break;
+                case 2:
+                    mediaPlayer.setAspectRatio(null);
+                    mediaPlayer.setScale(1);
+                    break;
+            }
+        }).start();
     }
 
     private void cycleAspectRatio() {
@@ -598,6 +598,33 @@ public class PlayerActivity extends AppCompatActivity {
             | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
     }
 
+    @Override
+    public void onNewVideoLayout(org.videolan.libvlc.interfaces.IVLCVout vlcVout,
+            int width, int height, int visibleWidth, int visibleHeight,
+            int sarNum, int sarDen) {
+        if (width * height == 0) return;
+        // Tinh aspect ratio chinh xac tu video thuc te
+        double videoAR = (double) width / height;
+        double screenAR = (double) screenW / screenH;
+        runOnUiThread(() -> {
+            if (scaleMode == 1) {
+                // Fill: crop sao cho day man hinh
+                if (videoAR >= screenAR) {
+                    mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                } else {
+                    mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                }
+                mediaPlayer.setScale(0);
+            } else if (scaleMode == 0) {
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(0);
+            } else {
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(1);
+            }
+        });
+    }
+
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) hideSystemUI();
@@ -620,6 +647,7 @@ public class PlayerActivity extends AppCompatActivity {
         broadcastAudioSessionClose();
         if (equalizer != null) equalizer.release();
         handler.removeCallbacksAndMessages(null);
+        mediaPlayer.getVLCVout().removeCallback(this);
         mediaPlayer.release();
         libVLC.release();
         closePfd();
