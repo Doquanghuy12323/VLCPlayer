@@ -267,6 +267,11 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
         mediaPlayer.attachViews(videoLayout, null, false, false);
+        // Thong bao kich thuoc surface cho VLC
+        videoLayout.post(() -> {
+            org.videolan.libvlc.interfaces.IVLCVout vout = mediaPlayer.getVLCVout();
+            vout.setWindowSize(videoLayout.getWidth(), videoLayout.getHeight());
+        });
     }
 
     private void playMedia(String uriString) {
@@ -508,19 +513,20 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
+        try {
+            org.videolan.libvlc.interfaces.IVLCVout vout = mediaPlayer.getVLCVout();
+            vout.setWindowSize(screenW, screenH);
+        } catch (Exception ignored) {}
         switch (scaleMode) {
             case 0:
-                // Fit - giu nguyen ti le
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(0);
                 break;
             case 1:
-                // Fill - lap day man hinh khong vien den
                 mediaPlayer.setAspectRatio(screenW + ":" + screenH);
                 mediaPlayer.setScale(0);
                 break;
             case 2:
-                // Zoom
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(1);
                 break;
