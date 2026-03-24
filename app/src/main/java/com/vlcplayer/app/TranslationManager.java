@@ -94,11 +94,11 @@ public class TranslationManager {
                 while ((line = br.readLine()) != null) sb.append(line);
                 br.close();
                 JSONObject json = new JSONObject(sb.toString());
-                if (json.getInt("responseStatus") == 200) {
+                if (json.optInt("responseStatus", 0) == 200) {
                     String translated = json.getJSONObject("responseData").getString("translatedText");
                     mainHandler.post(() -> callback.onSuccess(translated));
                 } else {
-                    mainHandler.post(() -> callback.onError("Loi dich: " + json.getInt("responseStatus")));
+                    mainHandler.post(() -> callback.onError("Loi dich: " + json.optInt("responseStatus", 0)));
                 }
             } catch (Exception e) {
                 mainHandler.post(() -> callback.onError("Loi: " + e.getMessage()));
@@ -142,7 +142,7 @@ public class TranslationManager {
                     br.close();
                     JSONObject json = new JSONObject(sb.toString());
                     String translated = text;
-                    if (json.getInt("responseStatus") == 200) {
+                    if (json.optInt("responseStatus", 0) == 200) {
                         translated = json.getJSONObject("responseData").getString("translatedText");
                     }
                     result.append(index).append("\n")
