@@ -111,10 +111,17 @@ public class PlayerActivity extends AppCompatActivity {
         hideSystemUI();
         setContentView(R.layout.activity_player);
 
-        DisplayMetrics dm = new DisplayMetrics();
-        getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-        screenW = dm.widthPixels;
-        screenH = dm.heightPixels;
+        // Lay kich thuoc man hinh chinh xac nhat
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            android.graphics.Rect bounds = getWindowManager().getCurrentWindowMetrics().getBounds();
+            screenW = bounds.width();
+            screenH = bounds.height();
+        } else {
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            screenW = dm.widthPixels;
+            screenH = dm.heightPixels;
+        }
 
         uriString  = getIntent().getStringExtra(EXTRA_URI);
         videoTitle = getIntent().getStringExtra(EXTRA_TITLE);
@@ -500,19 +507,18 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
             case 0:
-                // Fit - giu ty le, co the co vien den
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(0);
                 break;
             case 1:
-                // Fill - lap day chuan xac bang ti le man hinh
-                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                mediaPlayer.setScale(1);
+                // Fill: ep dung ti le man hinh, scale=0 de VLC tu crop
+                String ratio = screenW + ":" + screenH;
+                mediaPlayer.setAspectRatio(ratio);
+                mediaPlayer.setScale(0);
                 break;
             case 2:
-                // Stretch - keo gian
-                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                mediaPlayer.setScale(0);
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(1);
                 break;
         }
     }
