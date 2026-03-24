@@ -507,30 +507,50 @@ public class PlayerActivity extends AppCompatActivity
 
     // ========== UTILS ==========
 
+    // Cac mode giong VLC goc
+    // 0 = BEST_FIT  : giu ti le, co the co vien den
+    // 1 = FILL      : lap day man hinh cat vien den (default)
+    // 2 = FIT_SCREEN: fit theo chieu rong hoac cao
+    // 3 = 16:9      : ep 16:9
+    // 4 = 4:3       : ep 4:3
+    // 5 = ORIGINAL  : kich thuoc goc
+    private static final int SCALE_COUNT = 6;
+
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
-        new Thread(() -> {
-            switch (scaleMode) {
-                case 0:
-                    mediaPlayer.setAspectRatio(null);
-                    mediaPlayer.setScale(0);
-                    break;
-                case 1:
-                    mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                    mediaPlayer.setScale(0);
-                    break;
-                case 2:
-                    mediaPlayer.setAspectRatio(null);
-                    mediaPlayer.setScale(1);
-                    break;
-            }
-        }).start();
+        switch (scaleMode) {
+            case 0: // BEST FIT - giu ti le goc
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(0);
+                break;
+            case 1: // FILL - lap day hoan toan, cat vien den
+                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                mediaPlayer.setScale(0);
+                break;
+            case 2: // FIT SCREEN - scale de lap day, giu ti le
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(1.0f);
+                break;
+            case 3: // 16:9
+                mediaPlayer.setAspectRatio("16:9");
+                mediaPlayer.setScale(0);
+                break;
+            case 4: // 4:3
+                mediaPlayer.setAspectRatio("4:3");
+                mediaPlayer.setScale(0);
+                break;
+            case 5: // ORIGINAL - kich thuoc goc video
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(1);
+                break;
+        }
     }
 
+
     private void cycleAspectRatio() {
-        scaleMode = (scaleMode + 1) % 3;
+        scaleMode = (scaleMode + 1) % SCALE_COUNT;
         applyScaleMode();
-        String[] labels = {"Fit (giu ti le)", "Fill (lap day)", "Zoom 100%"};
+        String[] labels = {"Best Fit", "Fill (lap day)", "Fit Screen", "16:9", "4:3", "Original"};
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
