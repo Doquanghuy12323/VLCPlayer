@@ -49,8 +49,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-public class PlayerActivity extends AppCompatActivity
-        implements org.videolan.libvlc.interfaces.IVLCVout.OnNewVideoLayoutListener {
+public class PlayerActivity extends AppCompatActivity {
 
     public static final String EXTRA_URI   = "extra_uri";
     public static final String EXTRA_TITLE = "extra_title";
@@ -107,28 +106,28 @@ public class PlayerActivity extends AppCompatActivity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
-            WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        hideSystemUI();
-        // Extend video vao ca vung navigation bar
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            getWindow().setDecorFitsSystemWindows(false);
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(
-                android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
-                | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
-        }
+
+        // Buoc 1: Set flags truoc setContentView
+        getWindow().addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            | WindowManager.LayoutParams.FLAG_FULLSCREEN
+            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+
+        // Buoc 2: Transparent navigation bar
+        getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+        getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+
+        // Buoc 3: Set layout
         setContentView(R.layout.activity_player);
 
+        // Buoc 4: Hide system UI sau setContentView
+        hideSystemUI();
+
+        // Lay kich thuoc man hinh thuc te
         DisplayMetrics dm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-        // Dam bao W > H (landscape)
-        screenW = Math.max(dm.widthPixels, dm.heightPixels);
-        screenH = Math.min(dm.widthPixels, dm.heightPixels);
+        screenW = dm.widthPixels;
+        screenH = dm.heightPixels;
 
         uriString  = getIntent().getStringExtra(EXTRA_URI);
         videoTitle = getIntent().getStringExtra(EXTRA_TITLE);
@@ -220,6 +219,7 @@ public class PlayerActivity extends AppCompatActivity
 
     private void adjustBrightness(float delta) {
         WindowManager.LayoutParams p = getWindow().getAttributes();
+        if (p.screenBrightness < 0) p.screenBrightness = 0.5f;
         p.screenBrightness = Math.max(0.01f, Math.min(1.0f, p.screenBrightness + delta));
         getWindow().setAttributes(p);
         Toast.makeText(this, "Sang: " + (int)(p.screenBrightness * 100) + "%", Toast.LENGTH_SHORT).show();
@@ -255,17 +255,14 @@ public class PlayerActivity extends AppCompatActivity
                 case MediaPlayer.Event.Playing:
                     runOnUiThread(() -> {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
-                        // Delay nho de dam bao VLC da san sang truoc khi set scale
-                        handler.postDelayed(() -> applyScaleMode(), 300);
+                        handler.postDelayed(() -> applyScaleMode(), 200);
                         scheduleHideControls();
                         if (!waveletSent) { broadcastAudioSessionOpen(); waveletSent = true; }
                     });
                     break;
                 case MediaPlayer.Event.Paused:
-                    runOnUiThread(() -> btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
-                    break;
-                case MediaPlayer.Event.Vout:
-                    runOnUiThread(() -> handler.postDelayed(() -> applyScaleMode(), 100));
+                    runOnUiThread(() ->
+                        btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
                     break;
                 case MediaPlayer.Event.EndReached:
                     saveHistory();
@@ -274,17 +271,46 @@ public class PlayerActivity extends AppCompatActivity
             }
         });
         mediaPlayer.attachViews(videoLayout, null, false, false);
-        // Thong bao kich thuoc surface cho VLC
-        videoLayout.post(() -> {
-            org.videolan.libvlc.interfaces.IVLCVout vout = mediaPlayer.getVLCVout();
-            vout.setWindowSize(videoLayout.getWidth(), videoLayout.getHeight());
-        });
+    }
+
+    private void applyScaleMode() {
+        if (mediaPlayer == null) return;
+        switch (scaleMode) {
+            case 0: // Best Fit
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(0);
+                break;
+            case 1: // Fill - zoom de lap day, cat vien den
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(1);
+                break;
+            case 2: // 16:9
+                mediaPlayer.setAspectRatio("16:9");
+                mediaPlayer.setScale(0);
+                break;
+            case 3: // 4:3
+                mediaPlayer.setAspectRatio("4:3");
+                mediaPlayer.setScale(0);
+                break;
+            case 4: // Stretch
+                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                mediaPlayer.setScale(0);
+                break;
+        }
+    }
+
+    private void cycleAspectRatio() {
+        scaleMode = (scaleMode + 1) % 5;
+        applyScaleMode();
+        String[] labels = {"Best Fit", "Fill", "16:9", "4:3", "Stretch"};
+        Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
     private void playMedia(String uriString) {
         dbExecutor.execute(() -> {
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uriString);
-            final long resumePos = (history != null && history.lastPosition > 5000) ? history.lastPosition : 0;
+            final long resumePos = (history != null && history.lastPosition > 5000)
+                ? history.lastPosition : 0;
             runOnUiThread(() -> {
                 try {
                     Uri uri = Uri.parse(uriString);
@@ -306,7 +332,8 @@ public class PlayerActivity extends AppCompatActivity
                     if (resumePos > 0) {
                         handler.postDelayed(() -> {
                             mediaPlayer.setTime(resumePos);
-                            Toast.makeText(this, "Tiep tuc tu " + formatTime(resumePos), Toast.LENGTH_SHORT).show();
+                            Toast.makeText(this, "Tiep tuc tu " + formatTime(resumePos),
+                                Toast.LENGTH_SHORT).show();
                         }, 1000);
                     }
                 } catch (Exception e) {
@@ -323,7 +350,8 @@ public class PlayerActivity extends AppCompatActivity
         dbExecutor.execute(() -> {
             AppDatabase.get(this).dao().deleteHistory(uriString);
             AppDatabase.get(this).dao().insertHistory(
-                new HistoryItem(uriString, videoTitle != null ? videoTitle : "Video", pos, dur));
+                new HistoryItem(uriString,
+                    videoTitle != null ? videoTitle : "Video", pos, dur));
         });
     }
 
@@ -340,7 +368,8 @@ public class PlayerActivity extends AppCompatActivity
                 if (label.isEmpty()) label = "Bookmark " + formatTime(pos);
                 final String fl = label;
                 dbExecutor.execute(() -> AppDatabase.get(this).dao().insertBookmark(
-                    new BookmarkItem(uriString, videoTitle != null ? videoTitle : "Video", pos, fl)));
+                    new BookmarkItem(uriString,
+                        videoTitle != null ? videoTitle : "Video", pos, fl)));
                 Toast.makeText(this, "Da danh dau: " + fl, Toast.LENGTH_SHORT).show();
             })
             .setNegativeButton("Huy", null).show();
@@ -350,7 +379,8 @@ public class PlayerActivity extends AppCompatActivity
         String[] speeds = {"0.25x","0.5x","0.75x","1.0x","1.25x","1.5x","1.75x","2.0x"};
         float[] vals = {0.25f,0.5f,0.75f,1.0f,1.25f,1.5f,1.75f,2.0f};
         int cur = 3;
-        for (int i = 0; i < vals.length; i++) if (Math.abs(vals[i]-playbackSpeed)<0.01f) { cur=i; break; }
+        for (int i = 0; i < vals.length; i++)
+            if (Math.abs(vals[i]-playbackSpeed) < 0.01f) { cur = i; break; }
         new AlertDialog.Builder(this)
             .setTitle("Toc do phat")
             .setSingleChoiceItems(speeds, cur, (d, w) -> {
@@ -362,7 +392,10 @@ public class PlayerActivity extends AppCompatActivity
     }
 
     private void showEqualizerDialog() {
-        if (equalizer == null) { Toast.makeText(this, "EQ khong kha dung", Toast.LENGTH_SHORT).show(); return; }
+        if (equalizer == null) {
+            Toast.makeText(this, "EQ khong kha dung", Toast.LENGTH_SHORT).show();
+            return;
+        }
         short presets = equalizer.getNumberOfPresets();
         String[] names = new String[presets + 1];
         names[0] = "Mac dinh";
@@ -403,8 +436,6 @@ public class PlayerActivity extends AppCompatActivity
         }
     }
 
-    // ========== DICH AI ==========
-
     private void showTranslateDialog() {
         TranslationManager tm = new TranslationManager(this);
         String[] opts = {
@@ -435,7 +466,8 @@ public class PlayerActivity extends AppCompatActivity
             .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
             .setPositiveButton("Luu", (d, w) -> {
                 tm.setTargetLanguage(langs[sel[0]][1]);
-                Toast.makeText(this, "Da chon: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Da chon: " + langs[sel[0]][0],
+                    Toast.LENGTH_SHORT).show();
             })
             .setNegativeButton("Huy", null).show();
     }
@@ -458,45 +490,38 @@ public class PlayerActivity extends AppCompatActivity
         pd.setMessage("Dang tai subtitle...");
         pd.setCancelable(false);
         pd.show();
-
         new Thread(() -> {
             try {
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
                 conn.setConnectTimeout(10000);
-                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                BufferedReader br = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String ln;
-                while ((ln = br.readLine()) != null) {
-                    sb.append(ln).append("\n");
-                }
+                while ((ln = br.readLine()) != null) sb.append(ln).append("\n");
                 br.close();
                 final String srt = sb.toString();
-
                 runOnUiThread(() -> pd.setMessage("Dang dich..."));
-
                 TranslationManager tm = new TranslationManager(this);
                 tm.translateSrt(srt, "auto",
                     msg -> runOnUiThread(() -> pd.setMessage(msg)),
                     new TranslationManager.TranslateCallback() {
-                        @Override
-                        public void onSuccess(String translated) {
-                            runOnUiThread(() -> {
-                                pd.dismiss();
-                                saveSrtAndLoad(translated);
-                            });
+                        @Override public void onSuccess(String t) {
+                            runOnUiThread(() -> { pd.dismiss(); saveSrtAndLoad(t); });
                         }
-                        @Override
-                        public void onError(String error) {
+                        @Override public void onError(String e) {
                             runOnUiThread(() -> {
                                 pd.dismiss();
-                                Toast.makeText(PlayerActivity.this, error, Toast.LENGTH_SHORT).show();
+                                Toast.makeText(PlayerActivity.this, e,
+                                    Toast.LENGTH_SHORT).show();
                             });
                         }
                     });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     pd.dismiss();
-                    Toast.makeText(this, "Loi tai: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Loi tai: " + e.getMessage(),
+                        Toast.LENGTH_SHORT).show();
                 });
             }
         }).start();
@@ -509,61 +534,13 @@ public class PlayerActivity extends AppCompatActivity
             fw.write(srtContent);
             fw.close();
             if (mediaPlayer != null)
-                mediaPlayer.addSlave(Media.Slave.Type.Subtitle, Uri.fromFile(f).toString(), true);
+                mediaPlayer.addSlave(Media.Slave.Type.Subtitle,
+                    Uri.fromFile(f).toString(), true);
             Toast.makeText(this, "Da dich va load subtitle!", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Toast.makeText(this, "Loi luu: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Loi luu: " + e.getMessage(),
+                Toast.LENGTH_SHORT).show();
         }
-    }
-
-    // ========== UTILS ==========
-
-    // Cac mode giong VLC goc
-    // 0 = BEST_FIT  : giu ti le, co the co vien den
-    // 1 = FILL      : lap day man hinh cat vien den (default)
-    // 2 = FIT_SCREEN: fit theo chieu rong hoac cao
-    // 3 = 16:9      : ep 16:9
-    // 4 = 4:3       : ep 4:3
-    // 5 = ORIGINAL  : kich thuoc goc
-    private static final int SCALE_COUNT = 6;
-
-    private void applyScaleMode() {
-        if (mediaPlayer == null) return;
-        switch (scaleMode) {
-            case 0: // Best Fit - giu nguyen ti le
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(0);
-                break;
-            case 1: // Fill - DUNG setScale(1) de fill man hinh
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(1);
-                break;
-            case 2: // 16:9
-                mediaPlayer.setAspectRatio("16:9");
-                mediaPlayer.setScale(0);
-                break;
-            case 3: // 4:3
-                mediaPlayer.setAspectRatio("4:3");
-                mediaPlayer.setScale(0);
-                break;
-            case 4: // Stretch toan man hinh
-                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                mediaPlayer.setScale(0);
-                break;
-            case 5: // Original
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(0);
-                mediaPlayer.setScale(1);
-                break;
-        }
-    }
-
-
-    private void cycleAspectRatio() {
-        scaleMode = (scaleMode + 1) % 5;
-        applyScaleMode();
-        String[] labels = {"Best Fit", "Fill", "16:9", "4:3", "Stretch"};
-        Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
     private void togglePlayPause() {
@@ -624,51 +601,13 @@ public class PlayerActivity extends AppCompatActivity
     }
 
     private void hideSystemUI() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            getWindow().setDecorFitsSystemWindows(false);
-            android.view.WindowInsetsController controller =
-                getWindow().getInsetsController();
-            if (controller != null) {
-                controller.hide(android.view.WindowInsets.Type.systemBars());
-                controller.setSystemBarsBehavior(
-                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                | View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-        }
-    }
-
-    @Override
-    public void onNewVideoLayout(org.videolan.libvlc.interfaces.IVLCVout vlcVout,
-            int width, int height, int visibleWidth, int visibleHeight,
-            int sarNum, int sarDen) {
-        if (width * height == 0) return;
-        // Tinh aspect ratio chinh xac tu video thuc te
-        double videoAR = (double) width / height;
-        double screenAR = (double) screenW / screenH;
-        runOnUiThread(() -> {
-            if (scaleMode == 1) {
-                // Fill: crop sao cho day man hinh
-                if (videoAR >= screenAR) {
-                    mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                } else {
-                    mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                }
-                mediaPlayer.setScale(0);
-            } else if (scaleMode == 0) {
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(0);
-            } else {
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(1);
-            }
-        });
+        getWindow().getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            | View.SYSTEM_UI_FLAG_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
@@ -684,8 +623,10 @@ public class PlayerActivity extends AppCompatActivity
     @Override protected void onStop() {
         super.onStop();
         saveHistory();
-        mediaPlayer.stop();
-        mediaPlayer.detachViews();
+        if (mediaPlayer != null) {
+            mediaPlayer.stop();
+            mediaPlayer.detachViews();
+        }
     }
 
     @Override protected void onDestroy() {
@@ -693,8 +634,8 @@ public class PlayerActivity extends AppCompatActivity
         broadcastAudioSessionClose();
         if (equalizer != null) equalizer.release();
         handler.removeCallbacksAndMessages(null);
-        mediaPlayer.release();
-        libVLC.release();
+        if (mediaPlayer != null) mediaPlayer.release();
+        if (libVLC != null) libVLC.release();
         closePfd();
     }
 }
