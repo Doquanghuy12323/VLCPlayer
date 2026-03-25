@@ -10,11 +10,25 @@
         <item name="android:navigationBarColor">@color/bg_dark</item>
     </style>
 
-    <style name="Theme.VLCPlayer.Fullscreen" parent="Theme.VLCPlayer">
+    <style name="Theme.VLCPlayer.Fullscreen" parent="Theme.MaterialComponents.NoActionBar">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowContentOverlay">@null</item>
-        <item name="android:statusBarColor">#00000000</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:fitsSystemWindows">false</item>
     </style>
 </resources>
 
-<!-- Them nay duoc dinh nghia o cuoi file, truoc the </resources> -->
+<!-- Them nay duoc dinh nghia o cuoi file, truoc the 
+    <style name="Theme.VLCPlayer.Fullscreen" parent="Theme.MaterialComponents.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:fitsSystemWindows">false</item>
+    </style>
+</resources> -->

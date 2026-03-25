@@ -107,20 +107,13 @@ public class PlayerActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Buoc 1: Set flags truoc setContentView
+        // Set flags de video cover toan bo man hinh ke ca nav bar
         getWindow().addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             | WindowManager.LayoutParams.FLAG_FULLSCREEN
             | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
 
-        // Buoc 2: Transparent navigation bar
-        getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
-        getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
-
-        // Buoc 3: Set layout
         setContentView(R.layout.activity_player);
-
-        // Buoc 4: Hide system UI sau setContentView
         hideSystemUI();
 
         // Lay kich thuoc man hinh thuc te
