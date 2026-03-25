@@ -269,13 +269,14 @@ public class PlayerActivity extends AppCompatActivity {
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
-            case 0: // Best Fit
+            case 0: // Best Fit - giu ti le, co vien den
                 mediaPlayer.setAspectRatio(null);
                 mediaPlayer.setScale(0);
                 break;
-            case 1: // Fill - zoom de lap day, cat vien den
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(1);
+            case 1: // Fill - ep dung ti le man hinh, khong vien den
+                // Day la cach VLC goc dung de fill man hinh
+                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
+                mediaPlayer.setScale(0);
                 break;
             case 2: // 16:9
                 mediaPlayer.setAspectRatio("16:9");
@@ -285,9 +286,9 @@ public class PlayerActivity extends AppCompatActivity {
                 mediaPlayer.setAspectRatio("4:3");
                 mediaPlayer.setScale(0);
                 break;
-            case 4: // Stretch
-                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                mediaPlayer.setScale(0);
+            case 4: // Zoom - cat vien den giu ti le
+                mediaPlayer.setAspectRatio(null);
+                mediaPlayer.setScale(1);
                 break;
         }
     }
