@@ -6,6 +6,5 @@
     <item android:id="@+id/action_history" android:title="Lịch sử xem" app:showAsAction="never"/>
     <item android:id="@+id/action_privacy" android:title="Chế độ bảo mật" app:showAsAction="never"/>
     <item android:id="@+id/action_translate" android:title="Cài đặt dịch AI" app:showAsAction="never"/>
-    <item android:id="@+id/action_translate" android:title="Cai dat dich AI" app:showAsAction="never"/>
     <item android:id="@+id/action_update" android:title="Kiểm tra cập nhật" app:showAsAction="never"/>
 </menu>
