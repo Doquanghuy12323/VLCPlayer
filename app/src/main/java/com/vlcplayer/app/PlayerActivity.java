@@ -60,9 +60,20 @@ public class PlayerActivity extends AppCompatActivity {
     private ParcelFileDescriptor currentPfd;
     private Equalizer equalizer;
 
+    // Night mode overlay
+    private View nightOverlay;
+    private boolean nightMode = false;
+
+    // Video filters
+    private float filterBrightness = 1.0f; // 0.0 - 2.0
+    private float filterContrast   = 1.0f; // 0.0 - 2.0
+    private float filterSaturation = 1.0f; // 0.0 - 2.0
+    private float filterHue        = 0.0f; // -180 - 180
+    private boolean filtersEnabled = false;
+
     private SeekBar seekBar;
     private TextView tvCurrent, tvTotal, tvTitle, tvSpeed;
-    private ImageButton btnPlayPause;
+    private ImageButton btnPlayPause, btnNext, btnPrev, btnShuffle, btnRepeat;
     private View controlsOverlay, lockOverlay;
     private boolean isLocked = false;
 
@@ -106,17 +117,13 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // Set flags de video cover toan bo man hinh ke ca nav bar
         getWindow().addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             | WindowManager.LayoutParams.FLAG_FULLSCREEN
             | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
-
         setContentView(R.layout.activity_player);
         hideSystemUI();
 
-        // Lay kich thuoc man hinh thuc te
         DisplayMetrics dm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(dm);
         screenW = dm.widthPixels;
@@ -132,33 +139,87 @@ public class PlayerActivity extends AppCompatActivity {
         tvTitle         = findViewById(R.id.tv_title);
         tvSpeed         = findViewById(R.id.tv_speed);
         btnPlayPause    = findViewById(R.id.btn_play_pause);
+        btnNext         = findViewById(R.id.btn_next);
+        btnPrev         = findViewById(R.id.btn_prev);
+        btnShuffle      = findViewById(R.id.btn_shuffle);
+        btnRepeat       = findViewById(R.id.btn_repeat);
         controlsOverlay = findViewById(R.id.controls_overlay);
         lockOverlay     = findViewById(R.id.lock_overlay);
+        nightOverlay    = findViewById(R.id.night_overlay);
 
         tvTitle.setText(videoTitle != null ? videoTitle : "Video");
         tvSpeed.setText("1.0x");
 
+        updatePlaylistButtons();
         setupButtons();
         setupGestures();
         setupVLC();
 
-        if (uriString != null) playMedia(uriString);
-        else finish();
+        if (uriString != null) {
+            playMedia(uriString);
+            autoDetectAndApplyEQ(videoTitle);
+        } else finish();
 
         handler.post(updateSeekBar);
         scheduleHideControls();
+    }
+
+    private void updatePlaylistButtons() {
+        PlaylistManager pm = PlaylistManager.get();
+        if (btnNext != null)
+            btnNext.setAlpha(pm.hasNext() ? 1.0f : 0.4f);
+        if (btnPrev != null)
+            btnPrev.setAlpha(pm.hasPrev() ? 1.0f : 0.4f);
+        if (btnShuffle != null)
+            btnShuffle.setAlpha(pm.isShuffle() ? 1.0f : 0.5f);
+        if (btnRepeat != null) {
+            switch (pm.getRepeatMode()) {
+                case NONE: btnRepeat.setAlpha(0.4f); break;
+                case ALL:  btnRepeat.setAlpha(1.0f); break;
+                case ONE:  btnRepeat.setAlpha(1.0f); break;
+            }
+        }
     }
 
     private void setupButtons() {
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
         btnPlayPause.setOnClickListener(v -> togglePlayPause());
         videoLayout.setOnClickListener(v -> { if (!isLocked) toggleControls(); });
+
         findViewById(R.id.btn_forward).setOnClickListener(v -> {
             if (mediaPlayer != null) mediaPlayer.setTime(mediaPlayer.getTime() + 10000);
         });
         findViewById(R.id.btn_rewind).setOnClickListener(v -> {
             if (mediaPlayer != null) mediaPlayer.setTime(Math.max(0, mediaPlayer.getTime() - 10000));
         });
+
+        // Playlist controls
+        btnNext.setOnClickListener(v -> playNext());
+        btnPrev.setOnClickListener(v -> playPrev());
+        btnShuffle.setOnClickListener(v -> {
+            PlaylistManager.get().toggleShuffle();
+            updatePlaylistButtons();
+            Toast.makeText(this,
+                PlaylistManager.get().isShuffle() ? "Shuffle: ON" : "Shuffle: OFF",
+                Toast.LENGTH_SHORT).show();
+        });
+        btnRepeat.setOnClickListener(v -> {
+            PlaylistManager.RepeatMode mode = PlaylistManager.get().cycleRepeat();
+            updatePlaylistButtons();
+            String[] labels = {"Repeat: OFF", "Repeat: ALL", "Repeat: ONE"};
+            Toast.makeText(this, labels[mode.ordinal()], Toast.LENGTH_SHORT).show();
+        });
+
+        // Queue button
+        findViewById(R.id.btn_queue).setOnClickListener(v -> showQueueDialog());
+
+        // Night mode
+        findViewById(R.id.btn_night).setOnClickListener(v -> toggleNightMode());
+
+        // Video filter
+        findViewById(R.id.btn_filter).setOnClickListener(v -> showFilterDialog());
+
+        // Other buttons
         findViewById(R.id.btn_aspect).setOnClickListener(v -> cycleAspectRatio());
         findViewById(R.id.btn_speed).setOnClickListener(v -> showSpeedDialog());
         findViewById(R.id.btn_bookmark).setOnClickListener(v -> addBookmark());
@@ -180,52 +241,166 @@ public class PlayerActivity extends AppCompatActivity {
         });
     }
 
-    private void setupGestures() {
-        gestureDetector = new GestureDetector(this,
-            new GestureDetector.SimpleOnGestureListener() {
-                @Override
-                public boolean onScroll(MotionEvent e1, MotionEvent e2, float dX, float dY) {
-                    if (isLocked || e1 == null) return false;
-                    if (e1.getX() < screenW / 2f) adjustBrightness(dY * 0.005f);
-                    else adjustVolume(dY * 0.005f);
-                    return true;
+    // ========== PLAYLIST ==========
+
+    private void playNext() {
+        VideoItem next = PlaylistManager.get().getNext();
+        if (next != null) {
+            saveHistory();
+            uriString  = next.getUri().toString();
+            videoTitle = next.getName();
+            tvTitle.setText(videoTitle);
+            playMedia(uriString);
+            autoDetectAndApplyEQ(videoTitle);
+            updatePlaylistButtons();
+        } else {
+            Toast.makeText(this, "Het danh sach phat", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void playPrev() {
+        VideoItem prev = PlaylistManager.get().getPrev();
+        if (prev != null) {
+            saveHistory();
+            uriString  = prev.getUri().toString();
+            videoTitle = prev.getName();
+            tvTitle.setText(videoTitle);
+            playMedia(uriString);
+            autoDetectAndApplyEQ(videoTitle);
+            updatePlaylistButtons();
+        }
+    }
+
+    private void showQueueDialog() {
+        PlaylistManager pm = PlaylistManager.get();
+        java.util.List<VideoItem> queue = pm.getQueue();
+        if (queue.isEmpty()) {
+            Toast.makeText(this, "Hang doi trong", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] titles = new String[queue.size()];
+        for (int i = 0; i < queue.size(); i++) {
+            String prefix = (i == pm.getCurrentIndex()) ? "▶ " : "  ";
+            titles[i] = prefix + queue.get(i).getName();
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Hang doi phat (" + queue.size() + " video)")
+            .setItems(titles, (d, w) -> {
+                pm.setCurrentIndex(w);
+                VideoItem item = pm.getCurrent();
+                if (item != null) {
+                    saveHistory();
+                    uriString  = item.getUri().toString();
+                    videoTitle = item.getName();
+                    tvTitle.setText(videoTitle);
+                    playMedia(uriString);
+                    updatePlaylistButtons();
                 }
-                @Override
-                public boolean onDoubleTap(MotionEvent e) {
-                    if (isLocked) return false;
-                    if (e.getX() < screenW / 2f) {
-                        if (mediaPlayer != null) mediaPlayer.setTime(Math.max(0, mediaPlayer.getTime() - 10000));
-                        Toast.makeText(PlayerActivity.this, "-10s", Toast.LENGTH_SHORT).show();
-                    } else {
-                        if (mediaPlayer != null) mediaPlayer.setTime(mediaPlayer.getTime() + 10000);
-                        Toast.makeText(PlayerActivity.this, "+10s", Toast.LENGTH_SHORT).show();
-                    }
-                    return true;
+            })
+            .show();
+    }
+
+    // ========== NIGHT MODE ==========
+
+    private void toggleNightMode() {
+        nightMode = !nightMode;
+        if (nightOverlay != null) {
+            nightOverlay.setVisibility(nightMode ? View.VISIBLE : View.GONE);
+        }
+        Toast.makeText(this,
+            nightMode ? "Night mode: ON" : "Night mode: OFF",
+            Toast.LENGTH_SHORT).show();
+    }
+
+    // ========== VIDEO FILTERS ==========
+
+    private void showFilterDialog() {
+        String[] options = {
+            "Chinh sang (Brightness): " + String.format("%.1f", filterBrightness),
+            "Do tuong phan (Contrast): " + String.format("%.1f", filterContrast),
+            "Mau sac (Saturation): " + String.format("%.1f", filterSaturation),
+            "Mau sac (Hue): " + String.format("%.0f", filterHue),
+            filtersEnabled ? "Tat bo loc" : "Bat bo loc",
+            "Reset ve mac dinh"
+        };
+        new AlertDialog.Builder(this)
+            .setTitle("Bo loc video")
+            .setItems(options, (d, w) -> {
+                switch (w) {
+                    case 0: showSliderDialog("Brightness", 0, 200, (int)(filterBrightness*100),
+                        val -> { filterBrightness = val/100f; applyFilters(); }); break;
+                    case 1: showSliderDialog("Contrast", 0, 200, (int)(filterContrast*100),
+                        val -> { filterContrast = val/100f; applyFilters(); }); break;
+                    case 2: showSliderDialog("Saturation", 0, 200, (int)(filterSaturation*100),
+                        val -> { filterSaturation = val/100f; applyFilters(); }); break;
+                    case 3: showSliderDialog("Hue", 0, 360, (int)(filterHue+180),
+                        val -> { filterHue = val-180; applyFilters(); }); break;
+                    case 4:
+                        filtersEnabled = !filtersEnabled;
+                        applyFilters();
+                        Toast.makeText(this,
+                            filtersEnabled ? "Bo loc: ON" : "Bo loc: OFF",
+                            Toast.LENGTH_SHORT).show();
+                        break;
+                    case 5:
+                        filterBrightness = 1.0f;
+                        filterContrast   = 1.0f;
+                        filterSaturation = 1.0f;
+                        filterHue        = 0.0f;
+                        filtersEnabled   = false;
+                        applyFilters();
+                        Toast.makeText(this, "Da reset bo loc", Toast.LENGTH_SHORT).show();
+                        break;
                 }
-            });
-        videoLayout.setOnTouchListener((v, event) -> {
-            gestureDetector.onTouchEvent(event);
-            if (event.getAction() == MotionEvent.ACTION_UP && !isLocked) toggleControls();
-            return true;
+            }).show();
+    }
+
+    interface SliderCallback { void onValue(int value); }
+
+    private void showSliderDialog(String title, int min, int max, int current,
+            SliderCallback callback) {
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        layout.setPadding(48, 24, 48, 24);
+        SeekBar slider = new SeekBar(this);
+        slider.setMax(max - min);
+        slider.setProgress(current - min);
+        TextView tvVal = new TextView(this);
+        tvVal.setText(String.valueOf(current));
+        tvVal.setGravity(android.view.Gravity.CENTER);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean u) {
+                tvVal.setText(String.valueOf(p + min));
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
         });
+        layout.addView(tvVal);
+        layout.addView(slider);
+        new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(layout)
+            .setPositiveButton("OK", (d, w) -> {
+                callback.onValue(slider.getProgress() + min);
+            })
+            .setNegativeButton("Huy", null)
+            .show();
     }
 
-    private void adjustBrightness(float delta) {
-        WindowManager.LayoutParams p = getWindow().getAttributes();
-        if (p.screenBrightness < 0) p.screenBrightness = 0.5f;
-        p.screenBrightness = Math.max(0.01f, Math.min(1.0f, p.screenBrightness + delta));
-        getWindow().setAttributes(p);
-        Toast.makeText(this, "Sang: " + (int)(p.screenBrightness * 100) + "%", Toast.LENGTH_SHORT).show();
+    private void applyFilters() {
+        if (mediaPlayer == null) return;
+        if (!filtersEnabled) {
+            mediaPlayer.setAdjustVideo(false);
+            return;
+        }
+        mediaPlayer.setAdjustVideo(true);
+        mediaPlayer.setBrightness(filterBrightness);
+        mediaPlayer.setContrast(filterContrast);
+        mediaPlayer.setSaturation(filterSaturation);
+        mediaPlayer.setHue(filterHue);
     }
 
-    private void adjustVolume(float delta) {
-        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-        int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-        am.setStreamVolume(AudioManager.STREAM_MUSIC,
-            Math.max(0, Math.min(max, (int)(cur + delta * max))),
-            AudioManager.FLAG_SHOW_UI);
-    }
+    // ========== VLC SETUP ==========
 
     private void setupVLC() {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -249,6 +424,7 @@ public class PlayerActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
                         handler.postDelayed(() -> applyScaleMode(), 200);
+                        if (filtersEnabled) handler.postDelayed(() -> applyFilters(), 300);
                         scheduleHideControls();
                         if (!waveletSent) { broadcastAudioSessionOpen(); waveletSent = true; }
                     });
@@ -259,7 +435,16 @@ public class PlayerActivity extends AppCompatActivity {
                     break;
                 case MediaPlayer.Event.EndReached:
                     saveHistory();
-                    runOnUiThread(this::finish);
+                    runOnUiThread(() -> {
+                        PlaylistManager pm = PlaylistManager.get();
+                        if (pm.getRepeatMode() == PlaylistManager.RepeatMode.ONE) {
+                            playMedia(uriString); // replay
+                        } else if (pm.hasNext()) {
+                            playNext();
+                        } else {
+                            finish();
+                        }
+                    });
                     break;
             }
         });
@@ -269,53 +454,37 @@ public class PlayerActivity extends AppCompatActivity {
     private void applyScaleMode() {
         if (mediaPlayer == null) return;
         switch (scaleMode) {
-            case 0: // Best Fit - giu ti le, co vien den
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(0);
-                break;
-            case 1: // Fill - ep dung ti le man hinh, khong vien den
-                // Day la cach VLC goc dung de fill man hinh
-                mediaPlayer.setAspectRatio(screenW + ":" + screenH);
-                mediaPlayer.setScale(0);
-                break;
-            case 2: // 16:9
-                mediaPlayer.setAspectRatio("16:9");
-                mediaPlayer.setScale(0);
-                break;
-            case 3: // 4:3
-                mediaPlayer.setAspectRatio("4:3");
-                mediaPlayer.setScale(0);
-                break;
-            case 4: // Zoom - cat vien den giu ti le
-                mediaPlayer.setAspectRatio(null);
-                mediaPlayer.setScale(1);
-                break;
+            case 0: mediaPlayer.setAspectRatio(null); mediaPlayer.setScale(0); break;
+            case 1: mediaPlayer.setAspectRatio(screenW + ":" + screenH); mediaPlayer.setScale(0); break;
+            case 2: mediaPlayer.setAspectRatio("16:9"); mediaPlayer.setScale(0); break;
+            case 3: mediaPlayer.setAspectRatio("4:3"); mediaPlayer.setScale(0); break;
+            case 4: mediaPlayer.setAspectRatio(null); mediaPlayer.setScale(1); break;
         }
     }
 
     private void cycleAspectRatio() {
         scaleMode = (scaleMode + 1) % 5;
         applyScaleMode();
-        String[] labels = {"Best Fit", "Fill", "16:9", "4:3", "Stretch"};
+        String[] labels = {"Best Fit", "Fill", "16:9", "4:3", "Zoom"};
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-    private void playMedia(String uriString) {
+    private void playMedia(String uri) {
         dbExecutor.execute(() -> {
-            HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uriString);
+            HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
             final long resumePos = (history != null && history.lastPosition > 5000)
                 ? history.lastPosition : 0;
             runOnUiThread(() -> {
                 try {
-                    Uri uri = Uri.parse(uriString);
+                    Uri u = Uri.parse(uri);
                     Media media;
-                    if ("content".equals(uri.getScheme())) {
+                    if ("content".equals(u.getScheme())) {
                         closePfd();
-                        currentPfd = getContentResolver().openFileDescriptor(uri, "r");
+                        currentPfd = getContentResolver().openFileDescriptor(u, "r");
                         if (currentPfd == null) return;
                         media = new Media(libVLC, currentPfd.getFileDescriptor());
                     } else {
-                        media = new Media(libVLC, uri);
+                        media = new Media(libVLC, u);
                     }
                     media.setHWDecoderEnabled(true, false);
                     media.addOption(":file-caching=1500");
@@ -344,8 +513,7 @@ public class PlayerActivity extends AppCompatActivity {
         dbExecutor.execute(() -> {
             AppDatabase.get(this).dao().deleteHistory(uriString);
             AppDatabase.get(this).dao().insertHistory(
-                new HistoryItem(uriString,
-                    videoTitle != null ? videoTitle : "Video", pos, dur));
+                new HistoryItem(uriString, videoTitle != null ? videoTitle : "Video", pos, dur));
         });
     }
 
@@ -374,7 +542,7 @@ public class PlayerActivity extends AppCompatActivity {
         float[] vals = {0.25f,0.5f,0.75f,1.0f,1.25f,1.5f,1.75f,2.0f};
         int cur = 3;
         for (int i = 0; i < vals.length; i++)
-            if (Math.abs(vals[i]-playbackSpeed) < 0.01f) { cur = i; break; }
+            if (Math.abs(vals[i]-playbackSpeed) < 0.01f) { cur=i; break; }
         new AlertDialog.Builder(this)
             .setTitle("Toc do phat")
             .setSingleChoiceItems(speeds, cur, (d, w) -> {
@@ -532,9 +700,87 @@ public class PlayerActivity extends AppCompatActivity {
                     Uri.fromFile(f).toString(), true);
             Toast.makeText(this, "Da dich va load subtitle!", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Toast.makeText(this, "Loi luu: " + e.getMessage(),
-                Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Loi luu: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void autoDetectAndApplyEQ(String title) {
+        if (equalizer == null || title == null) return;
+        String lower = title.toLowerCase();
+        short presetIndex = -1;
+        if (lower.contains("fap") || lower.contains("music") || lower.contains("dance"))
+            presetIndex = findPreset(new String[]{"Dance", "Pop", "Party"});
+        else if (lower.contains("movie") || lower.contains("film"))
+            presetIndex = findPreset(new String[]{"Theater", "Movie"});
+        else if (lower.contains("anime") || lower.contains("animation"))
+            presetIndex = findPreset(new String[]{"Vocal", "Pop"});
+        else if (lower.contains("game") || lower.contains("action"))
+            presetIndex = findPreset(new String[]{"Rock", "Live"});
+        if (presetIndex >= 0) {
+            final short idx = presetIndex;
+            equalizer.usePreset(idx);
+        }
+    }
+
+    private short findPreset(String[] keywords) {
+        if (equalizer == null) return -1;
+        short presets = equalizer.getNumberOfPresets();
+        for (String kw : keywords)
+            for (short i = 0; i < presets; i++)
+                if (equalizer.getPresetName(i) != null &&
+                    equalizer.getPresetName(i).toLowerCase().contains(kw.toLowerCase()))
+                    return i;
+        return -1;
+    }
+
+    private void setupGestures() {
+        gestureDetector = new GestureDetector(this,
+            new GestureDetector.SimpleOnGestureListener() {
+                @Override
+                public boolean onScroll(MotionEvent e1, MotionEvent e2, float dX, float dY) {
+                    if (isLocked || e1 == null) return false;
+                    if (e1.getX() < screenW / 2f) adjustBrightness(dY * 0.005f);
+                    else adjustVolume(dY * 0.005f);
+                    return true;
+                }
+                @Override
+                public boolean onDoubleTap(MotionEvent e) {
+                    if (isLocked) return false;
+                    if (e.getX() < screenW / 2f) {
+                        if (mediaPlayer != null)
+                            mediaPlayer.setTime(Math.max(0, mediaPlayer.getTime() - 10000));
+                        Toast.makeText(PlayerActivity.this, "-10s", Toast.LENGTH_SHORT).show();
+                    } else {
+                        if (mediaPlayer != null)
+                            mediaPlayer.setTime(mediaPlayer.getTime() + 10000);
+                        Toast.makeText(PlayerActivity.this, "+10s", Toast.LENGTH_SHORT).show();
+                    }
+                    return true;
+                }
+            });
+        videoLayout.setOnTouchListener((v, event) -> {
+            gestureDetector.onTouchEvent(event);
+            if (event.getAction() == MotionEvent.ACTION_UP && !isLocked) toggleControls();
+            return true;
+        });
+    }
+
+    private void adjustBrightness(float delta) {
+        WindowManager.LayoutParams p = getWindow().getAttributes();
+        if (p.screenBrightness < 0) p.screenBrightness = 0.5f;
+        p.screenBrightness = Math.max(0.01f, Math.min(1.0f, p.screenBrightness + delta));
+        getWindow().setAttributes(p);
+        Toast.makeText(this, "Sang: " + (int)(p.screenBrightness*100) + "%",
+            Toast.LENGTH_SHORT).show();
+    }
+
+    private void adjustVolume(float delta) {
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+        am.setStreamVolume(AudioManager.STREAM_MUSIC,
+            Math.max(0, Math.min(max, (int)(cur + delta * max))),
+            AudioManager.FLAG_SHOW_UI);
     }
 
     private void togglePlayPause() {
