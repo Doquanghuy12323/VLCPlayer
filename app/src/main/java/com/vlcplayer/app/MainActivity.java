@@ -198,6 +198,9 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override public void onVideoClick(VideoItem video) {
+        // Set toan bo danh sach vao queue, bat dau tu video duoc chon
+        int index = videoList.indexOf(video);
+        PlaylistManager.get().setQueue(videoList, index);
         Intent i = new Intent(this, PlayerActivity.class);
         i.putExtra(PlayerActivity.EXTRA_URI, video.getUri().toString());
         i.putExtra(PlayerActivity.EXTRA_TITLE, video.getName());
