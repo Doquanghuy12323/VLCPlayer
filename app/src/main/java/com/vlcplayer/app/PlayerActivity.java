@@ -388,18 +388,37 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void applyFilters() {
-        if (mediaPlayer == null) return;
+        if (videoLayout == null) return;
         if (!filtersEnabled) {
-            // Tat filter - reset ve mac dinh
-            mediaPlayer.setVideoFilter(null);
+            // Reset ve mac dinh - xoa ColorFilter
+            videoLayout.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
             return;
         }
-        // Dung VLC adjust video filter
-        // Format: adjust{contrast=X,brightness=X,saturation=X,gamma=X,hue=X}
-        String filter = String.format(java.util.Locale.US,
-            "adjust{contrast=%.2f,brightness=%.2f,saturation=%.2f,gamma=1.00,hue=%.0f}",
-            filterContrast, filterBrightness, filterSaturation, filterHue);
-        mediaPlayer.setVideoFilter(filter);
+        // Dung Android ColorMatrix de chinh filter
+        // Khong can libVLC API - hoat dong tren moi phien ban
+        android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
+
+        // Contrast + Brightness
+        float c = filterContrast;   // 0.0-2.0, mac dinh 1.0
+        float b = (filterBrightness - 1.0f) * 255f; // chuyen ve -255 den 255
+        float[] contrastMatrix = {
+            c, 0, 0, 0, b,
+            0, c, 0, 0, b,
+            0, 0, c, 0, b,
+            0, 0, 0, 1, 0
+        };
+        cm.set(contrastMatrix);
+
+        // Saturation
+        android.graphics.ColorMatrix satMatrix = new android.graphics.ColorMatrix();
+        satMatrix.setSaturation(filterSaturation);
+        cm.postConcat(satMatrix);
+
+        android.graphics.ColorMatrixColorFilter filter =
+            new android.graphics.ColorMatrixColorFilter(cm);
+        android.graphics.Paint paint = new android.graphics.Paint();
+        paint.setColorFilter(filter);
+        videoLayout.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint);
     }
 
     // ========== VLC SETUP ==========
