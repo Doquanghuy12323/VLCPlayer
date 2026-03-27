@@ -390,14 +390,16 @@ public class PlayerActivity extends AppCompatActivity {
     private void applyFilters() {
         if (mediaPlayer == null) return;
         if (!filtersEnabled) {
-            mediaPlayer.setAdjustVideo(false);
+            // Tat filter - reset ve mac dinh
+            mediaPlayer.setVideoFilter(null);
             return;
         }
-        mediaPlayer.setAdjustVideo(true);
-        mediaPlayer.setBrightness(filterBrightness);
-        mediaPlayer.setContrast(filterContrast);
-        mediaPlayer.setSaturation(filterSaturation);
-        mediaPlayer.setHue(filterHue);
+        // Dung VLC adjust video filter
+        // Format: adjust{contrast=X,brightness=X,saturation=X,gamma=X,hue=X}
+        String filter = String.format(java.util.Locale.US,
+            "adjust{contrast=%.2f,brightness=%.2f,saturation=%.2f,gamma=1.00,hue=%.0f}",
+            filterContrast, filterBrightness, filterSaturation, filterHue);
+        mediaPlayer.setVideoFilter(filter);
     }
 
     // ========== VLC SETUP ==========
