@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VLC Player</string>
+    <string name="open_file">Mở file video</string>
+    <string name="back">Quay lại</string>
+    <string name="play_pause">Phát/Dừng</string>
+    <string name="rewind">Tua lùi 10s</string>
+    <string name="forward">Tua nhanh 10s</string>
+    <string name="action_refresh">Làm mới</string>
+</resources>
