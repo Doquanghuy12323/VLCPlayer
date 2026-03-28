@@ -352,38 +352,55 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    
+
     private void showCloudOrVaultDialog() {
+        androidx.biometric.BiometricManager bm = androidx.biometric.BiometricManager.from(this);
+        int canAuth = bm.canAuthenticate(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+        
+        // Bẫy lỗi: Nếu máy không có vân tay hoặc chưa cài mã PIN -> Bỏ qua bảo mật, mở thẳng Cloud
+        if (canAuth != androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS) {
+            android.widget.Toast.makeText(this, "Chưa cài vân tay/PIN. Mở chế độ mặc định.", android.widget.Toast.LENGTH_LONG).show();
+            showNetworkDialog();
+            return;
+        }
+
         androidx.biometric.BiometricPrompt prompt = new androidx.biometric.BiometricPrompt(this,
             androidx.core.content.ContextCompat.getMainExecutor(this),
             new androidx.biometric.BiometricPrompt.AuthenticationCallback() {
                 @Override public void onAuthenticationSucceeded(androidx.biometric.BiometricPrompt.AuthenticationResult result) {
-                    // Xac thuc thanh cong -> Mo giao dien Cloud/SMB (San sang cho giai doan sau)
-                    android.widget.EditText input = new android.widget.EditText(MainActivity.this);
-                    input.setHint("smb://user:pass@192.168.x.x/phim.mkv hoac Google Drive URL");
-                    new android.app.AlertDialog.Builder(MainActivity.this)
-                        .setTitle("Truy cap Cloud / NAS")
-                        .setView(input)
-                        .setPositiveButton("Phat", (d, w) -> {
-                            String url = input.getText().toString().trim();
-                            if(!url.isEmpty()) {
-                                android.content.Intent i = new android.content.Intent(MainActivity.this, PlayerActivity.class);
-                                i.putExtra(PlayerActivity.EXTRA_URI, url);
-                                i.putExtra(PlayerActivity.EXTRA_TITLE, "Network Stream");
-                                startActivity(i);
-                            }
-                        }).show();
+                    showNetworkDialog();
                 }
                 @Override public void onAuthenticationError(int errCode, CharSequence errString) {
-                    android.widget.Toast.makeText(MainActivity.this, "Loi bao mat: " + errString, android.widget.Toast.LENGTH_SHORT).show();
+                    android.widget.Toast.makeText(MainActivity.this, "Lỗi xác thực: " + errString, android.widget.Toast.LENGTH_SHORT).show();
                 }
             });
 
         androidx.biometric.BiometricPrompt.PromptInfo info = new androidx.biometric.BiometricPrompt.PromptInfo.Builder()
             .setTitle("VLC Vault & Cloud")
-            .setSubtitle("Xac thuc van tay de truy cap")
-            .setNegativeButtonText("Huy")
+            .setSubtitle("Xác thực sinh trắc học để truy cập")
+            .setAllowedAuthenticators(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)
             .build();
         prompt.authenticate(info);
+    }
+
+    private void showNetworkDialog() {
+        android.widget.EditText input = new android.widget.EditText(MainActivity.this);
+        input.setHint("smb://user:pass@192.168.x.x/phim.mkv hoặc URL Google Drive");
+        new android.app.AlertDialog.Builder(MainActivity.this)
+            .setTitle("Truy cập Cloud / NAS")
+            .setView(input)
+            .setPositiveButton("Phát ngay", (d, w) -> {
+                String url = input.getText().toString().trim();
+                if(!url.isEmpty()) {
+                    android.content.Intent i = new android.content.Intent(MainActivity.this, PlayerActivity.class);
+                    i.putExtra(PlayerActivity.EXTRA_URI, url);
+                    i.putExtra(PlayerActivity.EXTRA_TITLE, "Network Stream");
+                    startActivity(i);
+                }
+            })
+            .setNegativeButton("Hủy", null)
+            .show();
     }
 
 }
