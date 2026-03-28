@@ -76,6 +76,19 @@ public class PlayerActivity extends AppCompatActivity {
     private ImageButton btnPlayPause, btnNext, btnPrev, btnShuffle, btnRepeat;
     private View controlsOverlay, lockOverlay;
     private boolean isLocked = false;
+    private boolean isBackgroundPlayEnabled = false;
+
+    
+    private final android.content.BroadcastReceiver bgReceiver = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (mediaPlayer == null || intent == null || intent.getAction() == null) return;
+            switch(intent.getAction()) {
+                case BgAudioService.ACTION_PAUSE: mediaPlayer.pause(); break;
+                case BgAudioService.ACTION_PLAY: mediaPlayer.play(); break;
+                case BgAudioService.ACTION_CLOSE: finish(); break;
+            }
+        }
+    };
 
     private final Handler handler = new Handler();
     private boolean controlsVisible = true;
@@ -153,6 +166,17 @@ public class PlayerActivity extends AppCompatActivity {
         updatePlaylistButtons();
         setupButtons();
         setupGestures();
+        
+        android.content.IntentFilter filter = new android.content.IntentFilter();
+        filter.addAction(BgAudioService.ACTION_PLAY);
+        filter.addAction(BgAudioService.ACTION_PAUSE);
+        filter.addAction(BgAudioService.ACTION_CLOSE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(bgReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(bgReceiver, filter);
+        }
+
         setupVLC();
 
         if (uriString != null) {
@@ -321,7 +345,8 @@ public class PlayerActivity extends AppCompatActivity {
             "Mau sac (Saturation): " + String.format("%.1f", filterSaturation),
             "Mau sac (Hue): " + String.format("%.0f", filterHue),
             filtersEnabled ? "Tat bo loc" : "Bat bo loc",
-            "Reset ve mac dinh"
+            "Reset ve mac dinh",
+            isBackgroundPlayEnabled ? "Tat phat nen" : "Bat phat nen"
         };
         new AlertDialog.Builder(this)
             .setTitle("Bo loc video")
@@ -350,6 +375,10 @@ public class PlayerActivity extends AppCompatActivity {
                         filtersEnabled   = false;
                         applyFilters();
                         Toast.makeText(this, "Da reset bo loc", Toast.LENGTH_SHORT).show();
+                        break;
+                    case 6:
+                        isBackgroundPlayEnabled = !isBackgroundPlayEnabled;
+                        Toast.makeText(this, isBackgroundPlayEnabled ? "Phat nen: ON" : "Phat nen: OFF", Toast.LENGTH_SHORT).show();
                         break;
                 }
             }).show();
@@ -881,17 +910,33 @@ public class PlayerActivity extends AppCompatActivity {
         enterPiP();
     }
 
+    @Override protected void onStart() {
+        super.onStart();
+        stopService(new Intent(this, BgAudioService.class));
+        if (mediaPlayer != null && isBackgroundPlayEnabled) {
+            mediaPlayer.attachViews(videoLayout, null, false, false);
+        }
+    }
+
     @Override protected void onStop() {
         super.onStop();
         saveHistory();
         if (mediaPlayer != null) {
-            mediaPlayer.stop();
-            mediaPlayer.detachViews();
+            if (isBackgroundPlayEnabled && mediaPlayer.isPlaying()) {
+                mediaPlayer.detachViews();
+                Intent serviceIntent = new Intent(this, BgAudioService.class);
+                serviceIntent.putExtra("title", videoTitle != null ? videoTitle : "VLC Audio");
+                androidx.core.content.ContextCompat.startForegroundService(this, serviceIntent);
+            } else {
+                mediaPlayer.stop();
+                mediaPlayer.detachViews();
+            }
         }
     }
 
     @Override protected void onDestroy() {
         super.onDestroy();
+        try { unregisterReceiver(bgReceiver); } catch(Exception ignored){}
         broadcastAudioSessionClose();
         if (equalizer != null) equalizer.release();
         handler.removeCallbacksAndMessages(null);
