@@ -365,7 +365,7 @@ public class MainActivity extends AppCompatActivity
         // Bẫy lỗi: Nếu máy không có vân tay hoặc chưa cài mã PIN -> Bỏ qua bảo mật, mở thẳng Cloud
         if (canAuth != androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS) {
             android.widget.Toast.makeText(this, "Chưa cài vân tay/PIN. Mở chế độ mặc định.", android.widget.Toast.LENGTH_LONG).show();
-            showNetworkDialog();
+            showVaultMenuDialog();
             return;
         }
 
@@ -373,7 +373,7 @@ public class MainActivity extends AppCompatActivity
             androidx.core.content.ContextCompat.getMainExecutor(this),
             new androidx.biometric.BiometricPrompt.AuthenticationCallback() {
                 @Override public void onAuthenticationSucceeded(androidx.biometric.BiometricPrompt.AuthenticationResult result) {
-                    showNetworkDialog();
+                    showVaultMenuDialog();
                 }
                 @Override public void onAuthenticationError(int errCode, CharSequence errString) {
                     android.widget.Toast.makeText(MainActivity.this, "Lỗi xác thực: " + errString, android.widget.Toast.LENGTH_SHORT).show();
