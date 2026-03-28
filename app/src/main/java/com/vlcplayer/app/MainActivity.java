@@ -227,6 +227,7 @@ public class MainActivity extends AppCompatActivity
         if (id == R.id.action_url) { showUrlDialog(); return true; }
         if (id == R.id.action_history) { showHistoryDialog(); return true; }
         if (id == R.id.action_privacy) { showPrivacyDialog(); return true; }
+        if (id == R.id.action_clean) { showCleanDialog(); return true; }
         if (id == R.id.action_update) {
             new UpdateManager(this).checkForUpdate(false); return true; }
         return super.onOptionsItemSelected(item);
@@ -253,5 +254,101 @@ public class MainActivity extends AppCompatActivity
             .setNegativeButton("Huy", null).show();
     }
 
+    private void showCleanDialog() {
+        // Tinh toan cache hien tai
+        long thumbCache = getCacheDir().length();
+        long extCache = getExternalCacheDir() != null ? getExternalCacheDir().length() : 0;
+        long totalCache = (thumbCache + extCache) / 1024; // KB
+
+        Runtime rt = Runtime.getRuntime();
+        long usedMem = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024; // MB
+        long maxMem  = rt.maxMemory() / 1024 / 1024;
+
+        String info = "RAM app dang dung: " + usedMem + " MB / " + maxMem + " MB\n"
+            + "Cache thumbnail: " + totalCache + " KB\n\n"
+            + "Co the don sach:\n"
+            + "- Cache thumbnail Glide\n"
+            + "- Cache file tam\n"
+            + "- Lich su va bookmark cu\n\n"
+            + "Luu y: Android quan ly RAM tu dong, app khong the don RAM he thong.";
+
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Don dep & Thong tin")
+            .setMessage(info)
+            .setPositiveButton("Don sach cache", (d, w) -> cleanAppCache())
+            .setNeutralButton("Don lich su cu", (d, w) -> cleanOldHistory())
+            .setNegativeButton("Dong", null)
+            .show();
+    }
+
+    private void cleanAppCache() {
+        android.widget.ProgressBar pb = new android.widget.ProgressBar(this,
+            null, android.R.attr.progressBarStyleHorizontal);
+        pb.setIndeterminate(true);
+        android.app.AlertDialog loading = new android.app.AlertDialog.Builder(this)
+            .setTitle("Dang don sach...")
+            .setView(pb)
+            .setCancelable(false)
+            .show();
+
+        new Thread(() -> {
+            try {
+                // 1. Xoa Glide cache (thumbnail)
+                com.bumptech.glide.Glide.get(this).clearDiskCache();
+
+                // 2. Xoa cache thu muc app
+                deleteDir(getCacheDir());
+                if (getExternalCacheDir() != null) deleteDir(getExternalCacheDir());
+
+                // 3. Goi garbage collector
+                System.gc();
+                Runtime.getRuntime().gc();
+
+                // 4. Xoa thumbnail cache trong adapter
+                runOnUiThread(() -> {
+                    if (adapter != null) adapter.clearThumbnailCache();
+                });
+
+                Thread.sleep(500);
+
+                runOnUiThread(() -> {
+                    loading.dismiss();
+                    Runtime rt = Runtime.getRuntime();
+                    long freeMem = rt.freeMemory() / 1024 / 1024;
+                    android.widget.Toast.makeText(this,
+                        "Da don sach! RAM trong: " + freeMem + " MB",
+                        android.widget.Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    loading.dismiss();
+                    android.widget.Toast.makeText(this,
+                        "Loi: " + e.getMessage(),
+                        android.widget.Toast.LENGTH_SHORT).show();
+                });
+            }
+        }).start();
+    }
+
+    private void cleanOldHistory() {
+        executor.execute(() -> {
+            // Xoa lich su xem qua 30 ngay
+            long cutoff = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000);
+            AppDatabase.get(this).dao().deleteOldHistory(cutoff);
+            runOnUiThread(() ->
+                android.widget.Toast.makeText(this,
+                    "Da xoa lich su cu hon 30 ngay",
+                    android.widget.Toast.LENGTH_SHORT).show());
+        });
+    }
+
+    private void deleteDir(java.io.File dir) {
+        if (dir == null || !dir.exists()) return;
+        java.io.File[] files = dir.listFiles();
+        if (files != null) for (java.io.File f : files) {
+            if (f.isDirectory()) deleteDir(f);
+            else f.delete();
+        }
+    }
+
 }
-// Phần này được thêm tự động - KHÔNG chạy lệnh này

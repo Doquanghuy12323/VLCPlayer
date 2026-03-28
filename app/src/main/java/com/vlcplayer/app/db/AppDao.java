@@ -25,6 +25,9 @@ public interface AppDao {
     @Query("DELETE FROM history")
     void clearHistory();
 
+    @Query("DELETE FROM history WHERE watchedAt < :cutoff")
+    void deleteOldHistory(long cutoff);
+
     // Bookmarks
     @Insert
     void insertBookmark(BookmarkItem item);
