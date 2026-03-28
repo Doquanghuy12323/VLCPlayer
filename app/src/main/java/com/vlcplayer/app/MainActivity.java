@@ -438,7 +438,33 @@ public class MainActivity extends AppCompatActivity
     }
 
 
+    
+
     private void togglePrivacyMode(boolean hide) {
+        // 1. KIỂM TRA & YÊU CẦU QUYỀN LÕI (Xuyên thủng Scoped Storage Android 11+)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                try {
+                    android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                    intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                    android.widget.Toast.makeText(this, "Hãy CẤP QUYỀN 'Quản lý tất cả tệp' rồi BẤM ẨN LẠI để xóa sạch bóng ma!", android.widget.Toast.LENGTH_LONG).show();
+                    return;
+                } catch (Exception e) {
+                    android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                    startActivity(intent);
+                    return;
+                }
+            }
+        } else {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                androidx.core.app.ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 100);
+                android.widget.Toast.makeText(this, "Cấp quyền Bộ nhớ rồi thử lại!", android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
+
+        // 2. THỰC THI ẨN/HIỆN & BÁO CÁO LỖI RÕ RÀNG
         new Thread(() -> {
             if (videoList == null || videoList.isEmpty()) {
                 runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "Không có video để xử lý", android.widget.Toast.LENGTH_SHORT).show());
@@ -446,12 +472,13 @@ public class MainActivity extends AppCompatActivity
             }
             
             java.util.HashSet<String> dirs = new java.util.HashSet<>();
-            java.util.ArrayList<String> pathsToUpdate = new java.util.ArrayList<>();
+            java.util.ArrayList<String> pathsToScan = new java.util.ArrayList<>();
+            java.util.ArrayList<String> videoPaths = new java.util.ArrayList<>();
             
             for (VideoItem v : videoList) {
                 String path = getRealPathFromURI(v.getUri());
                 if (path != null) {
-                    pathsToUpdate.add(path);
+                    videoPaths.add(path);
                     java.io.File f = new java.io.File(path);
                     if (f.getParentFile() != null) {
                         dirs.add(f.getParentFile().getAbsolutePath());
@@ -460,21 +487,47 @@ public class MainActivity extends AppCompatActivity
             }
             
             int count = 0;
+            int errorCount = 0;
+            
             for (String dirPath : dirs) {
                 java.io.File nomedia = new java.io.File(dirPath, ".nomedia");
                 try {
                     if (hide) {
-                        if (!nomedia.exists() && nomedia.createNewFile()) count++;
+                        if (!nomedia.exists()) {
+                            if (nomedia.createNewFile()) {
+                                count++;
+                                pathsToScan.add(nomedia.getAbsolutePath());
+                            } else {
+                                errorCount++;
+                            }
+                        } else {
+                            pathsToScan.add(nomedia.getAbsolutePath());
+                        }
                     } else {
-                        if (nomedia.exists() && nomedia.delete()) count++;
+                        if (nomedia.exists()) {
+                            if (nomedia.delete()) {
+                                count++;
+                                pathsToScan.add(nomedia.getAbsolutePath());
+                            } else {
+                                errorCount++;
+                            }
+                        }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    errorCount++;
+                }
             }
             
-            // XỬ LÝ TRIỆT ĐỂ BỘ SƯU TẬP HỆ THỐNG (GALLERY / MEDIASTORE)
+            // 3. ÉP HỆ THỐNG ANDROID XÓA BÓNG MA BỘ SƯU TẬP
+            // Gộp cả file .nomedia và file video để chọc MediaScanner cập nhật lại trạng thái
+            pathsToScan.addAll(videoPaths);
+            String[] scanArray = pathsToScan.toArray(new String[0]);
+            
+            android.media.MediaScannerConnection.scanFile(MainActivity.this, scanArray, null, null);
+
+            // Back-up: Cố gắng xóa cứng Database cho các dòng máy cũ
             if (hide) {
-                // Xóa cứng bản ghi khỏi hệ thống để biến mất lập tức
-                for (String path : pathsToUpdate) {
+                for (String path : videoPaths) {
                     try {
                         getContentResolver().delete(
                             android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
@@ -483,17 +536,18 @@ public class MainActivity extends AppCompatActivity
                         );
                     } catch (Exception ignored) {}
                 }
-            } else {
-                // Ép MediaScanner quét lại để khôi phục ảnh/video lên Bộ sưu tập
-                String[] pathArray = pathsToUpdate.toArray(new String[0]);
-                android.media.MediaScannerConnection.scanFile(MainActivity.this, pathArray, null, null);
             }
             
             final int finalCount = count;
+            final int finalErrors = errorCount;
             runOnUiThread(() -> {
-                String msg = hide ? "Đã khóa và xóa bóng khỏi Bộ sưu tập (" + finalCount + " thư mục)." 
-                                  : "Đã mở khóa và khôi phục vào Bộ sưu tập (" + finalCount + " thư mục).";
-                android.widget.Toast.makeText(MainActivity.this, msg, android.widget.Toast.LENGTH_LONG).show();
+                if (finalErrors > 0) {
+                    android.widget.Toast.makeText(MainActivity.this, "Lỗi ghi ở " + finalErrors + " thư mục (Cần quyền). Đã xử lý: " + finalCount, android.widget.Toast.LENGTH_LONG).show();
+                } else {
+                    String msg = hide ? "Đã khóa và tàng hình " + finalCount + " thư mục khỏi Bộ sưu tập!" 
+                                      : "Đã mở khóa, khôi phục " + finalCount + " thư mục.";
+                    android.widget.Toast.makeText(MainActivity.this, msg, android.widget.Toast.LENGTH_LONG).show();
+                }
             });
         }).start();
     }
