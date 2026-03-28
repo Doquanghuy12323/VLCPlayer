@@ -423,6 +423,21 @@ public class MainActivity extends AppCompatActivity
             }).show();
     }
 
+    
+    private String getRealPathFromURI(android.net.Uri contentUri) {
+        if (contentUri == null) return null;
+        if ("file".equals(contentUri.getScheme())) return contentUri.getPath();
+        String[] proj = { android.provider.MediaStore.Video.Media.DATA };
+        try (android.database.Cursor cursor = getContentResolver().query(contentUri, proj, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int col = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA);
+                return cursor.getString(col);
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+
     private void togglePrivacyMode(boolean hide) {
         new Thread(() -> {
             if (videoList == null || videoList.isEmpty()) {
@@ -431,9 +446,12 @@ public class MainActivity extends AppCompatActivity
             }
             
             java.util.HashSet<String> dirs = new java.util.HashSet<>();
+            java.util.ArrayList<String> pathsToUpdate = new java.util.ArrayList<>();
+            
             for (VideoItem v : videoList) {
                 String path = getRealPathFromURI(v.getUri());
                 if (path != null) {
+                    pathsToUpdate.add(path);
                     java.io.File f = new java.io.File(path);
                     if (f.getParentFile() != null) {
                         dirs.add(f.getParentFile().getAbsolutePath());
@@ -453,26 +471,31 @@ public class MainActivity extends AppCompatActivity
                 } catch (Exception ignored) {}
             }
             
+            // XỬ LÝ TRIỆT ĐỂ BỘ SƯU TẬP HỆ THỐNG (GALLERY / MEDIASTORE)
+            if (hide) {
+                // Xóa cứng bản ghi khỏi hệ thống để biến mất lập tức
+                for (String path : pathsToUpdate) {
+                    try {
+                        getContentResolver().delete(
+                            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                            android.provider.MediaStore.Video.Media.DATA + "=?",
+                            new String[]{path}
+                        );
+                    } catch (Exception ignored) {}
+                }
+            } else {
+                // Ép MediaScanner quét lại để khôi phục ảnh/video lên Bộ sưu tập
+                String[] pathArray = pathsToUpdate.toArray(new String[0]);
+                android.media.MediaScannerConnection.scanFile(MainActivity.this, pathArray, null, null);
+            }
+            
             final int finalCount = count;
             runOnUiThread(() -> {
-                String msg = hide ? "Đã khóa (ẩn) " + finalCount + " thư mục." 
-                                  : "Đã mở khóa (hiện) " + finalCount + " thư mục.";
+                String msg = hide ? "Đã khóa và xóa bóng khỏi Bộ sưu tập (" + finalCount + " thư mục)." 
+                                  : "Đã mở khóa và khôi phục vào Bộ sưu tập (" + finalCount + " thư mục).";
                 android.widget.Toast.makeText(MainActivity.this, msg, android.widget.Toast.LENGTH_LONG).show();
             });
         }).start();
-    }
-
-    private String getRealPathFromURI(android.net.Uri contentUri) {
-        if (contentUri == null) return null;
-        if ("file".equals(contentUri.getScheme())) return contentUri.getPath();
-        String[] proj = { android.provider.MediaStore.Video.Media.DATA };
-        try (android.database.Cursor cursor = getContentResolver().query(contentUri, proj, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                int col = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA);
-                return cursor.getString(col);
-            }
-        } catch (Exception ignored) {}
-        return null;
     }
 
 }
