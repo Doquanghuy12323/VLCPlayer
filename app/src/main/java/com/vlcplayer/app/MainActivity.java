@@ -306,7 +306,7 @@ public class MainActivity extends AppCompatActivity
 
                 // 4. Xoa thumbnail cache trong adapter
                 runOnUiThread(() -> {
-                    if (adapter != null) adapter.clearThumbnailCache();
+                    com.bumptech.glide.Glide.get(this).clearMemory();
                 });
 
                 Thread.sleep(500);
