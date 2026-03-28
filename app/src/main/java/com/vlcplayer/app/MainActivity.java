@@ -226,9 +226,13 @@ public class MainActivity extends AppCompatActivity
         if (id == R.id.action_translate) { showTranslateLangDialog(); return true; }
         if (id == R.id.action_url) { showUrlDialog(); return true; }
         if (id == R.id.action_history) { showHistoryDialog(); return true; }
-        if (id == R.id.action_privacy) { showPrivacyDialog(); return true; }
+        
         if (id == R.id.action_clean) { showCleanDialog(); return true; }
-        if (id == R.id.action_privacy) { showCloudOrVaultDialog(); return true; }
+        
+        if (id == R.id.action_privacy) {
+            showCloudOrVaultDialog();
+            return true;
+        }
         if (id == R.id.action_update) {
             new UpdateManager(this).checkForUpdate(false); return true; }
         return super.onOptionsItemSelected(item);
