@@ -407,4 +407,72 @@ public class MainActivity extends AppCompatActivity
             .show();
     }
 
+
+    private void showVaultMenuDialog() {
+        String[] options = {"🌐 Truy cập Cloud / NAS", "🔒 Ẩn video (Tạo .nomedia)", "🔓 Hiện video (Xóa .nomedia)"};
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("VLC Vault Khóa Sinh Trắc")
+            .setItems(options, (d, w) -> {
+                if (w == 0) {
+                    showNetworkDialog();
+                } else if (w == 1) {
+                    togglePrivacyMode(true);
+                } else if (w == 2) {
+                    togglePrivacyMode(false);
+                }
+            }).show();
+    }
+
+    private void togglePrivacyMode(boolean hide) {
+        new Thread(() -> {
+            if (videoList == null || videoList.isEmpty()) {
+                runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "Không có video để xử lý", android.widget.Toast.LENGTH_SHORT).show());
+                return;
+            }
+            
+            java.util.HashSet<String> dirs = new java.util.HashSet<>();
+            for (VideoItem v : videoList) {
+                String path = getRealPathFromURI(v.getUri());
+                if (path != null) {
+                    java.io.File f = new java.io.File(path);
+                    if (f.getParentFile() != null) {
+                        dirs.add(f.getParentFile().getAbsolutePath());
+                    }
+                }
+            }
+            
+            int count = 0;
+            for (String dirPath : dirs) {
+                java.io.File nomedia = new java.io.File(dirPath, ".nomedia");
+                try {
+                    if (hide) {
+                        if (!nomedia.exists() && nomedia.createNewFile()) count++;
+                    } else {
+                        if (nomedia.exists() && nomedia.delete()) count++;
+                    }
+                } catch (Exception ignored) {}
+            }
+            
+            final int finalCount = count;
+            runOnUiThread(() -> {
+                String msg = hide ? "Đã khóa (ẩn) " + finalCount + " thư mục." 
+                                  : "Đã mở khóa (hiện) " + finalCount + " thư mục.";
+                android.widget.Toast.makeText(MainActivity.this, msg, android.widget.Toast.LENGTH_LONG).show();
+            });
+        }).start();
+    }
+
+    private String getRealPathFromURI(android.net.Uri contentUri) {
+        if (contentUri == null) return null;
+        if ("file".equals(contentUri.getScheme())) return contentUri.getPath();
+        String[] proj = { android.provider.MediaStore.Video.Media.DATA };
+        try (android.database.Cursor cursor = getContentResolver().query(contentUri, proj, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int col = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA);
+                return cursor.getString(col);
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
 }
