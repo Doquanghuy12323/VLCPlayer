@@ -1,2 +1,0 @@
--keep class org.videolan.** { *; }
--keep class com.vlcplayer.** { *; }
