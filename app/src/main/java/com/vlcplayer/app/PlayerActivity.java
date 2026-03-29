@@ -87,7 +87,6 @@ public class PlayerActivity extends AppCompatActivity {
     private float playbackSpeed = 1.0f;
 
     private String uriString, videoTitle;
-    private boolean bgServiceStarted = false;
     private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
     private GestureDetector gestureDetector;
 
@@ -449,7 +448,6 @@ public class PlayerActivity extends AppCompatActivity {
                         if (filtersEnabled) handler.postDelayed(() -> applyFilters(), 300);
                         scheduleHideControls();
                         if (!waveletSent) { broadcastAudioSessionOpen(); waveletSent = true; }
-                        startBackgroundService();
                     });
                     break;
                 case MediaPlayer.Event.Paused:
@@ -862,31 +860,6 @@ public class PlayerActivity extends AppCompatActivity {
         if (h > 0) return String.format(Locale.US, "%d:%02d:%02d", h, m, s);
         return String.format(Locale.US, "%02d:%02d", m, s);
     }
-
-
-    private void startBackgroundService() {
-        if (!bgServiceStarted) {
-            android.content.Intent i = new android.content.Intent(
-                this, MediaPlaybackService.class);
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                startForegroundService(i);
-            } else {
-                startService(i);
-            }
-            bgServiceStarted = true;
-        }
-        // Cap nhat thong bao
-        android.content.Intent upd = new android.content.Intent(
-            this, MediaPlaybackService.class);
-        startService(upd);
-    }
-
-    private void stopBackgroundService() {
-        if (bgServiceStarted) {
-            stopService(new android.content.Intent(
-                this, MediaPlaybackService.class));
-            bgServiceStarted = false;
-        }
     }
 
     private void hideSystemUI() {
@@ -923,7 +896,6 @@ public class PlayerActivity extends AppCompatActivity {
         broadcastAudioSessionClose();
         if (equalizer != null) equalizer.release();
         handler.removeCallbacksAndMessages(null);
-        stopBackgroundService();
         if (mediaPlayer != null) mediaPlayer.release();
         if (libVLC != null) libVLC.release();
         closePfd();
