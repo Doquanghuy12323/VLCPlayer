@@ -4,9 +4,6 @@ import android.app.PictureInPictureParams;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.ColorMatrix;
-import android.graphics.ColorMatrixColorFilter;
-import android.graphics.Paint;
 import android.media.AudioManager;
 import android.media.audiofx.AudioEffect;
 import android.media.audiofx.Equalizer;
@@ -63,11 +60,15 @@ public class PlayerActivity extends AppCompatActivity {
     private ParcelFileDescriptor currentPfd;
     private Equalizer equalizer;
 
+    // Night mode overlay
     private View nightOverlay;
     private boolean nightMode = false;
-    private float filterBrightness = 1.0f;
-    private float filterContrast   = 1.0f;
-    private float filterSaturation = 1.0f;
+
+    // Video filters
+    private float filterBrightness = 1.0f; // 0.0 - 2.0
+    private float filterContrast   = 1.0f; // 0.0 - 2.0
+    private float filterSaturation = 1.0f; // 0.0 - 2.0
+    private float filterHue        = 0.0f; // -180 - 180
     private boolean filtersEnabled = false;
 
     private SeekBar seekBar;
@@ -86,13 +87,14 @@ public class PlayerActivity extends AppCompatActivity {
     private float playbackSpeed = 1.0f;
 
     private String uriString, videoTitle;
+    private boolean bgServiceStarted = false;
     private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
     private GestureDetector gestureDetector;
 
     private final Runnable hideControls = () -> {
         if (!isLocked && mediaPlayer != null && mediaPlayer.isPlaying()) {
             controlsOverlay.animate().alpha(0f).setDuration(300)
-                .withEndAction(() -> controlsOverlay.setVisibility(View.GONE));
+                    .withEndAction(() -> controlsOverlay.setVisibility(View.GONE));
             controlsVisible = false;
         }
     };
@@ -157,9 +159,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (uriString != null) {
             playMedia(uriString);
             autoDetectAndApplyEQ(videoTitle);
-        } else {
-            finish();
-        }
+        } else finish();
 
         handler.post(updateSeekBar);
         scheduleHideControls();
@@ -167,13 +167,17 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void updatePlaylistButtons() {
         PlaylistManager pm = PlaylistManager.get();
-        if (btnNext != null) btnNext.setAlpha(pm.hasNext() ? 1.0f : 0.4f);
-        if (btnPrev != null) btnPrev.setAlpha(pm.hasPrev() ? 1.0f : 0.4f);
-        if (btnShuffle != null) btnShuffle.setAlpha(pm.isShuffle() ? 1.0f : 0.5f);
+        if (btnNext != null)
+            btnNext.setAlpha(pm.hasNext() ? 1.0f : 0.4f);
+        if (btnPrev != null)
+            btnPrev.setAlpha(pm.hasPrev() ? 1.0f : 0.4f);
+        if (btnShuffle != null)
+            btnShuffle.setAlpha(pm.isShuffle() ? 1.0f : 0.5f);
         if (btnRepeat != null) {
             switch (pm.getRepeatMode()) {
                 case NONE: btnRepeat.setAlpha(0.4f); break;
-                default:   btnRepeat.setAlpha(1.0f); break;
+                case ALL:  btnRepeat.setAlpha(1.0f); break;
+                case ONE:  btnRepeat.setAlpha(1.0f); break;
             }
         }
     }
@@ -182,18 +186,23 @@ public class PlayerActivity extends AppCompatActivity {
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
         btnPlayPause.setOnClickListener(v -> togglePlayPause());
         videoLayout.setOnClickListener(v -> { if (!isLocked) toggleControls(); });
+
         findViewById(R.id.btn_forward).setOnClickListener(v -> {
             if (mediaPlayer != null) mediaPlayer.setTime(mediaPlayer.getTime() + 10000);
         });
         findViewById(R.id.btn_rewind).setOnClickListener(v -> {
             if (mediaPlayer != null) mediaPlayer.setTime(Math.max(0, mediaPlayer.getTime() - 10000));
         });
+
+        // Playlist controls
         btnNext.setOnClickListener(v -> playNext());
         btnPrev.setOnClickListener(v -> playPrev());
         btnShuffle.setOnClickListener(v -> {
             PlaylistManager.get().toggleShuffle();
             updatePlaylistButtons();
-            Toast.makeText(this, PlaylistManager.get().isShuffle() ? "Shuffle: ON" : "Shuffle: OFF", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this,
+                PlaylistManager.get().isShuffle() ? "Shuffle: ON" : "Shuffle: OFF",
+                Toast.LENGTH_SHORT).show();
         });
         btnRepeat.setOnClickListener(v -> {
             PlaylistManager.RepeatMode mode = PlaylistManager.get().cycleRepeat();
@@ -201,9 +210,17 @@ public class PlayerActivity extends AppCompatActivity {
             String[] labels = {"Repeat: OFF", "Repeat: ALL", "Repeat: ONE"};
             Toast.makeText(this, labels[mode.ordinal()], Toast.LENGTH_SHORT).show();
         });
+
+        // Queue button
         findViewById(R.id.btn_queue).setOnClickListener(v -> showQueueDialog());
+
+        // Night mode
         findViewById(R.id.btn_night).setOnClickListener(v -> toggleNightMode());
+
+        // Video filter
         findViewById(R.id.btn_filter).setOnClickListener(v -> showFilterDialog());
+
+        // Other buttons
         findViewById(R.id.btn_aspect).setOnClickListener(v -> cycleAspectRatio());
         findViewById(R.id.btn_speed).setOnClickListener(v -> showSpeedDialog());
         findViewById(R.id.btn_bookmark).setOnClickListener(v -> addBookmark());
@@ -212,6 +229,7 @@ public class PlayerActivity extends AppCompatActivity {
         findViewById(R.id.btn_lock).setOnClickListener(v -> toggleLock());
         findViewById(R.id.btn_unlock).setOnClickListener(v -> toggleLock());
         findViewById(R.id.btn_translate).setOnClickListener(v -> showTranslateDialog());
+
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
                 if (fromUser) tvCurrent.setText(formatTime(p));
@@ -224,79 +242,7 @@ public class PlayerActivity extends AppCompatActivity {
         });
     }
 
-    private void setupGestures() {
-        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onScroll(MotionEvent e1, MotionEvent e2, float dX, float dY) {
-                if (isLocked || e1 == null) return false;
-                if (e1.getX() < screenW / 2f) adjustBrightness(dY * 0.005f);
-                else adjustVolume(dY * 0.005f);
-                return true;
-            }
-            @Override public boolean onDoubleTap(MotionEvent e) {
-                if (isLocked) return false;
-                if (e.getX() < screenW / 2f) {
-                    if (mediaPlayer != null) mediaPlayer.setTime(Math.max(0, mediaPlayer.getTime() - 10000));
-                    Toast.makeText(PlayerActivity.this, "-10s", Toast.LENGTH_SHORT).show();
-                } else {
-                    if (mediaPlayer != null) mediaPlayer.setTime(mediaPlayer.getTime() + 10000);
-                    Toast.makeText(PlayerActivity.this, "+10s", Toast.LENGTH_SHORT).show();
-                }
-                return true;
-            }
-        });
-        videoLayout.setOnTouchListener((v, event) -> {
-            gestureDetector.onTouchEvent(event);
-            if (event.getAction() == MotionEvent.ACTION_UP && !isLocked) toggleControls();
-            return true;
-        });
-    }
-
-    private void setupVLC() {
-        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        audioSessionId = am.generateAudioSessionId();
-        ArrayList<String> options = new ArrayList<>();
-        options.add("--clock-jitter=0");
-        options.add("--clock-synchro=0");
-        options.add("--avcodec-threads=0");
-        options.add("--network-caching=1500");
-        options.add("--aout=android_audiotrack");
-        options.add("--audiotrack-session-id=" + audioSessionId);
-        libVLC = new LibVLC(this, options);
-        mediaPlayer = new MediaPlayer(libVLC);
-        try {
-            equalizer = new Equalizer(0, audioSessionId);
-            equalizer.setEnabled(true);
-        } catch (Exception ignored) {}
-        mediaPlayer.setEventListener(event -> {
-            switch (event.type) {
-                case MediaPlayer.Event.Playing:
-                    runOnUiThread(() -> {
-                        btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
-                        handler.postDelayed(() -> applyScaleMode(), 200);
-                        scheduleHideControls();
-                        if (!waveletSent) { broadcastAudioSessionOpen(); waveletSent = true; }
-                    });
-                    break;
-                case MediaPlayer.Event.Paused:
-                    runOnUiThread(() -> btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
-                    break;
-                case MediaPlayer.Event.EndReached:
-                    saveHistory();
-                    runOnUiThread(() -> {
-                        PlaylistManager pm = PlaylistManager.get();
-                        if (pm.getRepeatMode() == PlaylistManager.RepeatMode.ONE) {
-                            playMedia(uriString);
-                        } else if (pm.hasNext()) {
-                            playNext();
-                        } else {
-                            finish();
-                        }
-                    });
-                    break;
-            }
-        });
-        mediaPlayer.attachViews(videoLayout, null, false, false);
-    }
+    // ========== PLAYLIST ==========
 
     private void playNext() {
         VideoItem next = PlaylistManager.get().getNext();
@@ -329,41 +275,54 @@ public class PlayerActivity extends AppCompatActivity {
     private void showQueueDialog() {
         PlaylistManager pm = PlaylistManager.get();
         java.util.List<VideoItem> queue = pm.getQueue();
-        if (queue.isEmpty()) { Toast.makeText(this, "Hang doi trong", Toast.LENGTH_SHORT).show(); return; }
+        if (queue.isEmpty()) {
+            Toast.makeText(this, "Hang doi trong", Toast.LENGTH_SHORT).show();
+            return;
+        }
         String[] titles = new String[queue.size()];
-        for (int i = 0; i < queue.size(); i++)
-            titles[i] = (i == pm.getCurrentIndex() ? "▶ " : "  ") + queue.get(i).getName();
+        for (int i = 0; i < queue.size(); i++) {
+            String prefix = (i == pm.getCurrentIndex()) ? "▶ " : "  ";
+            titles[i] = prefix + queue.get(i).getName();
+        }
         new AlertDialog.Builder(this)
-            .setTitle("Hang doi (" + queue.size() + " video)")
+            .setTitle("Hang doi phat (" + queue.size() + " video)")
             .setItems(titles, (d, w) -> {
                 pm.setCurrentIndex(w);
                 VideoItem item = pm.getCurrent();
                 if (item != null) {
                     saveHistory();
-                    uriString = item.getUri().toString();
+                    uriString  = item.getUri().toString();
                     videoTitle = item.getName();
                     tvTitle.setText(videoTitle);
                     playMedia(uriString);
                     updatePlaylistButtons();
                 }
-            }).show();
+            })
+            .show();
     }
+
+    // ========== NIGHT MODE ==========
 
     private void toggleNightMode() {
         nightMode = !nightMode;
-        if (nightOverlay != null) nightOverlay.setVisibility(nightMode ? View.VISIBLE : View.GONE);
-        Toast.makeText(this, nightMode ? "Night mode: ON" : "Night mode: OFF", Toast.LENGTH_SHORT).show();
+        if (nightOverlay != null) {
+            nightOverlay.setVisibility(nightMode ? View.VISIBLE : View.GONE);
+        }
+        Toast.makeText(this,
+            nightMode ? "Night mode: ON" : "Night mode: OFF",
+            Toast.LENGTH_SHORT).show();
     }
 
-    interface SliderCallback { void onValue(int value); }
+    // ========== VIDEO FILTERS ==========
 
     private void showFilterDialog() {
         String[] options = {
-            "Sang (Brightness): " + String.format("%.1f", filterBrightness),
-            "Tuong phan (Contrast): " + String.format("%.1f", filterContrast),
-            "Mau (Saturation): " + String.format("%.1f", filterSaturation),
+            "Chinh sang (Brightness): " + String.format("%.1f", filterBrightness),
+            "Do tuong phan (Contrast): " + String.format("%.1f", filterContrast),
+            "Mau sac (Saturation): " + String.format("%.1f", filterSaturation),
+            "Mau sac (Hue): " + String.format("%.0f", filterHue),
             filtersEnabled ? "Tat bo loc" : "Bat bo loc",
-            "Reset mac dinh"
+            "Reset ve mac dinh"
         };
         new AlertDialog.Builder(this)
             .setTitle("Bo loc video")
@@ -375,21 +334,32 @@ public class PlayerActivity extends AppCompatActivity {
                         val -> { filterContrast = val/100f; applyFilters(); }); break;
                     case 2: showSliderDialog("Saturation", 0, 200, (int)(filterSaturation*100),
                         val -> { filterSaturation = val/100f; applyFilters(); }); break;
-                    case 3:
+                    case 3: showSliderDialog("Hue", 0, 360, (int)(filterHue+180),
+                        val -> { filterHue = val-180; applyFilters(); }); break;
+                    case 4:
                         filtersEnabled = !filtersEnabled;
                         applyFilters();
-                        Toast.makeText(this, filtersEnabled ? "Bo loc: ON" : "Bo loc: OFF", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this,
+                            filtersEnabled ? "Bo loc: ON" : "Bo loc: OFF",
+                            Toast.LENGTH_SHORT).show();
                         break;
-                    case 4:
-                        filterBrightness = 1.0f; filterContrast = 1.0f; filterSaturation = 1.0f;
-                        filtersEnabled = false; applyFilters();
+                    case 5:
+                        filterBrightness = 1.0f;
+                        filterContrast   = 1.0f;
+                        filterSaturation = 1.0f;
+                        filterHue        = 0.0f;
+                        filtersEnabled   = false;
+                        applyFilters();
                         Toast.makeText(this, "Da reset bo loc", Toast.LENGTH_SHORT).show();
                         break;
                 }
             }).show();
     }
 
-    private void showSliderDialog(String title, int min, int max, int current, SliderCallback cb) {
+    interface SliderCallback { void onValue(int value); }
+
+    private void showSliderDialog(String title, int min, int max, int current,
+            SliderCallback callback) {
         android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
         layout.setOrientation(android.widget.LinearLayout.VERTICAL);
         layout.setPadding(48, 24, 48, 24);
@@ -400,39 +370,108 @@ public class PlayerActivity extends AppCompatActivity {
         tvVal.setText(String.valueOf(current));
         tvVal.setGravity(android.view.Gravity.CENTER);
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar sb, int p, boolean u) { tvVal.setText(String.valueOf(p + min)); }
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean u) {
+                tvVal.setText(String.valueOf(p + min));
+            }
             @Override public void onStartTrackingTouch(SeekBar sb) {}
             @Override public void onStopTrackingTouch(SeekBar sb) {}
         });
         layout.addView(tvVal);
         layout.addView(slider);
         new AlertDialog.Builder(this)
-            .setTitle(title).setView(layout)
-            .setPositiveButton("OK", (d, w) -> cb.onValue(slider.getProgress() + min))
-            .setNegativeButton("Huy", null).show();
+            .setTitle(title)
+            .setView(layout)
+            .setPositiveButton("OK", (d, w) -> {
+                callback.onValue(slider.getProgress() + min);
+            })
+            .setNegativeButton("Huy", null)
+            .show();
     }
 
     private void applyFilters() {
         if (videoLayout == null) return;
         if (!filtersEnabled) {
-            videoLayout.setLayerType(View.LAYER_TYPE_NONE, null);
+            // Reset ve mac dinh - xoa ColorFilter
+            videoLayout.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
             return;
         }
-        float c = filterContrast;
-        float b = (filterBrightness - 1.0f) * 255f;
-        float[] matrix = {
+        // Dung Android ColorMatrix de chinh filter
+        // Khong can libVLC API - hoat dong tren moi phien ban
+        android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
+
+        // Contrast + Brightness
+        float c = filterContrast;   // 0.0-2.0, mac dinh 1.0
+        float b = (filterBrightness - 1.0f) * 255f; // chuyen ve -255 den 255
+        float[] contrastMatrix = {
             c, 0, 0, 0, b,
             0, c, 0, 0, b,
             0, 0, c, 0, b,
             0, 0, 0, 1, 0
         };
-        ColorMatrix cm = new ColorMatrix(matrix);
-        ColorMatrix sat = new ColorMatrix();
-        sat.setSaturation(filterSaturation);
-        cm.postConcat(sat);
-        Paint paint = new Paint();
-        paint.setColorFilter(new ColorMatrixColorFilter(cm));
-        videoLayout.setLayerType(View.LAYER_TYPE_HARDWARE, paint);
+        cm.set(contrastMatrix);
+
+        // Saturation
+        android.graphics.ColorMatrix satMatrix = new android.graphics.ColorMatrix();
+        satMatrix.setSaturation(filterSaturation);
+        cm.postConcat(satMatrix);
+
+        android.graphics.ColorMatrixColorFilter filter =
+            new android.graphics.ColorMatrixColorFilter(cm);
+        android.graphics.Paint paint = new android.graphics.Paint();
+        paint.setColorFilter(filter);
+        videoLayout.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint);
+    }
+
+    // ========== VLC SETUP ==========
+
+    private void setupVLC() {
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        audioSessionId = am.generateAudioSessionId();
+        ArrayList<String> options = new ArrayList<>();
+        options.add("--clock-jitter=0");
+        options.add("--clock-synchro=0");
+        options.add("--avcodec-threads=0");
+        options.add("--network-caching=1500");
+        options.add("--aout=android_audiotrack");
+        options.add("--audiotrack-session-id=" + audioSessionId);
+        libVLC = new LibVLC(this, options);
+        mediaPlayer = new MediaPlayer(libVLC);
+        try {
+            equalizer = new Equalizer(0, audioSessionId);
+            equalizer.setEnabled(true);
+        } catch (Exception ignored) {}
+        mediaPlayer.setEventListener(event -> {
+            switch (event.type) {
+                case MediaPlayer.Event.Playing:
+                    runOnUiThread(() -> {
+                        btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
+                        handler.postDelayed(() -> applyScaleMode(), 200);
+                        if (filtersEnabled) handler.postDelayed(() -> applyFilters(), 300);
+                        scheduleHideControls();
+                        if (!waveletSent) { broadcastAudioSessionOpen(); waveletSent = true; }
+                        startBackgroundService();
+                    });
+                    break;
+                case MediaPlayer.Event.Paused:
+                    runOnUiThread(() ->
+                        btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
+                    break;
+                case MediaPlayer.Event.EndReached:
+                    saveHistory();
+                    runOnUiThread(() -> {
+                        PlaylistManager pm = PlaylistManager.get();
+                        if (pm.getRepeatMode() == PlaylistManager.RepeatMode.ONE) {
+                            playMedia(uriString); // replay
+                        } else if (pm.hasNext()) {
+                            playNext();
+                        } else {
+                            finish();
+                        }
+                    });
+                    break;
+            }
+        });
+        mediaPlayer.attachViews(videoLayout, null, false, false);
     }
 
     private void applyScaleMode() {
@@ -456,7 +495,8 @@ public class PlayerActivity extends AppCompatActivity {
     private void playMedia(String uri) {
         dbExecutor.execute(() -> {
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
-            final long resumePos = (history != null && history.lastPosition > 5000) ? history.lastPosition : 0;
+            final long resumePos = (history != null && history.lastPosition > 5000)
+                ? history.lastPosition : 0;
             runOnUiThread(() -> {
                 try {
                     Uri u = Uri.parse(uri);
@@ -478,7 +518,8 @@ public class PlayerActivity extends AppCompatActivity {
                     if (resumePos > 0) {
                         handler.postDelayed(() -> {
                             mediaPlayer.setTime(resumePos);
-                            Toast.makeText(this, "Tiep tuc tu " + formatTime(resumePos), Toast.LENGTH_SHORT).show();
+                            Toast.makeText(this, "Tiep tuc tu " + formatTime(resumePos),
+                                Toast.LENGTH_SHORT).show();
                         }, 1000);
                     }
                 } catch (Exception e) {
@@ -505,13 +546,15 @@ public class PlayerActivity extends AppCompatActivity {
         EditText input = new EditText(this);
         input.setText("Bookmark " + formatTime(pos));
         new AlertDialog.Builder(this)
-            .setTitle("Danh dau thoi diem").setView(input)
+            .setTitle("Danh dau thoi diem")
+            .setView(input)
             .setPositiveButton("Luu", (d, w) -> {
                 String label = input.getText().toString().trim();
                 if (label.isEmpty()) label = "Bookmark " + formatTime(pos);
                 final String fl = label;
                 dbExecutor.execute(() -> AppDatabase.get(this).dao().insertBookmark(
-                    new BookmarkItem(uriString, videoTitle != null ? videoTitle : "Video", pos, fl)));
+                    new BookmarkItem(uriString,
+                        videoTitle != null ? videoTitle : "Video", pos, fl)));
                 Toast.makeText(this, "Da danh dau: " + fl, Toast.LENGTH_SHORT).show();
             })
             .setNegativeButton("Huy", null).show();
@@ -521,7 +564,8 @@ public class PlayerActivity extends AppCompatActivity {
         String[] speeds = {"0.25x","0.5x","0.75x","1.0x","1.25x","1.5x","1.75x","2.0x"};
         float[] vals = {0.25f,0.5f,0.75f,1.0f,1.25f,1.5f,1.75f,2.0f};
         int cur = 3;
-        for (int i = 0; i < vals.length; i++) if (Math.abs(vals[i]-playbackSpeed)<0.01f) { cur=i; break; }
+        for (int i = 0; i < vals.length; i++)
+            if (Math.abs(vals[i]-playbackSpeed) < 0.01f) { cur=i; break; }
         new AlertDialog.Builder(this)
             .setTitle("Toc do phat")
             .setSingleChoiceItems(speeds, cur, (d, w) -> {
@@ -533,7 +577,10 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void showEqualizerDialog() {
-        if (equalizer == null) { Toast.makeText(this, "EQ khong kha dung", Toast.LENGTH_SHORT).show(); return; }
+        if (equalizer == null) {
+            Toast.makeText(this, "EQ khong kha dung", Toast.LENGTH_SHORT).show();
+            return;
+        }
         short presets = equalizer.getNumberOfPresets();
         String[] names = new String[presets + 1];
         names[0] = "Mac dinh";
@@ -576,9 +623,16 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showTranslateDialog() {
         TranslationManager tm = new TranslationManager(this);
-        String[] opts = {"Dich subtitle tu URL", "Doi ngon ngu (hien tai: " + tm.getTargetLanguageName() + ")"};
-        new AlertDialog.Builder(this).setTitle("Dich AI")
-            .setItems(opts, (d, which) -> { if (which == 0) showSrtUrlInput(); else showChangeLangDialog(); }).show();
+        String[] opts = {
+            "Dich subtitle tu URL",
+            "Doi ngon ngu (hien tai: " + tm.getTargetLanguageName() + ")"
+        };
+        new AlertDialog.Builder(this)
+            .setTitle("Dich AI")
+            .setItems(opts, (d, which) -> {
+                if (which == 0) showSrtUrlInput();
+                else showChangeLangDialog();
+            }).show();
     }
 
     private void showChangeLangDialog() {
@@ -587,34 +641,46 @@ public class PlayerActivity extends AppCompatActivity {
         String[] names = new String[langs.length];
         String cur = tm.getTargetLanguage();
         int curIdx = 0;
-        for (int i = 0; i < langs.length; i++) { names[i] = langs[i][0]; if (langs[i][1].equals(cur)) curIdx = i; }
+        for (int i = 0; i < langs.length; i++) {
+            names[i] = langs[i][0];
+            if (langs[i][1].equals(cur)) curIdx = i;
+        }
         final int[] sel = {curIdx};
-        new AlertDialog.Builder(this).setTitle("Chon ngon ngu")
+        new AlertDialog.Builder(this)
+            .setTitle("Chon ngon ngu dich")
             .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
             .setPositiveButton("Luu", (d, w) -> {
                 tm.setTargetLanguage(langs[sel[0]][1]);
-                Toast.makeText(this, "Da chon: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
-            }).setNegativeButton("Huy", null).show();
+                Toast.makeText(this, "Da chon: " + langs[sel[0]][0],
+                    Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Huy", null).show();
     }
 
     private void showSrtUrlInput() {
         EditText input = new EditText(this);
         input.setHint("https://example.com/subtitle.srt");
-        new AlertDialog.Builder(this).setTitle("URL file SRT").setView(input)
+        new AlertDialog.Builder(this)
+            .setTitle("URL file SRT")
+            .setView(input)
             .setPositiveButton("Dich", (d, w) -> {
                 String url = input.getText().toString().trim();
                 if (!url.isEmpty()) startSrtDownloadAndTranslate(url);
-            }).setNegativeButton("Huy", null).show();
+            })
+            .setNegativeButton("Huy", null).show();
     }
 
     private void startSrtDownloadAndTranslate(String url) {
         ProgressDialog pd = new ProgressDialog(this);
-        pd.setMessage("Dang tai subtitle..."); pd.setCancelable(false); pd.show();
+        pd.setMessage("Dang tai subtitle...");
+        pd.setCancelable(false);
+        pd.show();
         new Thread(() -> {
             try {
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
                 conn.setConnectTimeout(10000);
-                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                BufferedReader br = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String ln;
                 while ((ln = br.readLine()) != null) sb.append(ln).append("\n");
@@ -629,11 +695,19 @@ public class PlayerActivity extends AppCompatActivity {
                             runOnUiThread(() -> { pd.dismiss(); saveSrtAndLoad(t); });
                         }
                         @Override public void onError(String e) {
-                            runOnUiThread(() -> { pd.dismiss(); Toast.makeText(PlayerActivity.this, e, Toast.LENGTH_SHORT).show(); });
+                            runOnUiThread(() -> {
+                                pd.dismiss();
+                                Toast.makeText(PlayerActivity.this, e,
+                                    Toast.LENGTH_SHORT).show();
+                            });
                         }
                     });
             } catch (Exception e) {
-                runOnUiThread(() -> { pd.dismiss(); Toast.makeText(this, "Loi tai: " + e.getMessage(), Toast.LENGTH_SHORT).show(); });
+                runOnUiThread(() -> {
+                    pd.dismiss();
+                    Toast.makeText(this, "Loi tai: " + e.getMessage(),
+                        Toast.LENGTH_SHORT).show();
+                });
             }
         }).start();
     }
@@ -641,8 +715,12 @@ public class PlayerActivity extends AppCompatActivity {
     private void saveSrtAndLoad(String srtContent) {
         try {
             File f = new File(getExternalFilesDir(null), "translated.srt");
-            FileWriter fw = new FileWriter(f); fw.write(srtContent); fw.close();
-            if (mediaPlayer != null) mediaPlayer.addSlave(Media.Slave.Type.Subtitle, Uri.fromFile(f).toString(), true);
+            FileWriter fw = new FileWriter(f);
+            fw.write(srtContent);
+            fw.close();
+            if (mediaPlayer != null)
+                mediaPlayer.addSlave(Media.Slave.Type.Subtitle,
+                    Uri.fromFile(f).toString(), true);
             Toast.makeText(this, "Da dich va load subtitle!", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Toast.makeText(this, "Loi luu: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -654,12 +732,17 @@ public class PlayerActivity extends AppCompatActivity {
         String lower = title.toLowerCase();
         short presetIndex = -1;
         if (lower.contains("fap") || lower.contains("music") || lower.contains("dance"))
-            presetIndex = findPreset(new String[]{"Dance", "Pop"});
+            presetIndex = findPreset(new String[]{"Dance", "Pop", "Party"});
         else if (lower.contains("movie") || lower.contains("film"))
             presetIndex = findPreset(new String[]{"Theater", "Movie"});
-        else if (lower.contains("anime")) presetIndex = findPreset(new String[]{"Vocal", "Pop"});
-        else if (lower.contains("game") || lower.contains("action")) presetIndex = findPreset(new String[]{"Rock"});
-        if (presetIndex >= 0) equalizer.usePreset(presetIndex);
+        else if (lower.contains("anime") || lower.contains("animation"))
+            presetIndex = findPreset(new String[]{"Vocal", "Pop"});
+        else if (lower.contains("game") || lower.contains("action"))
+            presetIndex = findPreset(new String[]{"Rock", "Live"});
+        if (presetIndex >= 0) {
+            final short idx = presetIndex;
+            equalizer.usePreset(idx);
+        }
     }
 
     private short findPreset(String[] keywords) {
@@ -667,9 +750,42 @@ public class PlayerActivity extends AppCompatActivity {
         short presets = equalizer.getNumberOfPresets();
         for (String kw : keywords)
             for (short i = 0; i < presets; i++)
-                if (equalizer.getPresetName(i) != null && equalizer.getPresetName(i).toLowerCase().contains(kw.toLowerCase()))
+                if (equalizer.getPresetName(i) != null &&
+                    equalizer.getPresetName(i).toLowerCase().contains(kw.toLowerCase()))
                     return i;
         return -1;
+    }
+
+    private void setupGestures() {
+        gestureDetector = new GestureDetector(this,
+            new GestureDetector.SimpleOnGestureListener() {
+                @Override
+                public boolean onScroll(MotionEvent e1, MotionEvent e2, float dX, float dY) {
+                    if (isLocked || e1 == null) return false;
+                    if (e1.getX() < screenW / 2f) adjustBrightness(dY * 0.005f);
+                    else adjustVolume(dY * 0.005f);
+                    return true;
+                }
+                @Override
+                public boolean onDoubleTap(MotionEvent e) {
+                    if (isLocked) return false;
+                    if (e.getX() < screenW / 2f) {
+                        if (mediaPlayer != null)
+                            mediaPlayer.setTime(Math.max(0, mediaPlayer.getTime() - 10000));
+                        Toast.makeText(PlayerActivity.this, "-10s", Toast.LENGTH_SHORT).show();
+                    } else {
+                        if (mediaPlayer != null)
+                            mediaPlayer.setTime(mediaPlayer.getTime() + 10000);
+                        Toast.makeText(PlayerActivity.this, "+10s", Toast.LENGTH_SHORT).show();
+                    }
+                    return true;
+                }
+            });
+        videoLayout.setOnTouchListener((v, event) -> {
+            gestureDetector.onTouchEvent(event);
+            if (event.getAction() == MotionEvent.ACTION_UP && !isLocked) toggleControls();
+            return true;
+        });
     }
 
     private void adjustBrightness(float delta) {
@@ -677,14 +793,17 @@ public class PlayerActivity extends AppCompatActivity {
         if (p.screenBrightness < 0) p.screenBrightness = 0.5f;
         p.screenBrightness = Math.max(0.01f, Math.min(1.0f, p.screenBrightness + delta));
         getWindow().setAttributes(p);
-        Toast.makeText(this, "Sang: " + (int)(p.screenBrightness*100) + "%", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Sang: " + (int)(p.screenBrightness*100) + "%",
+            Toast.LENGTH_SHORT).show();
     }
 
     private void adjustVolume(float delta) {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
         int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-        am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, Math.min(max, (int)(cur + delta * max))), AudioManager.FLAG_SHOW_UI);
+        am.setStreamVolume(AudioManager.STREAM_MUSIC,
+            Math.max(0, Math.min(max, (int)(cur + delta * max))),
+            AudioManager.FLAG_SHOW_UI);
     }
 
     private void togglePlayPause() {
@@ -696,7 +815,8 @@ public class PlayerActivity extends AppCompatActivity {
     private void toggleControls() {
         if (controlsVisible) {
             handler.removeCallbacks(hideControls);
-            controlsOverlay.animate().alpha(0f).setDuration(300).withEndAction(() -> controlsOverlay.setVisibility(View.GONE));
+            controlsOverlay.animate().alpha(0f).setDuration(300)
+                    .withEndAction(() -> controlsOverlay.setVisibility(View.GONE));
             controlsVisible = false;
         } else {
             controlsOverlay.setVisibility(View.VISIBLE);
@@ -743,6 +863,32 @@ public class PlayerActivity extends AppCompatActivity {
         return String.format(Locale.US, "%02d:%02d", m, s);
     }
 
+
+    private void startBackgroundService() {
+        if (!bgServiceStarted) {
+            android.content.Intent i = new android.content.Intent(
+                this, MediaPlaybackService.class);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(i);
+            } else {
+                startService(i);
+            }
+            bgServiceStarted = true;
+        }
+        // Cap nhat thong bao
+        android.content.Intent upd = new android.content.Intent(
+            this, MediaPlaybackService.class);
+        startService(upd);
+    }
+
+    private void stopBackgroundService() {
+        if (bgServiceStarted) {
+            stopService(new android.content.Intent(
+                this, MediaPlaybackService.class));
+            bgServiceStarted = false;
+        }
+    }
+
     private void hideSystemUI() {
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -766,7 +912,10 @@ public class PlayerActivity extends AppCompatActivity {
     @Override protected void onStop() {
         super.onStop();
         saveHistory();
-        if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.detachViews(); }
+        if (mediaPlayer != null) {
+            mediaPlayer.stop();
+            mediaPlayer.detachViews();
+        }
     }
 
     @Override protected void onDestroy() {
@@ -774,6 +923,7 @@ public class PlayerActivity extends AppCompatActivity {
         broadcastAudioSessionClose();
         if (equalizer != null) equalizer.release();
         handler.removeCallbacksAndMessages(null);
+        stopBackgroundService();
         if (mediaPlayer != null) mediaPlayer.release();
         if (libVLC != null) libVLC.release();
         closePfd();

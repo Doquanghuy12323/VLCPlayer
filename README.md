@@ -14,7 +14,7 @@
 
 ```bash
 # 1. Clone về
-git clone https://github.com/Doquanghuy12323/VLCPlayer.git
+git clone https://github.com/YOUR_USERNAME/VLCPlayer.git
 cd VLCPlayer
 
 # 2. Build APK (cần Java 17 trong Termux)

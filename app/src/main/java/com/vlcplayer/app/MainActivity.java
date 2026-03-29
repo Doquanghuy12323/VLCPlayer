@@ -1,6 +1,7 @@
 package com.vlcplayer.app;
 
 import android.Manifest;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -8,13 +9,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Looper;
 import android.provider.MediaStore;
+import android.text.format.DateUtils;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.view.View;
-import android.widget.ProgressBar;
-import android.widget.TextView;
+import android.widget.EditText;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -26,8 +25,9 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.bumptech.glide.Glide;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.vlcplayer.app.db.AppDatabase;
+import com.vlcplayer.app.db.HistoryItem;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,42 +35,30 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity
-    implements VideoAdapter.OnVideoClickListener {
+        implements VideoAdapter.OnVideoClickListener {
 
-    private static final int REQ_PERMISSION = 100;
+    private static final int PERM_REQUEST = 100;
+    private static final int PICK_VIDEO   = 101;
 
     private RecyclerView recyclerView;
+    private final Handler handler = new Handler();
     private VideoAdapter adapter;
-    private ProgressBar progressBar;
-    private TextView tvEmpty;
-    private final List<VideoItem> videoList = new ArrayList<>();
+    private List<VideoItem> videoList = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        Toolbar toolbar = findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
+        setSupportActionBar((Toolbar) findViewById(R.id.toolbar));
 
         recyclerView = findViewById(R.id.recyclerView);
-        progressBar  = findViewById(R.id.progress_bar);
-        tvEmpty      = findViewById(R.id.tv_empty);
-
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        recyclerView.setHasFixedSize(true);
-        // Gioi han cache recyclerview tranh tran bo nho
-        recyclerView.setItemViewCacheSize(10);
-        recyclerView.setDrawingCacheEnabled(false);
-
         adapter = new VideoAdapter(videoList, this);
-        adapter.setHasStableIds(true);
         recyclerView.setAdapter(adapter);
 
-        View fab = findViewById(R.id.fab);
-        if (fab != null) fab.setOnClickListener(v -> showUrlDialog());
+        ((FloatingActionButton) findViewById(R.id.fab))
+            .setOnClickListener(v -> openFilePicker());
 
         checkPermissionsAndLoad();
         new UpdateManager(this).checkForUpdate(true);
@@ -78,59 +66,34 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
-    protected void onNewIntent(Intent intent) {
+    protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
         handleShareIntent(intent);
     }
 
-    private void handleShareIntent(Intent intent) {
+    private void handleShareIntent(android.content.Intent intent) {
         if (intent == null) return;
         String action = intent.getAction();
-        Uri uri = null;
-        if (Intent.ACTION_VIEW.equals(action)) {
+        android.net.Uri uri = null;
+
+        if (android.content.Intent.ACTION_VIEW.equals(action)) {
             uri = intent.getData();
-        } else if (Intent.ACTION_SEND.equals(action)) {
-            uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        } else if (android.content.Intent.ACTION_SEND.equals(action)) {
+            uri = intent.getParcelableExtra(android.content.Intent.EXTRA_STREAM);
         }
+
         if (uri != null) {
-            final Uri finalUri = uri;
+            final android.net.Uri finalUri = uri;
+            // Dat vao playlist va mo player ngay
             handler.postDelayed(() -> {
-                Intent player = new Intent(this, PlayerActivity.class);
+                android.content.Intent player =
+                    new android.content.Intent(this, PlayerActivity.class);
                 player.putExtra(PlayerActivity.EXTRA_URI, finalUri.toString());
-                String name = finalUri.getLastPathSegment();
                 player.putExtra(PlayerActivity.EXTRA_TITLE,
-                    name != null ? name : "Video");
+                    finalUri.getLastPathSegment() != null
+                        ? finalUri.getLastPathSegment() : "Video");
                 startActivity(player);
             }, 300);
-        }
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Khi quay lai tu PlayerActivity, dọn Glide memory
-        Glide.get(this).clearMemory();
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (adapter != null) adapter.clearCache();
-        executor.shutdown();
-    }
-
-    @Override
-    public void onLowMemory() {
-        super.onLowMemory();
-        Glide.get(this).clearMemory();
-        if (adapter != null) adapter.clearCache();
-    }
-
-    @Override
-    public void onTrimMemory(int level) {
-        super.onTrimMemory(level);
-        if (level >= TRIM_MEMORY_MODERATE) {
-            Glide.get(this).clearMemory();
         }
     }
 
@@ -142,71 +105,137 @@ public class MainActivity extends AppCompatActivity
                 == PackageManager.PERMISSION_GRANTED) {
             loadVideos();
         } else {
-            ActivityCompat.requestPermissions(this,
-                new String[]{perm}, REQ_PERMISSION);
-        }
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int req,
-            @NonNull String[] perms, @NonNull int[] results) {
-        super.onRequestPermissionsResult(req, perms, results);
-        if (req == REQ_PERMISSION && results.length > 0
-                && results[0] == PackageManager.PERMISSION_GRANTED) {
-            loadVideos();
-        } else {
-            Toast.makeText(this, "Can quyen truy cap bo nho",
-                Toast.LENGTH_LONG).show();
+            ActivityCompat.requestPermissions(this, new String[]{perm}, PERM_REQUEST);
         }
     }
 
     private void loadVideos() {
-        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
-        executor.execute(() -> {
-            List<VideoItem> items = new ArrayList<>();
-            String[] proj = {
-                MediaStore.Video.Media._ID,
-                MediaStore.Video.Media.DISPLAY_NAME,
-                MediaStore.Video.Media.DURATION,
-                MediaStore.Video.Media.SIZE,
-                MediaStore.Video.Media.DATA
-            };
-            String sort = MediaStore.Video.Media.DATE_ADDED + " DESC";
-            try (Cursor c = getContentResolver().query(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    proj, null, null, sort)) {
-                if (c != null) {
-                    int iId   = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
-                    int iName = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
-                    int iDur  = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
-                    int iSize = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
-                    while (c.moveToNext()) {
-                        long id  = c.getLong(iId);
-                        Uri uri  = Uri.withAppendedPath(
-                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                            String.valueOf(id));
-                        items.add(new VideoItem(id, c.getString(iName),
-                            uri, c.getLong(iDur), c.getLong(iSize)));
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
+        videoList.clear();
+        ContentResolver cr = getContentResolver();
+        String[] proj = {
+            MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME,
+            MediaStore.Video.Media.DURATION, MediaStore.Video.Media.SIZE,
+            MediaStore.Video.Media.DATA
+        };
+        try (Cursor c = cr.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                proj, null, null, MediaStore.Video.Media.DATE_ADDED + " DESC")) {
+            if (c != null && c.moveToFirst()) {
+                do {
+                    long id     = c.getLong(c.getColumnIndexOrThrow(MediaStore.Video.Media._ID));
+                    String name = c.getString(c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME));
+                    long dur    = c.getLong(c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION));
+                    long size   = c.getLong(c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE));
+                    String path = c.getString(c.getColumnIndexOrThrow(MediaStore.Video.Media.DATA));
+                    Uri uri = Uri.withAppendedPath(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+                    videoList.add(new VideoItem(id, name, dur, size, path, uri));
+                } while (c.moveToNext());
             }
-            handler.post(() -> {
-                if (progressBar != null) progressBar.setVisibility(View.GONE);
-                videoList.clear();
-                videoList.addAll(items);
-                adapter.notifyDataSetChanged();
-                if (tvEmpty != null)
-                    tvEmpty.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
+        }
+        adapter.notifyDataSetChanged();
+        if (videoList.isEmpty())
+            Toast.makeText(this, "Không tìm thấy video", Toast.LENGTH_SHORT).show();
+    }
+
+    private void openFilePicker() {
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("video/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(Intent.createChooser(i, "Chọn video"), PICK_VIDEO);
+    }
+
+    private void showUrlDialog() {
+        EditText input = new EditText(this);
+        input.setHint("https://example.com/video.mp4");
+
+        new AlertDialog.Builder(this)
+            .setTitle("Phát từ URL")
+            .setView(input)
+            .setPositiveButton("Phát", (d, w) -> {
+                String url = input.getText().toString().trim();
+                if (!url.isEmpty()) {
+                    Intent intent = new Intent(this, PlayerActivity.class);
+                    intent.putExtra(PlayerActivity.EXTRA_URI, url);
+                    intent.putExtra(PlayerActivity.EXTRA_TITLE, url);
+                    startActivity(intent);
+                }
+            })
+            .setNegativeButton("Hủy", null)
+            .show();
+    }
+
+    private void showHistoryDialog() {
+        executor.execute(() -> {
+            List<HistoryItem> history = AppDatabase.get(this).dao().getHistory();
+            runOnUiThread(() -> {
+                if (history.isEmpty()) {
+                    Toast.makeText(this, "Chưa có lịch sử xem", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String[] titles = new String[history.size()];
+                for (int i = 0; i < history.size(); i++) {
+                    HistoryItem h = history.get(i);
+                    String ago = DateUtils.getRelativeTimeSpanString(
+                        h.watchedAt).toString();
+                    titles[i] = h.title + "\n" + formatTime(h.lastPosition)
+                        + " / " + formatTime(h.duration) + " · " + ago;
+                }
+                new AlertDialog.Builder(this)
+                    .setTitle("Lịch sử xem")
+                    .setItems(titles, (d, which) -> {
+                        HistoryItem h = history.get(which);
+                        Intent intent = new Intent(this, PlayerActivity.class);
+                        intent.putExtra(PlayerActivity.EXTRA_URI, h.uri);
+                        intent.putExtra(PlayerActivity.EXTRA_TITLE, h.title);
+                        startActivity(intent);
+                    })
+                    .setNegativeButton("Xóa tất cả", (d, w) -> {
+                        executor.execute(() -> AppDatabase.get(this).dao().clearHistory());
+                        Toast.makeText(this, "Đã xóa lịch sử", Toast.LENGTH_SHORT).show();
+                    })
+                    .show();
             });
         });
     }
 
+    private void showPrivacyDialog() {
+        boolean enabled = PrivacyManager.isEnabled(this);
+        new AlertDialog.Builder(this)
+            .setTitle("Chế độ bảo mật")
+            .setMessage(enabled
+                ? "Đang bật: Video ẩn khỏi Gallery và các app media khác.\nTắt chế độ bảo mật?"
+                : "Bật chế độ bảo mật sẽ ẩn video khỏi Gallery và các app media khác.\nBật không?")
+            .setPositiveButton(enabled ? "Tắt" : "Bật", (d, w) -> {
+                PrivacyManager.setEnabled(this, !enabled);
+                Toast.makeText(this,
+                    enabled ? "Đã tắt bảo mật" : "Đã bật bảo mật - Video ẩn khỏi Gallery",
+                    Toast.LENGTH_LONG).show();
+            })
+            .setNegativeButton("Hủy", null)
+            .show();
+    }
+
+    private String formatTime(long ms) {
+        long h = ms / 3600000, m = (ms % 3600000) / 60000, s = (ms % 60000) / 1000;
+        if (h > 0) return String.format("%d:%02d:%02d", h, m, s);
+        return String.format("%02d:%02d", m, s);
+    }
+
     @Override
-    public void onVideoClick(VideoItem video) {
-        PlaylistManager.get().setQueue(videoList,
-            videoList.indexOf(video));
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == PICK_VIDEO && res == RESULT_OK && data != null && data.getData() != null) {
+            Intent i = new Intent(this, PlayerActivity.class);
+            i.putExtra(PlayerActivity.EXTRA_URI, data.getData().toString());
+            i.putExtra(PlayerActivity.EXTRA_TITLE, "Video");
+            startActivity(i);
+        }
+    }
+
+    @Override public void onVideoClick(VideoItem video) {
+        // Set toan bo danh sach vao queue, bat dau tu video duoc chon
+        int index = videoList.indexOf(video);
+        PlaylistManager.get().setQueue(videoList, index);
         Intent i = new Intent(this, PlayerActivity.class);
         i.putExtra(PlayerActivity.EXTRA_URI, video.getUri().toString());
         i.putExtra(PlayerActivity.EXTRA_TITLE, video.getName());
@@ -214,86 +243,32 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
+    public void onRequestPermissionsResult(int req, @NonNull String[] perms,
+            @NonNull int[] results) {
+        super.onRequestPermissionsResult(req, perms, results);
+        if (req == PERM_REQUEST && results.length > 0
+                && results[0] == PackageManager.PERMISSION_GRANTED) loadVideos();
+    }
+
+    @Override public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.main_menu, menu);
         return true;
     }
 
-    @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+    @Override public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.action_refresh) {
-            Glide.get(this).clearMemory();
-            loadVideos();
-            return true;
-        }
+        if (id == R.id.action_refresh) { checkPermissionsAndLoad(); return true; }
+        if (id == R.id.action_translate) { showTranslateLangDialog(); return true; }
         if (id == R.id.action_url) { showUrlDialog(); return true; }
         if (id == R.id.action_history) { showHistoryDialog(); return true; }
-        if (id == R.id.action_privacy) { togglePrivacy(); return true; }
-        if (id == R.id.action_translate) { showTranslateSettings(); return true; }
-        if (id == R.id.action_clean) { cleanApp(); return true; }
+        if (id == R.id.action_privacy) { showPrivacyDialog(); return true; }
+        if (id == R.id.action_clean) { showCleanDialog(); return true; }
         if (id == R.id.action_update) {
-            new UpdateManager(this).checkForUpdate(false); return true;
-        }
+            new UpdateManager(this).checkForUpdate(false); return true; }
         return super.onOptionsItemSelected(item);
     }
 
-    private void togglePrivacy() {
-        boolean current = PrivacyManager.isEnabled(this);
-        boolean next = !current;
-        PrivacyManager.setEnabled(this, next);
-        Toast.makeText(this,
-            next ? "Che do bao mat: BAT (Gallery se an video)"
-                 : "Che do bao mat: TAT (Gallery se hien video lai)",
-            Toast.LENGTH_LONG).show();
-    }
-
-    private void showUrlDialog() {
-        android.widget.EditText et = new android.widget.EditText(this);
-        et.setHint("https://example.com/video.mp4");
-        new AlertDialog.Builder(this)
-            .setTitle("Phat tu URL")
-            .setView(et)
-            .setPositiveButton("Phat", (d, w) -> {
-                String url = et.getText().toString().trim();
-                if (!url.isEmpty()) {
-                    Intent i = new Intent(this, PlayerActivity.class);
-                    i.putExtra(PlayerActivity.EXTRA_URI, url);
-                    i.putExtra(PlayerActivity.EXTRA_TITLE, "URL Stream");
-                    startActivity(i);
-                }
-            })
-            .setNegativeButton("Huy", null).show();
-    }
-
-    private void showHistoryDialog() {
-        executor.execute(() -> {
-            List<com.vlcplayer.app.db.HistoryItem> hist =
-                AppDatabase.get(this).dao().getHistory();
-            handler.post(() -> {
-                if (hist.isEmpty()) {
-                    Toast.makeText(this, "Chua co lich su xem",
-                        Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                String[] names = new String[hist.size()];
-                for (int i = 0; i < hist.size(); i++)
-                    names[i] = hist.get(i).title;
-                new AlertDialog.Builder(this)
-                    .setTitle("Lich su xem")
-                    .setItems(names, (d, w) -> {
-                        com.vlcplayer.app.db.HistoryItem h = hist.get(w);
-                        Intent i = new Intent(this, PlayerActivity.class);
-                        i.putExtra(PlayerActivity.EXTRA_URI, h.uri);
-                        i.putExtra(PlayerActivity.EXTRA_TITLE, h.title);
-                        startActivity(i);
-                    })
-                    .setNegativeButton("Dong", null).show();
-            });
-        });
-    }
-
-    private void showTranslateSettings() {
+    private void showTranslateLangDialog() {
         TranslationManager tm = new TranslationManager(this);
         String[][] langs = TranslationManager.LANGUAGES;
         String[] names = new String[langs.length];
@@ -309,63 +284,106 @@ public class MainActivity extends AppCompatActivity
             .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
             .setPositiveButton("Luu", (d, w) -> {
                 tm.setTargetLanguage(langs[sel[0]][1]);
-                Toast.makeText(this, "Da chon: " + langs[sel[0]][0],
-                    Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Da chon: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
             })
             .setNegativeButton("Huy", null).show();
     }
 
-    private void cleanApp() {
-        long cacheSize = 0;
-        if (getCacheDir() != null) cacheSize += getDirSize(getCacheDir());
-        if (getExternalCacheDir() != null)
-            cacheSize += getDirSize(getExternalCacheDir());
-        final long finalSize = cacheSize / 1024;
+    private void showCleanDialog() {
+        // Tinh toan cache hien tai
+        long thumbCache = getCacheDir().length();
+        long extCache = getExternalCacheDir() != null ? getExternalCacheDir().length() : 0;
+        long totalCache = (thumbCache + extCache) / 1024; // KB
 
         Runtime rt = Runtime.getRuntime();
-        long usedMb = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024;
+        long usedMem = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024; // MB
+        long maxMem  = rt.maxMemory() / 1024 / 1024;
 
-        new AlertDialog.Builder(this)
-            .setTitle("Don dep")
-            .setMessage("Cache hien tai: " + finalSize + " KB\n"
-                + "RAM app dang dung: " + usedMb + " MB\n\n"
-                + "Xoa cache thumbnail va lich su cu?")
-            .setPositiveButton("Don sach", (d, w) -> {
-                new Thread(() -> {
-                    Glide.get(this).clearDiskCache();
-                    deleteDir(getCacheDir());
-                    if (getExternalCacheDir() != null)
-                        deleteDir(getExternalCacheDir());
-                    AppDatabase.get(this).dao().deleteOldHistory(
-                        System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000);
-                    System.gc();
-                    handler.post(() -> {
-                        Glide.get(this).clearMemory();
-                        if (adapter != null) adapter.clearCache();
-                        Toast.makeText(this, "Da don sach!",
-                            Toast.LENGTH_SHORT).show();
-                    });
-                }).start();
-            })
-            .setNegativeButton("Huy", null).show();
+        String info = "RAM app dang dung: " + usedMem + " MB / " + maxMem + " MB\n"
+            + "Cache thumbnail: " + totalCache + " KB\n\n"
+            + "Co the don sach:\n"
+            + "- Cache thumbnail Glide\n"
+            + "- Cache file tam\n"
+            + "- Lich su va bookmark cu\n\n"
+            + "Luu y: Android quan ly RAM tu dong, app khong the don RAM he thong.";
+
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Don dep & Thong tin")
+            .setMessage(info)
+            .setPositiveButton("Don sach cache", (d, w) -> cleanAppCache())
+            .setNeutralButton("Don lich su cu", (d, w) -> cleanOldHistory())
+            .setNegativeButton("Dong", null)
+            .show();
     }
 
-    private long getDirSize(java.io.File dir) {
-        long size = 0;
-        if (dir == null) return 0;
-        java.io.File[] files = dir.listFiles();
-        if (files == null) return 0;
-        for (java.io.File f : files)
-            size += f.isDirectory() ? getDirSize(f) : f.length();
-        return size;
+    private void cleanAppCache() {
+        android.widget.ProgressBar pb = new android.widget.ProgressBar(this,
+            null, android.R.attr.progressBarStyleHorizontal);
+        pb.setIndeterminate(true);
+        android.app.AlertDialog loading = new android.app.AlertDialog.Builder(this)
+            .setTitle("Dang don sach...")
+            .setView(pb)
+            .setCancelable(false)
+            .show();
+
+        new Thread(() -> {
+            try {
+                // 1. Xoa Glide cache (thumbnail)
+                com.bumptech.glide.Glide.get(this).clearDiskCache();
+
+                // 2. Xoa cache thu muc app
+                deleteDir(getCacheDir());
+                if (getExternalCacheDir() != null) deleteDir(getExternalCacheDir());
+
+                // 3. Goi garbage collector
+                System.gc();
+                Runtime.getRuntime().gc();
+
+                // 4. Xoa thumbnail cache trong adapter
+                runOnUiThread(() -> {
+                    com.bumptech.glide.Glide.get(this).clearMemory();
+                });
+
+                Thread.sleep(500);
+
+                runOnUiThread(() -> {
+                    loading.dismiss();
+                    Runtime rt = Runtime.getRuntime();
+                    long freeMem = rt.freeMemory() / 1024 / 1024;
+                    android.widget.Toast.makeText(this,
+                        "Da don sach! RAM trong: " + freeMem + " MB",
+                        android.widget.Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    loading.dismiss();
+                    android.widget.Toast.makeText(this,
+                        "Loi: " + e.getMessage(),
+                        android.widget.Toast.LENGTH_SHORT).show();
+                });
+            }
+        }).start();
+    }
+
+    private void cleanOldHistory() {
+        executor.execute(() -> {
+            // Xoa lich su xem qua 30 ngay
+            long cutoff = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000);
+            AppDatabase.get(this).dao().deleteOldHistory(cutoff);
+            runOnUiThread(() ->
+                android.widget.Toast.makeText(this,
+                    "Da xoa lich su cu hon 30 ngay",
+                    android.widget.Toast.LENGTH_SHORT).show());
+        });
     }
 
     private void deleteDir(java.io.File dir) {
-        if (dir == null) return;
+        if (dir == null || !dir.exists()) return;
         java.io.File[] files = dir.listFiles();
         if (files != null) for (java.io.File f : files) {
             if (f.isDirectory()) deleteDir(f);
             else f.delete();
         }
     }
+
 }
