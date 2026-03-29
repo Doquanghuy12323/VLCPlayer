@@ -41,8 +41,6 @@ public class MainActivity extends AppCompatActivity
 
     private RecyclerView recyclerView;
     private VideoAdapter adapter;
-    private
-    private
     private final List<VideoItem> videoList = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
