@@ -900,3 +900,4 @@ public class PlayerActivity extends AppCompatActivity {
         if (libVLC != null) libVLC.release();
         closePfd();
     }
+// fixed Mon Mar 30 01:47:46 +07 2026
