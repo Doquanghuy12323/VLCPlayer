@@ -71,9 +71,9 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int position) {
         VideoItem item = videoList.get(position);
         h.tvName.setText(item.getName());
-        h.tvInfo.setText(item.getDurationStr() + " · " + item.getSizeStr());
+        h.tvInfo.setText(formatDur(item.getDuration()) + " · " + item.getSizeStr());
         h.ivThumb.setImageResource(android.R.drawable.ic_media_play);
-        h.btnPlay.setVisibility(item.hasNext() ? View.VISIBLE : View.GONE);
+        if (h.btnPlay != null) h.btnPlay.setVisibility(View.GONE);
 
         // Load thumbnail qua Glide - tu dong quan ly cache
         Glide.with(h.ivThumb.getContext())
@@ -155,6 +155,11 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
         thumbCache.clear();
     }
 
+    private String formatDur(long ms) {
+        long m = ms/1000/60; long s = ms/1000%60;
+        return String.format(java.util.Locale.US, "%d:%02d", m, s);
+    }
+
     @Override public int getItemCount() { return videoList.size(); }
 
     @Override public long getItemId(int position) {
@@ -168,8 +173,8 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
         VH(View v) {
             super(v);
             ivThumb = v.findViewById(R.id.iv_thumbnail);
-            tvName  = v.findViewById(R.id.tv_name);
-            tvInfo  = v.findViewById(R.id.tv_info);
+            tvName  = v.findViewById(R.id.tv_video_name);
+            tvInfo  = v.findViewById(R.id.tv_duration);
             btnPlay = v.findViewById(R.id.btn_play_next);
         }
     }

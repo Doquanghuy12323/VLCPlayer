@@ -55,7 +55,7 @@ public class MainActivity extends AppCompatActivity
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
-        recyclerView = findViewById(R.id.recycler_view);
+        recyclerView = findViewById(R.id.recyclerView);
         progressBar  = findViewById(R.id.progress_bar);
         tvEmpty      = findViewById(R.id.tv_empty);
 
@@ -69,7 +69,7 @@ public class MainActivity extends AppCompatActivity
         adapter.setHasStableIds(true);
         recyclerView.setAdapter(adapter);
 
-        View fab = findViewById(R.id.fab_url);
+        View fab = findViewById(R.id.fab);
         if (fab != null) fab.setOnClickListener(v -> showUrlDialog());
 
         checkPermissionsAndLoad();
@@ -120,14 +120,14 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
-    protected void onLowMemory() {
+    public void onLowMemory() {
         super.onLowMemory();
         Glide.get(this).clearMemory();
         if (adapter != null) adapter.clearCache();
     }
 
     @Override
-    protected void onTrimMemory(int level) {
+    public void onTrimMemory(int level) {
         super.onTrimMemory(level);
         if (level >= TRIM_MEMORY_MODERATE) {
             Glide.get(this).clearMemory();
@@ -269,7 +269,7 @@ public class MainActivity extends AppCompatActivity
     private void showHistoryDialog() {
         executor.execute(() -> {
             List<com.vlcplayer.app.db.HistoryItem> hist =
-                AppDatabase.get(this).dao().getAllHistory();
+                AppDatabase.get(this).dao().getHistory();
             handler.post(() -> {
                 if (hist.isEmpty()) {
                     Toast.makeText(this, "Chua co lich su xem",
