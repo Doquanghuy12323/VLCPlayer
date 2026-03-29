@@ -71,7 +71,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int position) {
         VideoItem item = videoList.get(position);
         h.tvName.setText(item.getName());
-        h.tvInfo.setText(formatDur(item.getDuration()) + " · " + item.getSizeStr());
+        h.tvInfo.setText(formatDur(item.getDuration()) + " · " + item.getFormattedSize());
         h.ivThumb.setImageResource(android.R.drawable.ic_media_play);
         if (h.btnPlay != null) h.btnPlay.setVisibility(View.GONE);
 
@@ -175,7 +175,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
             ivThumb = v.findViewById(R.id.iv_thumbnail);
             tvName  = v.findViewById(R.id.tv_video_name);
             tvInfo  = v.findViewById(R.id.tv_duration);
-            btnPlay = v.findViewById(R.id.btn_play_next);
+            btnPlay = null; // btn_play_next not in layout
         }
     }
 }

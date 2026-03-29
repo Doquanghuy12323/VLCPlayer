@@ -41,8 +41,8 @@ public class MainActivity extends AppCompatActivity
 
     private RecyclerView recyclerView;
     private VideoAdapter adapter;
-    private ProgressBar progressBar;
-    private TextView tvEmpty;
+    private
+    private
     private final List<VideoItem> videoList = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -56,8 +56,6 @@ public class MainActivity extends AppCompatActivity
         setSupportActionBar(toolbar);
 
         recyclerView = findViewById(R.id.recyclerView);
-        progressBar  = findViewById(R.id.progress_bar);
-        tvEmpty      = findViewById(R.id.tv_empty);
 
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setHasFixedSize(true);
