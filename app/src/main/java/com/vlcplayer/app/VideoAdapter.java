@@ -71,7 +71,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int position) {
         VideoItem item = videoList.get(position);
         h.tvName.setText(item.getName());
-        h.tvInfo.setText(formatDur(item.getDuration()) + " · " + item.getSizeStr());
+        h.tvInfo.setText(formatDur(item.getDuration()) + " · " + formatSize(item.getSize()));
         h.ivThumb.setImageResource(android.R.drawable.ic_media_play);
         if (h.btnPlay != null) h.btnPlay.setVisibility(View.GONE);
 
@@ -108,7 +108,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
         dialog.setContentView(R.layout.dialog_preview);
 
         SurfaceView sv = dialog.findViewById(R.id.preview_surface);
-        TextView tvTitle = dialog.findViewById(R.id.preview_title);
+        TextView tvTitle = dialog.findViewById(R.id.tv_hint);
         if (tvTitle != null) tvTitle.setText(item.getName());
 
         android.media.MediaPlayer[] mp = {null};
@@ -160,6 +160,12 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
         return String.format(java.util.Locale.US, "%d:%02d", m, s);
     }
 
+    private String formatSize(long bytes) {
+        if (bytes >= 1024*1024*1024) return String.format("%.1f GB", bytes/1024.0/1024/1024);
+        if (bytes >= 1024*1024) return String.format("%.0f MB", bytes/1024.0/1024);
+        return String.format("%.0f KB", bytes/1024.0);
+    }
+
     @Override public int getItemCount() { return videoList.size(); }
 
     @Override public long getItemId(int position) {
@@ -175,7 +181,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
             ivThumb = v.findViewById(R.id.iv_thumbnail);
             tvName  = v.findViewById(R.id.tv_video_name);
             tvInfo  = v.findViewById(R.id.tv_duration);
-            btnPlay = v.findViewById(R.id.btn_play_next);
+            btnPlay = null; // no play button in layout
         }
     }
 }
