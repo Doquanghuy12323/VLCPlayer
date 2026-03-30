@@ -108,7 +108,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
         dialog.setContentView(R.layout.dialog_preview);
 
         SurfaceView sv = dialog.findViewById(R.id.preview_surface);
-        TextView tvTitle = dialog.findViewById(R.id.tv_hint);
+        TextView tvTitle = dialog.findViewById(R.id.preview_title);
         if (tvTitle != null) tvTitle.setText(item.getName());
 
         android.media.MediaPlayer[] mp = {null};

@@ -185,8 +185,13 @@ public class MainActivity extends AppCompatActivity
                         Uri uri  = Uri.withAppendedPath(
                             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                             String.valueOf(id));
-                        items.add(new VideoItem(id, c.getString(iName),
-                            uri, c.getLong(iDur), c.getLong(iSize)));
+                        items.add(new VideoItem(
+                            id,
+                            c.getString(iName),
+                            c.getLong(iDur),
+                            c.getLong(iSize),
+                            c.getString(c.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA)),
+                            uri));
                     }
                 }
             } catch (Exception e) {
