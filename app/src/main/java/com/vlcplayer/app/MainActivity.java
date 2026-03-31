@@ -430,14 +430,7 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void showHandyGuide() {
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Huong dan The Handy")
-            .setMessage("1. Ket noi The Handy vao WiFi
-2. Vao handyfeeling.com/setup
-3. Copy Connection Key
-4. Dan key vao app
-5. Load Script de dong bo")
-            .setPositiveButton("OK", null).show();
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Huong dan The Handy").setMessage("Vao handyfeeling.com de lay Connection Key, sau do nhap vao app va bam Ket noi.").setPositiveButton("OK", null).show();
     }
 
 private void showLanguageDialog() {
