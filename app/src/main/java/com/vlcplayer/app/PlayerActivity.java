@@ -216,6 +216,8 @@ public class PlayerActivity extends AppCompatActivity {
         findViewById(R.id.btn_lock).setOnClickListener(v -> toggleLock());
         findViewById(R.id.btn_unlock).setOnClickListener(v -> toggleLock());
         findViewById(R.id.btn_translate).setOnClickListener(v -> showTranslateDialog());
+        View btnFunscript = findViewById(R.id.btn_funscript);
+        if (btnFunscript != null) btnFunscript.setOnClickListener(v -> showFunscriptDialog());
         View btnHandy = findViewById(R.id.btn_handy);
         if (btnHandy != null) btnHandy.setOnClickListener(v -> showHandyDialog());
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
