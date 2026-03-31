@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+
     <string name="app_name">VLC Player</string>
     <string name="open_file">Mở file video</string>
     <string name="back">Quay lại</string>
@@ -7,15 +8,13 @@
     <string name="rewind">Tua lùi 10s</string>
     <string name="forward">Tua nhanh 10s</string>
     <string name="action_refresh">Làm mới</string>
-</resources>
 
-    <!-- Funscript -->
     <string name="funscript_load">Load Funscript</string>
     <string name="funscript_url">Funscript URL</string>
     <string name="funscript_synced">Funscript synced: %d actions</string>
     <string name="funscript_not_found">Funscript not found</string>
-    <!-- Language -->
     <string name="settings_language">App Language</string>
-    <!-- Privacy -->
     <string name="privacy_on">Privacy: ON</string>
     <string name="privacy_off">Privacy: OFF</string>
+    <string name="handy_connect">The Handy</string>
+</resources>
