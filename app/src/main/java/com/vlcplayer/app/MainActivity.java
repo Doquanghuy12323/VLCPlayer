@@ -373,4 +373,37 @@ public class MainActivity extends AppCompatActivity
             else f.delete();
         }
     }
+
+    private void showLanguageDialog() {
+        String[][] langs = AppLanguageManager.LANGUAGES;
+        String[] names = new String[langs.length];
+        String cur = AppLanguageManager.getSavedLanguage(this);
+        int curIdx = 0;
+        for (int i = 0; i < langs.length; i++) { names[i] = langs[i][0]; if (langs[i][1].equals(cur)) curIdx = i; }
+        final int[] sel = {curIdx};
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Ngon ngu ung dung")
+            .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
+            .setPositiveButton("Luu", (d, w) -> {
+                AppLanguageManager.saveLanguage(this, langs[sel[0]][1]);
+                android.widget.Toast.makeText(this, "Khoi dong lai de ap dung: " + langs[sel[0]][0], android.widget.Toast.LENGTH_LONG).show();
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
+    private void showPrivacyDialog() {
+        PrivacyManager pm = new PrivacyManager(this);
+        boolean isOn = pm.isEnabled();
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Che do bao mat")
+            .setMessage(isOn ? "Hien tai: BẬT\nCac video bi an khoi Gallery.\nTat di?" : "Hien tai: TẮT\nBat se an video khoi Gallery.")
+            .setPositiveButton(isOn ? "Tat" : "Bat", (d, w) -> {
+                java.util.List<String> paths = new java.util.ArrayList<>();
+                for (VideoItem item : videoItems) paths.add(item.getUri().toString());
+                pm.setEnabled(!isOn, paths);
+                android.widget.Toast.makeText(this, !isOn ? "Da bat bao mat" : "Da tat bao mat", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
 }

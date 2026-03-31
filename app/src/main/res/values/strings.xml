@@ -8,3 +8,14 @@
     <string name="forward">Tua nhanh 10s</string>
     <string name="action_refresh">Làm mới</string>
 </resources>
+
+    <!-- Funscript -->
+    <string name="funscript_load">Load Funscript</string>
+    <string name="funscript_url">Funscript URL</string>
+    <string name="funscript_synced">Funscript synced: %d actions</string>
+    <string name="funscript_not_found">Funscript not found</string>
+    <!-- Language -->
+    <string name="settings_language">App Language</string>
+    <!-- Privacy -->
+    <string name="privacy_on">Privacy: ON</string>
+    <string name="privacy_off">Privacy: OFF</string>

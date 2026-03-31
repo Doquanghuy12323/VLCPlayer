@@ -51,6 +51,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.io.File;
 
 public class PlayerActivity extends AppCompatActivity {
 
@@ -86,6 +87,7 @@ public class PlayerActivity extends AppCompatActivity {
     private float playbackSpeed = 1.0f;
 
     private String uriString, videoTitle;
+    private FunscriptManager funscriptManager = new FunscriptManager();
     private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
     private GestureDetector gestureDetector;
 
@@ -219,7 +221,10 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public void onStartTrackingTouch(SeekBar sb) { userSeeking = true; }
             @Override public void onStopTrackingTouch(SeekBar sb) {
                 userSeeking = false;
-                if (mediaPlayer != null) mediaPlayer.setTime(sb.getProgress());
+                if (mediaPlayer != null) {
+                mediaPlayer.setTime(sb.getProgress());
+                if (funscriptManager.isLoaded()) funscriptManager.seekTo(sb.getProgress());
+            }
             }
         });
     }
@@ -763,7 +768,79 @@ public class PlayerActivity extends AppCompatActivity {
         enterPiP();
     }
 
-    @Override protected void onStop() {
+
+    private void showFunscriptDialog() {
+        String[] opts = {"Load tu URL", "Tu dong tim file .funscript", "Dung funscript"};
+        new AlertDialog.Builder(this).setTitle("Funscript")
+            .setItems(opts, (d, w) -> {
+                if (w == 0) showFunscriptUrlInput();
+                else if (w == 1) autoLoadFunscript();
+                else { funscriptManager.stop(); Toast.makeText(this, "Da dung funscript", Toast.LENGTH_SHORT).show(); }
+            }).show();
+    }
+
+    private void showFunscriptUrlInput() {
+        EditText input = new EditText(this);
+        input.setHint("https://example.com/video.funscript");
+        new AlertDialog.Builder(this).setTitle("Funscript URL").setView(input)
+            .setPositiveButton("Load", (d, w) -> {
+                String url = input.getText().toString().trim();
+                if (url.isEmpty()) return;
+                Toast.makeText(this, "Dang tai funscript...", Toast.LENGTH_SHORT).show();
+                funscriptManager.loadFromUrl(url,
+                    () -> { startFunscript(); Toast.makeText(this, "Funscript: " + funscriptManager.getActionCount() + " actions", Toast.LENGTH_SHORT).show(); },
+                    () -> Toast.makeText(this, "Loi tai funscript", Toast.LENGTH_SHORT).show());
+            }).setNegativeButton("Huy", null).show();
+    }
+
+    private void autoLoadFunscript() {
+        if (uriString == null) return;
+        // Tim file .funscript cung ten voi video
+        try {
+            android.net.Uri uri = android.net.Uri.parse(uriString);
+            String name = uri.getLastPathSegment();
+            if (name != null) {
+                // Bo extension
+                int dot = name.lastIndexOf('.');
+                if (dot > 0) name = name.substring(0, dot);
+                // Tim trong thu muc Download va Movies
+                String[] dirs = {
+                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(),
+                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES).getAbsolutePath(),
+                };
+                for (String dir : dirs) {
+                    File f = new File(dir, name + ".funscript");
+                    if (f.exists()) {
+                        if (funscriptManager.loadFromFile(f)) {
+                            startFunscript();
+                            Toast.makeText(this, "Da load: " + f.getName() + " (" + funscriptManager.getActionCount() + " actions)", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                    }
+                }
+                Toast.makeText(this, "Khong tim thay " + name + ".funscript", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void startFunscript() {
+        if (!funscriptManager.isLoaded() || mediaPlayer == null) return;
+        long pos = mediaPlayer.getTime();
+        funscriptManager.start(pos, new FunscriptManager.FunscriptCallback() {
+            @Override public void onAction(int position, int speed) {
+                // Log action - trong thuc te gui lenh den thiet bi Bluetooth
+                android.util.Log.d("Funscript", "pos=" + position + " speed=" + speed + "ms");
+                // Hien thi tren UI (tuy chon)
+            }
+            @Override public void onFinished() {
+                runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Funscript xong", Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+        @Override protected void onStop() {
         super.onStop();
         saveHistory();
         if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.detachViews(); }

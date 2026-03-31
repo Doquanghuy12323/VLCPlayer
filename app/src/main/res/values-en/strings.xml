@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VLC Player</string>
+    <string name="funscript_load">Load Funscript</string>
+    <string name="funscript_url">Funscript URL</string>
+    <string name="settings_language">App Language</string>
+    <string name="privacy_on">Privacy: ON</string>
+    <string name="privacy_off">Privacy: OFF</string>
+</resources>
