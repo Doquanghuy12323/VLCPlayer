@@ -433,21 +433,10 @@ public class MainActivity extends AppCompatActivity
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Huong dan The Handy")
             .setMessage("1. Ket noi The Handy vao WiFi
-
-"
-                + "2. Vao handyfeeling.com/setup tren trinh duyet
-
-"
-                + "3. Copy Connection Key hien thi tren trang do
-
-"
-                + "4. Dan key vao muc Nhap Connection Key trong app
-
-"
-                + "5. Mo video, bam nut Handy trong man hinh phat video
-
-"
-                + "6. Bam Ket noi roi Load Script de bat dau dong bo")
+2. Vao handyfeeling.com/setup
+3. Copy Connection Key
+4. Dan key vao app
+5. Load Script de dong bo")
             .setPositiveButton("OK", null).show();
     }
 
