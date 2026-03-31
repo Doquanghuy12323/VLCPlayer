@@ -246,7 +246,9 @@ public class MainActivity extends AppCompatActivity
     private void togglePrivacy() {
         boolean current = new PrivacyManager(this).isEnabled();
         boolean next = !current;
-        new PrivacyManager(this).setEnabled(next, paths);
+                java.util.List<String> paths2 = new java.util.ArrayList<>();
+        if (items != null) for (VideoItem item : items) paths2.add(item.getUri().toString());
+        new PrivacyManager(this).setEnabled(next, paths2);
         Toast.makeText(this,
             next ? "Che do bao mat: BAT (Gallery se an video)"
                  : "Che do bao mat: TAT (Gallery se hien video lai)",
