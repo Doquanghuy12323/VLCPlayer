@@ -88,6 +88,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private String uriString, videoTitle;
     private FunscriptManager funscriptManager = new FunscriptManager();
+    private HandyManager handyManager;
     private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
     private GestureDetector gestureDetector;
 
@@ -164,6 +165,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
 
         handler.post(updateSeekBar);
+        handyManager = new HandyManager(this);
         scheduleHideControls();
     }
 
@@ -214,6 +216,8 @@ public class PlayerActivity extends AppCompatActivity {
         findViewById(R.id.btn_lock).setOnClickListener(v -> toggleLock());
         findViewById(R.id.btn_unlock).setOnClickListener(v -> toggleLock());
         findViewById(R.id.btn_translate).setOnClickListener(v -> showTranslateDialog());
+        View btnHandy = findViewById(R.id.btn_handy);
+        if (btnHandy != null) btnHandy.setOnClickListener(v -> showHandyDialog());
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
                 if (fromUser) tvCurrent.setText(formatTime(p));
@@ -224,6 +228,7 @@ public class PlayerActivity extends AppCompatActivity {
                 if (mediaPlayer != null) {
                 mediaPlayer.setTime(sb.getProgress());
                 if (funscriptManager.isLoaded()) funscriptManager.seekTo(sb.getProgress());
+                if (handyManager != null && handyManager.isConnected()) handyManager.seekSync(sb.getProgress());
             }
             }
         });
@@ -769,13 +774,123 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
 
+
+    private void showHandyDialog() {
+        String savedKey = handyManager.getSavedKey();
+        String status = handyManager.isConnected() ? "Trang thai: DA KET NOI" : "Trang thai: Chua ket noi";
+        String[] opts = {
+            status,
+            "Nhap / doi Connection Key",
+            "Ket noi The Handy",
+            "Load Funscript + Sync",
+            "Dong bo voi video hien tai",
+            "Ngat ket noi"
+        };
+        new AlertDialog.Builder(this)
+            .setTitle("The Handy")
+            .setItems(opts, (d, w) -> {
+                switch (w) {
+                    case 0: showHandyStatus(); break;
+                    case 1: showKeyInput(); break;
+                    case 2: connectHandy(); break;
+                    case 3: showHandyFunscriptDialog(); break;
+                    case 4: syncHandyNow(); break;
+                    case 5: disconnectHandy(); break;
+                }
+            }).show();
+    }
+
+    private void showHandyStatus() {
+        if (!handyManager.isConnected()) {
+            Toast.makeText(this, "Chua ket noi The Handy", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        handyManager.getStatus(new HandyManager.HandyCallback() {
+            @Override public void onSuccess(String m) { runOnUiThread(() -> new AlertDialog.Builder(PlayerActivity.this).setTitle("The Handy Status").setMessage(m).setPositiveButton("OK", null).show()); }
+            @Override public void onError(String e) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, e, Toast.LENGTH_SHORT).show()); }
+        });
+    }
+
+    private void showKeyInput() {
+        EditText input = new EditText(this);
+        input.setHint("xxxx-xxxx-xxxx-xxxx");
+        input.setText(handyManager.getSavedKey());
+        input.setSingleLine(true);
+        new AlertDialog.Builder(this)
+            .setTitle("Connection Key")
+            .setMessage("Lay key tai: handyfeeling.com")
+            .setView(input)
+            .setPositiveButton("Luu", (d, w) -> {
+                String key = input.getText().toString().trim();
+                if (!key.isEmpty()) {
+                    handyManager.saveKey(key);
+                    Toast.makeText(this, "Da luu key", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
+    private void connectHandy() {
+        if (handyManager.getSavedKey().isEmpty()) { showKeyInput(); return; }
+        Toast.makeText(this, "Dang ket noi...", Toast.LENGTH_SHORT).show();
+        handyManager.connect(new HandyManager.HandyCallback() {
+            @Override public void onSuccess(String m) { runOnUiThread(() -> new AlertDialog.Builder(PlayerActivity.this).setTitle("The Handy").setMessage(m).setPositiveButton("OK", null).show()); }
+            @Override public void onError(String e) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Loi: " + e, Toast.LENGTH_LONG).show()); }
+        });
+    }
+
+    private void showHandyFunscriptDialog() {
+        if (!handyManager.isConnected()) { Toast.makeText(this, "Ket noi The Handy truoc!", Toast.LENGTH_SHORT).show(); return; }
+        EditText input = new EditText(this);
+        input.setHint("URL file .funscript hoac .csv");
+        new AlertDialog.Builder(this)
+            .setTitle("Load Funscript cho The Handy")
+            .setMessage("Nhap URL file funscript (can convert sang CSV)")
+            .setView(input)
+            .setPositiveButton("Load & Sync", (d, w) -> {
+                String url = input.getText().toString().trim();
+                if (url.isEmpty()) return;
+                Toast.makeText(this, "Dang setup script...", Toast.LENGTH_SHORT).show();
+                handyManager.setupScript(url, new HandyManager.HandyCallback() {
+                    @Override public void onSuccess(String m) {
+                        runOnUiThread(() -> {
+                            Toast.makeText(PlayerActivity.this, m, Toast.LENGTH_SHORT).show();
+                            syncHandyNow();
+                        });
+                    }
+                    @Override public void onError(String e) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Loi: " + e, Toast.LENGTH_LONG).show()); }
+                });
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
+    private void syncHandyNow() {
+        if (!handyManager.isConnected() || mediaPlayer == null) {
+            Toast.makeText(this, "Chua ket noi The Handy hoac chua phat video", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        long pos = mediaPlayer.getTime();
+        handyManager.play(pos, new HandyManager.HandyCallback() {
+            @Override public void onSuccess(String m) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "The Handy dong bo tai " + formatTime(pos), Toast.LENGTH_SHORT).show()); }
+            @Override public void onError(String e) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Loi dong bo: " + e, Toast.LENGTH_SHORT).show()); }
+        });
+    }
+
+    private void disconnectHandy() {
+        handyManager.stop(new HandyManager.HandyCallback() {
+            @Override public void onSuccess(String m) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Da ngat The Handy", Toast.LENGTH_SHORT).show()); }
+            @Override public void onError(String e) {}
+        });
+    }
+
     private void showFunscriptDialog() {
         String[] opts = {"Load tu URL", "Tu dong tim file .funscript", "Dung funscript"};
         new AlertDialog.Builder(this).setTitle("Funscript")
             .setItems(opts, (d, w) -> {
                 if (w == 0) showFunscriptUrlInput();
                 else if (w == 1) autoLoadFunscript();
-                else { funscriptManager.stop(); Toast.makeText(this, "Da dung funscript", Toast.LENGTH_SHORT).show(); }
+                else { funscriptManager.stop();
+        if (handyManager != null) handyManager.stop(null); Toast.makeText(this, "Da dung funscript", Toast.LENGTH_SHORT).show(); }
             }).show();
     }
 
