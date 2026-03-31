@@ -244,9 +244,9 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void togglePrivacy() {
-        boolean current = PrivacyManager.isEnabled(this);
+        boolean current = new PrivacyManager(this).isEnabled();
         boolean next = !current;
-        PrivacyManager.setEnabled(this, next);
+        new PrivacyManager(this).setEnabled(next, paths);
         Toast.makeText(this,
             next ? "Che do bao mat: BAT (Gallery se an video)"
                  : "Che do bao mat: TAT (Gallery se hien video lai)",
@@ -399,7 +399,7 @@ public class MainActivity extends AppCompatActivity
             .setMessage(isOn ? "Hien tai: BẬT\nCac video bi an khoi Gallery.\nTat di?" : "Hien tai: TẮT\nBat se an video khoi Gallery.")
             .setPositiveButton(isOn ? "Tat" : "Bat", (d, w) -> {
                 java.util.List<String> paths = new java.util.ArrayList<>();
-                for (VideoItem item : videoItems) paths.add(item.getUri().toString());
+                for (VideoItem item : videoList) paths.add(item.getUri().toString());
                 pm.setEnabled(!isOn, paths);
                 android.widget.Toast.makeText(this, !isOn ? "Da bat bao mat" : "Da tat bao mat", android.widget.Toast.LENGTH_SHORT).show();
             })

@@ -227,6 +227,14 @@
                 android:background="@drawable/circle_button_bg"
                 android:src="@android:drawable/ic_lock_lock"
                 android:tint="#FFFFFF" android:contentDescription="unlock"/>
+    <ImageButton
+        android:id="@+id/btn_handy"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@android:drawable/ic_menu_share"
+        android:tint="#FF6B35"
+        android:contentDescription="The Handy"/>
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="Mo khoa" android:textColor="#AAFFFFFF"
                 android:textSize="10sp" android:layout_marginTop="4dp"/>
