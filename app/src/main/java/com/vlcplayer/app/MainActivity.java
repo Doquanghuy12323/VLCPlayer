@@ -378,7 +378,82 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    private void showLanguageDialog() {
+    private void showHandyMainDialog() {
+        // Doc key da luu
+        android.content.SharedPreferences prefs = getSharedPreferences("handy_prefs", MODE_PRIVATE);
+        String savedKey = prefs.getString("connection_key", "");
+        
+        String[] opts = {
+            savedKey.isEmpty() ? "Key: Chua co" : "Key: " + savedKey.substring(0, Math.min(8, savedKey.length())) + "...",
+            "Nhap Connection Key",
+            "Huong dan su dung The Handy"
+        };
+        
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("🔌 The Handy")
+            .setMessage("The Handy se dong bo khi ban mo video.\nNhap key de bat dau.")
+            .setItems(opts, (d, w) -> {
+                switch (w) {
+                    case 0:
+                    case 1: showHandyKeyInput(); break;
+                    case 2: showHandyGuide(); break;
+                }
+            })
+            .setPositiveButton("Nhap Key", (d, w) -> showHandyKeyInput())
+            .setNegativeButton("Dong", null)
+            .show();
+    }
+
+    private void showHandyKeyInput() {
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("VD: 1234-abcd-5678-efgh");
+        android.content.SharedPreferences prefs = getSharedPreferences("handy_prefs", MODE_PRIVATE);
+        input.setText(prefs.getString("connection_key", ""));
+        input.setSingleLine(true);
+        input.setPadding(48, 24, 48, 24);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Nhap Connection Key")
+            .setMessage("Lay key tai: handyfeeling.com/setup")
+            .setView(input)
+            .setPositiveButton("Luu", (d, w) -> {
+                String key = input.getText().toString().trim();
+                if (!key.isEmpty()) {
+                    prefs.edit().putString("connection_key", key).apply();
+                    android.widget.Toast.makeText(this,
+                        "Da luu key! Mo video de bat dau dung The Handy.",
+                        android.widget.Toast.LENGTH_LONG).show();
+                } else {
+                    android.widget.Toast.makeText(this, "Key khong duoc de trong", android.widget.Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
+    private void showHandyGuide() {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Huong dan The Handy")
+            .setMessage(
+                "1. Ket noi The Handy vao dien thoai qua WiFi
+
+" +
+                "2. Vao handyfeeling.com/setup tren trinh duyet
+
+" +
+                "3. Copy Connection Key hien thi tren trang do
+
+" +
+                "4. Dan key vao muc 'Nhap Connection Key' trong app
+
+" +
+                "5. Mo video, bam nut 🔌 trong man hinh phat video
+
+" +
+                "6. Bam 'Ket noi' roi 'Load Script' de bat dau dong bo"
+            )
+            .setPositiveButton("OK", null).show();
+    }
+
+private void showLanguageDialog() {
         String[][] langs = AppLanguageManager.LANGUAGES;
         String[] names = new String[langs.length];
         String cur = AppLanguageManager.getSavedLanguage(this);
