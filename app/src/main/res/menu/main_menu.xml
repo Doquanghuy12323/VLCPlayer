@@ -8,4 +8,16 @@
     <item android:id="@+id/action_translate" android:title="Cài đặt dịch AI" app:showAsAction="never"/>
     <item android:id="@+id/action_clean" android:title="Don dep he thong" app:showAsAction="never"/>
     <item android:id="@+id/action_update" android:title="Kiểm tra cập nhật" app:showAsAction="never"/>
+    <item
+        android:id="@+id/menu_language"
+        android:title="Ngôn ngữ / Language"
+        android:showAsAction="never"/>
+    <item
+        android:id="@+id/menu_privacy"
+        android:title="Chế độ bảo mật"
+        android:showAsAction="never"/>
+    <item
+        android:id="@+id/menu_handy"
+        android:title="The Handy"
+        android:showAsAction="never"/>
 </menu>

@@ -227,6 +227,8 @@ public class MainActivity extends AppCompatActivity
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
+        if (id == R.id.menu_language) { showLanguageDialog(); return true; }
+        if (id == R.id.menu_privacy) { showPrivacyDialog(); return true; }
         if (id == R.id.action_refresh) {
             Glide.get(this).clearMemory();
             loadVideos();
