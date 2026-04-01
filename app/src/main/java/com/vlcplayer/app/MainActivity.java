@@ -396,7 +396,7 @@ public class MainActivity extends AppCompatActivity
                 switch (w) {
                     case 0:
                     case 1: showHandyKeyInput(); break;
-                    case 2: showHandyGuide(); break;
+                    case 2: android.widget.Toast.makeText(this, "Vao handyfeeling.com/setup de lay Key", android.widget.Toast.LENGTH_LONG).show(); break;
                 }
             })
             .setPositiveButton("Nhap Key", (d, w) -> showHandyKeyInput())
