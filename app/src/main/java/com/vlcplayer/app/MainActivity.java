@@ -1,3 +1,4 @@
+// VLCPlayer MainActivity
 
 
     private void showHandyMainDialog() {
