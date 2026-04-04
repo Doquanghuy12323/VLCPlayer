@@ -225,20 +225,26 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+    public boolean onOptionsItemSelected(android.view.MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.action_refresh) {
-            Glide.get(this).clearMemory();
-            loadVideos();
+        if (id == R.id.menu_url) {
+            showUrlDialog();
             return true;
-        }
-        if (id == R.id.action_url) { showUrlDialog(); return true; }
-        if (id == R.id.action_history) { showHistoryDialog(); return true; }
-        if (id == R.id.action_privacy) { togglePrivacy(); return true; }
-        if (id == R.id.action_translate) { showTranslateSettings(); return true; }
-        if (id == R.id.action_clean) { cleanApp(); return true; }
-        if (id == R.id.action_update) {
-            new UpdateManager(this).checkForUpdate(false); return true;
+        } else if (id == R.id.menu_history) {
+            showHistory();
+            return true;
+        } else if (id == R.id.menu_privacy) {
+            showPrivacyDialog();
+            return true;
+        } else if (id == R.id.menu_language) {
+            showLanguageDialog();
+            return true;
+        } else if (id == R.id.menu_handy) {
+            showHandyMainDialog();
+            return true;
+        } else if (id == R.id.menu_clean_cache) {
+            cleanCache();
+            return true;
         }
         return super.onOptionsItemSelected(item);
     }
