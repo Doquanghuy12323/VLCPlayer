@@ -227,13 +227,7 @@ public class MainActivity extends AppCompatActivity
     @Override
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.menu_url) {
-            showUrlDialog();
-            return true;
-        } else if (id == R.id.menu_history) {
-            showHistory();
-            return true;
-        } else if (id == R.id.menu_privacy) {
+        if (id == R.id.menu_privacy) {
             showPrivacyDialog();
             return true;
         } else if (id == R.id.menu_language) {
@@ -241,9 +235,6 @@ public class MainActivity extends AppCompatActivity
             return true;
         } else if (id == R.id.menu_handy) {
             showHandyMainDialog();
-            return true;
-        } else if (id == R.id.menu_clean_cache) {
-            cleanCache();
             return true;
         }
         return super.onOptionsItemSelected(item);
