@@ -1025,10 +1025,10 @@ public class PlayerActivity extends AppCompatActivity {
 
     // Tim va tu dong load funscript cung ten voi video
     private void autoFindAndSyncFunscript() {
-        android.net.Uri videoUri = getIntent().getData();
-        if (videoUri == null) return;
-        String videoPath = videoUri.getPath();
-        if (videoPath == null) return;
+        String videoPath = getIntent().getStringExtra(EXTRA_URI);
+        if (videoPath == null || videoPath.isEmpty()) return;
+        // Neu la URI dang content:// thi lay path thuc
+        if (videoPath.startsWith("content://") || videoPath.startsWith("http")) return;
         String base = videoPath.replaceAll("\\.[^.]+$", "");
         String[] exts = {".funscript", ".csv"};
         for (String ext : exts) {
