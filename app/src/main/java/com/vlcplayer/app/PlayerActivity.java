@@ -1026,7 +1026,7 @@ public class PlayerActivity extends AppCompatActivity {
     // Tim va tu dong load funscript cung ten voi video
     private void autoFindAndSyncFunscript() {
         if (currentVideoPath == null) return;
-        String base = currentVideoPath.replaceAll("\.[^.]+$", "");
+        String base = currentVideoPath.replaceAll("\\.[^.]+$", "");
         String[] exts = {".funscript", ".csv"};
         for (String ext : exts) {
             java.io.File f = new java.io.File(base + ext);
