@@ -890,7 +890,7 @@ public class PlayerActivity extends AppCompatActivity {
         new AlertDialog.Builder(this).setTitle("Funscript")
             .setItems(opts, (d, w) -> {
                 if (w == 0) showFunscriptUrlInput();
-                else if (w == 1) autoLoadFunscript();
+                else if (w == 1) autoFindAndSyncFunscript();
                 else { funscriptManager.stop();
         if (handyManager != null) handyManager.stop(null); Toast.makeText(this, "Da dung funscript", Toast.LENGTH_SHORT).show(); }
             }).show();
@@ -972,4 +972,80 @@ public class PlayerActivity extends AppCompatActivity {
         if (libVLC != null) libVLC.release();
         closePfd();
     }
+    // Tu dong upload funscript len transfer.sh va lay public URL
+    private void uploadFunscriptAndSync(java.io.File file) {
+        Toast.makeText(this, "Dang upload funscript...", android.widget.Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                java.net.URL url = new java.net.URL("https://transfer.sh/" + file.getName());
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("PUT");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Max-Days", "1");
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(30000);
+
+                java.io.FileInputStream fis = new java.io.FileInputStream(file);
+                java.io.OutputStream os = conn.getOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = fis.read(buf)) != -1) os.write(buf, 0, n);
+                fis.close(); os.close();
+
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    byte[] resp = conn.getInputStream().readAllBytes();
+                    String publicUrl = new String(resp).trim();
+                    runOnUiThread(() -> {
+                        Toast.makeText(this, "Upload xong! Dang setup Handy...", android.widget.Toast.LENGTH_SHORT).show();
+                        if (handyManager.isConnected()) {
+                            handyManager.setupScript(publicUrl, new HandyManager.HandyCallback() {
+                                @Override public void onSuccess(String m) {
+                                    runOnUiThread(() -> { syncHandyNow(); Toast.makeText(PlayerActivity.this, "The Handy san sang!", android.widget.Toast.LENGTH_SHORT).show(); });
+                                }
+                                @Override public void onError(String e) {
+                                    runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Loi setup: " + e, android.widget.Toast.LENGTH_LONG).show());
+                                }
+                            });
+                        } else {
+                            // Luu URL de dung sau khi ket noi
+                            getSharedPreferences("handy_prefs", MODE_PRIVATE).edit()
+                                .putString("last_funscript_url", publicUrl).apply();
+                            Toast.makeText(this, "Da luu URL. Ket noi Handy roi bam Dong bo.", android.widget.Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } else {
+                    runOnUiThread(() -> Toast.makeText(this, "Upload that bai: " + code, android.widget.Toast.LENGTH_SHORT).show());
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "Loi upload: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    // Tim va tu dong load funscript cung ten voi video
+    private void autoFindAndSyncFunscript() {
+        if (currentVideoPath == null) return;
+        String base = currentVideoPath.replaceAll("\.[^.]+$", "");
+        String[] exts = {".funscript", ".csv"};
+        for (String ext : exts) {
+            java.io.File f = new java.io.File(base + ext);
+            if (f.exists()) {
+                new AlertDialog.Builder(this)
+                    .setTitle("Tim thay Funscript")
+                    .setMessage("Tim thay: " + f.getName() + "\nTu dong upload va sync voi The Handy?")
+                    .setPositiveButton("Upload & Sync", (d, w) -> uploadFunscriptAndSync(f))
+                    .setNegativeButton("Chi load local", (d, w) -> {
+                        if (funscriptManager.loadFromFile(f)) {
+                            startFunscript();
+                            Toast.makeText(this, "Loaded " + funscriptManager.getActionCount() + " actions", android.widget.Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("Huy", null).show();
+                return;
+            }
+        }
+        Toast.makeText(this, "Khong tim thay file funscript cung ten video", android.widget.Toast.LENGTH_SHORT).show();
+    }
+
 }
