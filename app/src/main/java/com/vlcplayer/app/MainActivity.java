@@ -227,13 +227,31 @@ public class MainActivity extends AppCompatActivity
     @Override
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.menu_privacy) {
+        if (id == R.id.action_refresh) {
+            loadVideos();
+            return true;
+        } else if (id == R.id.action_url) {
+            showUrlDialog();
+            return true;
+        } else if (id == R.id.action_history) {
+            showHistoryDialog();
+            return true;
+        } else if (id == R.id.action_privacy) {
             showPrivacyDialog();
             return true;
-        } else if (id == R.id.menu_language) {
+        } else if (id == R.id.action_translate) {
+            showTranslateSettings();
+            return true;
+        } else if (id == R.id.action_clean) {
+            cleanApp();
+            return true;
+        } else if (id == R.id.action_update) {
+            android.widget.Toast.makeText(this, "Dang kiem tra cap nhat...", android.widget.Toast.LENGTH_SHORT).show();
+            return true;
+        } else if (id == R.id.action_language) {
             showLanguageDialog();
             return true;
-        } else if (id == R.id.menu_handy) {
+        } else if (id == R.id.action_handy) {
             showHandyMainDialog();
             return true;
         }
