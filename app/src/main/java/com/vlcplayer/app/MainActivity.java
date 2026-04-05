@@ -413,7 +413,7 @@ public class MainActivity extends AppCompatActivity
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Ngon ngu / Language")
             .setItems(langs, (d, which) -> {
-                AppLanguageManager.setLanguage(this, codes[which]);
+                new AppLanguageManager(this).applyLanguage(codes[which]);
                 android.widget.Toast.makeText(this,
                     "Da chon: " + langs[which],
                     android.widget.Toast.LENGTH_SHORT).show();
