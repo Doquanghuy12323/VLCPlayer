@@ -390,4 +390,35 @@ public class MainActivity extends AppCompatActivity
             .setNegativeButton("Dong", null).show();
     }
 
+    private void showPrivacyDialog() {
+        boolean current = new PrivacyManager(this).isEnabled();
+        boolean next = !current;
+        String msg = current ? "Tat che do bao mat?" : "Bat che do bao mat?";
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Che do bao mat")
+            .setMessage(msg)
+            .setPositiveButton("Dong y", (d, w) -> {
+                java.util.List<String> paths2 = new java.util.ArrayList<>();
+                new PrivacyManager(this).setEnabled(next, paths2);
+                android.widget.Toast.makeText(this,
+                    next ? "Da bat bao mat" : "Da tat bao mat",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Huy", null).show();
+    }
+
+    private void showLanguageDialog() {
+        String[] langs = {"Tieng Viet", "English"};
+        String[] codes = {"vi", "en"};
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Ngon ngu / Language")
+            .setItems(langs, (d, which) -> {
+                AppLanguageManager.setLanguage(this, codes[which]);
+                android.widget.Toast.makeText(this,
+                    "Da chon: " + langs[which],
+                    android.widget.Toast.LENGTH_SHORT).show();
+                recreate();
+            }).show();
+    }
+
 }
