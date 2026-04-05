@@ -407,13 +407,15 @@ public class MainActivity extends AppCompatActivity
             .setNegativeButton("Huy", null).show();
     }
 
-    private void showLanguageDialog() {
+        private void showLanguageDialog() {
         String[] langs = {"Tieng Viet", "English"};
         String[] codes = {"vi", "en"};
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Ngon ngu / Language")
             .setItems(langs, (d, which) -> {
-                new AppLanguageManager(this).applyLanguage(codes[which]);
+                android.content.SharedPreferences prefs =
+                    getSharedPreferences("app_prefs", MODE_PRIVATE);
+                prefs.edit().putString("language", codes[which]).apply();
                 android.widget.Toast.makeText(this,
                     "Da chon: " + langs[which],
                     android.widget.Toast.LENGTH_SHORT).show();
