@@ -221,6 +221,9 @@ public class PlayerActivity extends AppCompatActivity {
         View btnHandy = findViewById(R.id.btn_handy);
         if (btnHandy != null) btnHandy.setOnClickListener(v -> showHandyDialog());
 
+        View btnAudio = findViewById(R.id.btn_audio);
+        if (btnAudio != null) btnAudio.setOnClickListener(v -> showAudioTrackDialog());
+
         // Long press tren title de chon audio track
         View titleView = findViewById(R.id.tv_title);
         if (titleView != null) titleView.setOnLongClickListener(v -> {
@@ -1091,9 +1094,10 @@ public class PlayerActivity extends AppCompatActivity {
         }
         String[] names = new String[tracks.length];
         for (int i = 0; i < tracks.length; i++) {
-            names[i] = (tracks[i].name == null || tracks[i].name.isEmpty())
-                ? "Track " + (i + 1)
-                : tracks[i].name;
+            String tname = tracks[i].name;
+            if (tname == null || tname.isEmpty() || tname.equals("-1"))
+                tname = "Track " + (i + 1);
+            names[i] = (tracks[i].id == mediaPlayer.getAudioTrack() ? "▶ " : "   ") + tname;
         }
         int current = mediaPlayer.getAudioTrack();
         int currentIdx = 0;

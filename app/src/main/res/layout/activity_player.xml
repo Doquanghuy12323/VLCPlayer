@@ -237,6 +237,15 @@
                 android:src="@android:drawable/ic_lock_lock"
                 android:tint="#FFFFFF" android:contentDescription="unlock"/>
     <ImageButton
+        android:id="@+id/btn_audio"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@android:drawable/ic_btn_speak_now"
+        android:tint="#FFFFFF"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:padding="6dp"/>
+
+    <ImageButton
         android:id="@+id/btn_handy"
         android:layout_width="40dp"
         android:layout_height="40dp"
