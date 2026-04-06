@@ -980,20 +980,24 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, "Dang upload funscript...", android.widget.Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
+                // Doc file thanh bytes truoc
+                java.io.FileInputStream fis = new java.io.FileInputStream(file);
+                byte[] fileBytes = fis.readAllBytes();
+                fis.close();
+
                 java.net.URL url = new java.net.URL("https://transfer.sh/" + file.getName());
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("PUT");
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Max-Days", "1");
+                conn.setRequestProperty("Content-Length", String.valueOf(fileBytes.length));
                 conn.setConnectTimeout(30000);
-                conn.setReadTimeout(30000);
+                conn.setReadTimeout(60000);
+                conn.setFixedLengthStreamingMode(fileBytes.length);
 
-                java.io.FileInputStream fis = new java.io.FileInputStream(file);
                 java.io.OutputStream os = conn.getOutputStream();
-                byte[] buf = new byte[4096];
-                int n;
-                while ((n = fis.read(buf)) != -1) os.write(buf, 0, n);
-                fis.close(); os.close();
+                os.write(fileBytes);
+                os.flush(); os.close();
 
                 int code = conn.getResponseCode();
                 if (code == 200) {
