@@ -625,7 +625,13 @@ public class PlayerActivity extends AppCompatActivity {
         new Thread(() -> {
             try {
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-                conn.setConnectTimeout(10000);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+                conn.setInstanceFollowRedirects(true);
+                int code = conn.getResponseCode();
+                android.util.Log.d("FunscriptManager", "HTTP " + code + " from " + url);
+                if (code != 200) { handler.post(onError); return; }
                 BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String ln;
@@ -1025,10 +1031,27 @@ public class PlayerActivity extends AppCompatActivity {
 
     // Tim va tu dong load funscript cung ten voi video
     private void autoFindAndSyncFunscript() {
-        String videoPath = getIntent().getStringExtra(EXTRA_URI);
-        if (videoPath == null || videoPath.isEmpty()) return;
-        // Neu la URI dang content:// thi lay path thuc
-        if (videoPath.startsWith("content://") || videoPath.startsWith("http")) return;
+        if (uriString == null || uriString.isEmpty()) {
+            android.widget.Toast.makeText(this, "Khong co video dang phat", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Lay path thuc tu URI
+        String videoPath = uriString;
+        if (uriString.startsWith("content://")) {
+            android.database.Cursor cursor = getContentResolver().query(
+                android.net.Uri.parse(uriString), new String[]{"_data"}, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                videoPath = cursor.getString(0);
+                cursor.close();
+            } else {
+                android.widget.Toast.makeText(this, "Khong lay duoc duong dan file", android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
+        if (videoPath == null || videoPath.startsWith("http")) {
+            android.widget.Toast.makeText(this, "Chi ho tro file local", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
         String base = videoPath.replaceAll("\\.[^.]+$", "");
         String[] exts = {".funscript", ".csv"};
         for (String ext : exts) {
