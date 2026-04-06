@@ -629,9 +629,6 @@ public class PlayerActivity extends AppCompatActivity {
                 conn.setReadTimeout(15000);
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0");
                 conn.setInstanceFollowRedirects(true);
-                int code = conn.getResponseCode();
-                android.util.Log.d("FunscriptManager", "HTTP " + code + " from " + url);
-                if (code != 200) { handler.post(onError); return; }
                 BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String ln;
