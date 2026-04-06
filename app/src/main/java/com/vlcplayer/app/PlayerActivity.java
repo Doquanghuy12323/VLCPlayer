@@ -220,6 +220,13 @@ public class PlayerActivity extends AppCompatActivity {
         if (btnFunscript != null) btnFunscript.setOnClickListener(v -> showFunscriptDialog());
         View btnHandy = findViewById(R.id.btn_handy);
         if (btnHandy != null) btnHandy.setOnClickListener(v -> showHandyDialog());
+
+        // Long press tren title de chon audio track
+        View titleView = findViewById(R.id.tv_title);
+        if (titleView != null) titleView.setOnLongClickListener(v -> {
+            showAudioTrackDialog();
+            return true;
+        });
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
                 if (fromUser) tvCurrent.setText(formatTime(p));
@@ -1073,6 +1080,35 @@ public class PlayerActivity extends AppCompatActivity {
             }
         }
         Toast.makeText(this, "Khong tim thay file funscript cung ten video", android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    private void showAudioTrackDialog() {
+        if (mediaPlayer == null) return;
+        org.videolan.libvlc.MediaPlayer.TrackDescription[] tracks = mediaPlayer.getAudioTracks();
+        if (tracks == null || tracks.length == 0) {
+            Toast.makeText(this, "Khong co audio track", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[tracks.length];
+        for (int i = 0; i < tracks.length; i++) {
+            names[i] = (tracks[i].name == null || tracks[i].name.isEmpty())
+                ? "Track " + (i + 1)
+                : tracks[i].name;
+        }
+        int current = mediaPlayer.getAudioTrack();
+        int currentIdx = 0;
+        for (int i = 0; i < tracks.length; i++) {
+            if (tracks[i].id == current) { currentIdx = i; break; }
+        }
+        final org.videolan.libvlc.MediaPlayer.TrackDescription[] finalTracks = tracks;
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Chon audio track")
+            .setSingleChoiceItems(names, currentIdx, (d, which) -> {
+                mediaPlayer.setAudioTrack(finalTracks[which].id);
+                Toast.makeText(this, "Da chon: " + names[which], Toast.LENGTH_SHORT).show();
+                d.dismiss();
+            })
+            .setNegativeButton("Huy", null).show();
     }
 
 }
