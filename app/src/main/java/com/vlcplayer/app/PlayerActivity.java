@@ -1111,6 +1111,15 @@ public class PlayerActivity extends AppCompatActivity {
                 mediaPlayer.setAudioTrack(finalTracks[which].id);
                 Toast.makeText(this, "Da chon: " + names[which], Toast.LENGTH_SHORT).show();
                 d.dismiss();
+                // Pause/resume de force libVLC re-init audio output cho Wavelet
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                    boolean wasPlaying = mediaPlayer.isPlaying();
+                    long pos = mediaPlayer.getTime();
+                    mediaPlayer.stop();
+                    mediaPlayer.play();
+                    mediaPlayer.setTime(pos);
+                    if (!wasPlaying) mediaPlayer.pause();
+                }, 200);
 
             })
             .setNegativeButton("Huy", null).show();
