@@ -1111,24 +1111,7 @@ public class PlayerActivity extends AppCompatActivity {
                 mediaPlayer.setAudioTrack(finalTracks[which].id);
                 Toast.makeText(this, "Da chon: " + names[which], Toast.LENGTH_SHORT).show();
                 d.dismiss();
-                // Re-broadcast AudioSession cho Wavelet sau khi doi track
-                android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-                h.postDelayed(() -> {
-                    try {
-                        int sessionId = mediaPlayer.getAudioSessionId();
-                        if (sessionId != 0) {
-                            android.content.Intent i2 = new android.content.Intent(
-                                android.media.audiofx.AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION);
-                            i2.putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, sessionId);
-                            i2.putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
-                            i2.putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE,
-                                android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC);
-                            sendBroadcast(i2);
-                        }
-                    } catch (Exception e) {
-                        android.util.Log.e("AudioTrack", "Broadcast error: " + e.getMessage());
-                    }
-                }, 500);
+
             })
             .setNegativeButton("Huy", null).show();
     }
