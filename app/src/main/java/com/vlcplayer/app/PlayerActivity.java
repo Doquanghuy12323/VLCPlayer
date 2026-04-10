@@ -1111,14 +1111,7 @@ public class PlayerActivity extends AppCompatActivity {
                 mediaPlayer.setAudioTrack(finalTracks[which].id);
                 Toast.makeText(this, "Da chon: " + names[which], Toast.LENGTH_SHORT).show();
                 d.dismiss();
-                // Chi pause/resume nhe de Wavelet re-detect, khong stop
-                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                    if (mediaPlayer.isPlaying()) {
-                        mediaPlayer.pause();
-                        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() ->
-                            mediaPlayer.play(), 300);
-                    }
-                }, 200);
+
 
             })
             .setNegativeButton("Huy", null).show();
