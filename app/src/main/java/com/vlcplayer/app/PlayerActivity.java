@@ -974,16 +974,15 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (mediaPlayer != null) {
-            mediaPlayer.detachViews();
-        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (mediaPlayer != null && videoLayout != null) {
-            mediaPlayer.attachViews(videoLayout, null, false, false);
+        // Force redraw surface de fix black screen
+        if (videoLayout != null) {
+            videoLayout.invalidate();
+            videoLayout.requestLayout();
         }
     }
 
