@@ -972,22 +972,29 @@ public class PlayerActivity extends AppCompatActivity {
 
         
     @Override
+    protected void onStart() {
+        super.onStart();
+        if (mediaPlayer != null && videoLayout != null) {
+            mediaPlayer.attachViews(videoLayout, null, false, false);
+        }
+    }
+
+        @Override
     protected void onPause() {
         super.onPause();
+        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+            mediaPlayer.pause();
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // Force redraw surface de fix black screen
-        if (videoLayout != null) {
-            videoLayout.invalidate();
-            videoLayout.requestLayout();
-        }
     }
 
     @Override protected void onStop() {
         super.onStop();
+        if (mediaPlayer != null) { mediaPlayer.detachViews(); }
         saveHistory();
         if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.detachViews(); }
     }
