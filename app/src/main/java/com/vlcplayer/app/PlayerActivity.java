@@ -982,6 +982,18 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
 
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (mediaPlayer != null && videoLayout != null) {
+            videoLayout.post(() -> {
+                try {
+                    mediaPlayer.attachViews(videoLayout, null, false, false);
+                } catch (Exception e) {}
+            });
+        }
+    }
+
 @Override protected void onStop() {
         super.onStop();
         saveHistory();
