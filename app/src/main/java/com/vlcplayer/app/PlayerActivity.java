@@ -969,22 +969,12 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
     }
-
-        
-    @Override
-    protected void onStart() {
-        super.onStart();
-        if (mediaPlayer != null && videoLayout != null) {
-            mediaPlayer.attachViews(videoLayout, null, false, false);
-        }
     }
 
         @Override
     protected void onPause() {
         super.onPause();
-        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
-        }
+    }
     }
 
     @Override
@@ -994,7 +984,6 @@ public class PlayerActivity extends AppCompatActivity {
 
     @Override protected void onStop() {
         super.onStop();
-        if (mediaPlayer != null) { mediaPlayer.detachViews(); }
         saveHistory();
         if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.detachViews(); }
     }
