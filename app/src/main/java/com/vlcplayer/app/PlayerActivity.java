@@ -969,8 +969,7 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
     }
-    }
-}
+    
 @Override protected void onStop() {
         super.onStop();
         saveHistory();
