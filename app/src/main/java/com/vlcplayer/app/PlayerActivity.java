@@ -970,19 +970,8 @@ public class PlayerActivity extends AppCompatActivity {
         });
     }
     }
-
-        @Override
-    protected void onPause() {
-        super.onPause();
-    }
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-    }
-
-    @Override protected void onStop() {
+}
+@Override protected void onStop() {
         super.onStop();
         saveHistory();
         if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.detachViews(); }
