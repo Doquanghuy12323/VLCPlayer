@@ -973,12 +973,23 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        if (mediaPlayer != null && videoLayout != null) {
-            videoLayout.post(() -> {
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && mediaPlayer != null && videoLayout != null) {
+            // Doi surface that su san sang
+            videoLayout.postDelayed(() -> {
                 try {
+                    if (mediaPlayer != null && !mediaPlayer.isPlaying()) return;
+                    mediaPlayer.detachViews();
                     mediaPlayer.attachViews(videoLayout, null, false, false);
-                } catch (Exception e) {}
-            });
+                    videoLayout.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+                } catch (Exception e) {
+                    android.util.Log.e("Player", "reattach: " + e.getMessage());
+                }
+            }, 100);
         }
     }
 
