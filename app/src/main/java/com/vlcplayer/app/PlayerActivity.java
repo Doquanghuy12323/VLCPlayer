@@ -495,11 +495,7 @@ public class PlayerActivity extends AppCompatActivity {
                     media.setHWDecoderEnabled(true, false);
                     media.addOption(":file-caching=1500");
                     media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-                try {
-                    mediaPlayer.detachViews();
-                    mediaPlayer.attachViews(videoLayout, null, false, false);
-                } catch (Exception e) {}
-                    mediaPlayer.setMedia(media);
+                                    mediaPlayer.setMedia(media);
                     media.release();
                     mediaPlayer.play();
                     if (resumePos > 0) {
@@ -783,14 +779,19 @@ public class PlayerActivity extends AppCompatActivity {
             | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
     }
 
-    @Override public void onWindowFocusChanged(boolean hasFocus) {
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus && isInBackground && mediaPlayer != null && videoLayout != null) {
+        if (hasFocus && isInBackground) {
             isInBackground = false;
             videoLayout.postDelayed(() -> {
                 try {
                     mediaPlayer.attachViews(videoLayout, null, false, false);
                 } catch (Exception e) {}
+            }, 300);
+        }
+        if (hasFocus) hideSystemUI();
+    } catch (Exception e) {}
             }, 300);
         }
         if (hasFocus && isInBackground) {
