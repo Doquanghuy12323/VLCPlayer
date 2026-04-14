@@ -794,6 +794,10 @@ public class PlayerActivity extends AppCompatActivity {
     } catch (Exception e) {}
             }, 300);
         }
+        if (hasFocus) hideSystemUI();
+    } catch (Exception e) {}
+            }, 300);
+        }
         if (hasFocus && isInBackground) {
             isInBackground = false;
             // Force redraw bang cach seek den vi tri hien tai
