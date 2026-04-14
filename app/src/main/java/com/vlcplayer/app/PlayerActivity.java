@@ -495,6 +495,10 @@ public class PlayerActivity extends AppCompatActivity {
                     media.setHWDecoderEnabled(true, false);
                     media.addOption(":file-caching=1500");
                     media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
+                try {
+                    mediaPlayer.detachViews();
+                    mediaPlayer.attachViews(videoLayout, null, false, false);
+                } catch (Exception e) {}
                     mediaPlayer.setMedia(media);
                     media.release();
                     mediaPlayer.play();
