@@ -61,6 +61,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
+    private boolean isInBackground = false;
     private ParcelFileDescriptor currentPfd;
     private Equalizer equalizer;
 
@@ -780,12 +781,13 @@ public class PlayerActivity extends AppCompatActivity {
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus && mediaPlayer != null && videoLayout != null) {
+        if (hasFocus && isInBackground && mediaPlayer != null && videoLayout != null) {
+            isInBackground = false;
             videoLayout.postDelayed(() -> {
                 try {
                     mediaPlayer.attachViews(videoLayout, null, false, false);
                 } catch (Exception e) {}
-            }, 200);
+            }, 300);
         }
         if (hasFocus) hideSystemUI();
     }
@@ -980,9 +982,11 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
+        isInBackground = false;
     }
 @Override protected void onStop() {
         super.onStop();
+        isInBackground = true;
         saveHistory();
         if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.detachViews(); }
     }
