@@ -791,7 +791,8 @@ public class PlayerActivity extends AppCompatActivity {
             }, 300);
         }
         if (hasFocus) hideSystemUI();
-    } catch (Exception e) {}
+    }
+
             }, 300);
         }
         if (hasFocus) hideSystemUI();
