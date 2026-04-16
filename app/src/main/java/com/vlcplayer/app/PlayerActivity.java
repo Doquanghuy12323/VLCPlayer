@@ -788,28 +788,6 @@ public class PlayerActivity extends AppCompatActivity {
                 try {
                     mediaPlayer.attachViews(videoLayout, null, false, false);
                 } catch (Exception e) {}
-            }, 300);
-        }
-        if (hasFocus) hideSystemUI();
-    }
-
-            }, 300);
-        }
-        if (hasFocus) hideSystemUI();
-    } catch (Exception e) {}
-            }, 300);
-        }
-        if (hasFocus && isInBackground) {
-            isInBackground = false;
-            // Force redraw bang cach seek den vi tri hien tai
-            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                long pos = mediaPlayer.getTime();
-                mediaPlayer.setTime(pos);
-            }
-        }
-        if (hasFocus) hideSystemUI();
-    }
-
     @Override public void onUserLeaveHint() {
         super.onUserLeaveHint();
         enterPiP();
