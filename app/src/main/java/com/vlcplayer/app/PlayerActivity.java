@@ -788,6 +788,11 @@ public class PlayerActivity extends AppCompatActivity {
                 try {
                     mediaPlayer.attachViews(videoLayout, null, false, false);
                 } catch (Exception e) {}
+            }, 300);
+        }
+        if (hasFocus) hideSystemUI();
+    }
+
     @Override public void onUserLeaveHint() {
         super.onUserLeaveHint();
         enterPiP();
