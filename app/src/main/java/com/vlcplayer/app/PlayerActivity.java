@@ -784,15 +784,6 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus && isInBackground) {
-            isInBackground = false;
-            videoLayout.postDelayed(() -> {
-                try {
-                    mediaPlayer.attachViews(videoLayout, null, false, false);
-                    if (mediaPlayer != null && lastPosition >= 0) { mediaPlayer.play(); }
-                } catch (Exception e) {}
-            }, 300);
-        }
         if (hasFocus) hideSystemUI();
     }
 
@@ -986,7 +977,6 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        isInBackground = false;
     }    @Override
     protected void onResume() {
         super.onResume();
@@ -994,8 +984,10 @@ public class PlayerActivity extends AppCompatActivity {
             videoLayout.post(() -> {
                 try {
                     mediaPlayer.attachViews(videoLayout, null, false, false);
-                    if (isInBackground && lastPosition >= 0) {
+                    if (isInBackground) {
                         mediaPlayer.play();
+                mediaPlayer.play();
+                if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
                         isInBackground = false;
                     }
                 } catch (Exception e) {}
