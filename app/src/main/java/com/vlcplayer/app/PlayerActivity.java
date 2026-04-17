@@ -987,12 +987,28 @@ public class PlayerActivity extends AppCompatActivity {
     protected void onStart() {
         super.onStart();
         isInBackground = false;
+    }    @Override
+    protected void onResume() {
+        super.onResume();
+        if (mediaPlayer != null && videoLayout != null) {
+            videoLayout.post(() -> {
+                try {
+                    mediaPlayer.attachViews(videoLayout, null, false, false);
+                    if (isInBackground && lastPosition >= 0) {
+                        mediaPlayer.play();
+                        isInBackground = false;
+                    }
+                } catch (Exception e) {}
+            });
+        }
     }
+
+    
 @Override protected void onStop() {
         super.onStop();
         isInBackground = true;
         saveHistory();
-        if (mediaPlayer != null) { lastPosition = mediaPlayer.getTime(); mediaPlayer.pause(); mediaPlayer.detachViews(); }
+        if (mediaPlayer != null) { lastPosition = mediaPlayer.getTime(); mediaPlayer.pause(); }
     }
 
     @Override protected void onDestroy() {
