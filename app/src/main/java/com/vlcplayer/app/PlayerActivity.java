@@ -496,8 +496,6 @@ public class PlayerActivity extends AppCompatActivity {
                     media.addOption(":file-caching=1500");
                     media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
                 // Reattach surface truoc khi set media moi
-                try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
-                mediaPlayer.attachViews(videoLayout, null, false, false);
                                     mediaPlayer.setMedia(media);
                     media.release();
                     mediaPlayer.play();
@@ -790,6 +788,7 @@ public class PlayerActivity extends AppCompatActivity {
             videoLayout.postDelayed(() -> {
                 try {
                     mediaPlayer.attachViews(videoLayout, null, false, false);
+                    if (mediaPlayer != null && lastPosition >= 0) { mediaPlayer.play(); }
                 } catch (Exception e) {}
             }, 300);
         }
@@ -992,7 +991,7 @@ public class PlayerActivity extends AppCompatActivity {
         super.onStop();
         isInBackground = true;
         saveHistory();
-        if (mediaPlayer != null) { mediaPlayer.stop(); mediaPlayer.detachViews(); }
+        if (mediaPlayer != null) { lastPosition = mediaPlayer.getTime(); mediaPlayer.pause(); mediaPlayer.detachViews(); }
     }
 
     @Override protected void onDestroy() {
