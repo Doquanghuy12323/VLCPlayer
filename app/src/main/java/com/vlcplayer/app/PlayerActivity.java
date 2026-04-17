@@ -62,6 +62,7 @@ public class PlayerActivity extends AppCompatActivity {
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
     private boolean isInBackground = false;
+    private long lastPosition = 0;
     private ParcelFileDescriptor currentPfd;
     private Equalizer equalizer;
 
