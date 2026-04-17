@@ -497,6 +497,7 @@ public class PlayerActivity extends AppCompatActivity {
                     media.addOption(":file-caching=1500");
                     media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
                     media.release();
+                mediaPlayer.attachViews(videoLayout, null, false, false);
                     mediaPlayer.play();
                     if (resumePos > 0) {
                         handler.postDelayed(() -> {
