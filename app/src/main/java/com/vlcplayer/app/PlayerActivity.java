@@ -497,6 +497,8 @@ public class PlayerActivity extends AppCompatActivity {
                     media.addOption(":file-caching=1500");
                     media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
                 mediaPlayer.stop();
+                mediaPlayer.detachViews();
+                mediaPlayer.attachViews(videoLayout, null, false, false);
                 mediaPlayer.setMedia(media);
                     media.release();
                     mediaPlayer.play();
