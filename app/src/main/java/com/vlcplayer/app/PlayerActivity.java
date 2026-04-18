@@ -478,35 +478,48 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-                    private void playMedia(String uri) {
+                        private void playMedia(String uri) {
         pendingUri = uri;
         try {
             Uri u = Uri.parse(uri);
             Media media;
+
             if ("content".equals(u.getScheme())) {
-                // Mo PFD moi TRUOC khi dong PFD cu
-                // Tranh dong PFD khi media cu con dang su dung
-                android.os.ParcelFileDescriptor newPfd =
-                    getContentResolver().openFileDescriptor(u, "r");
-                if (newPfd == null) return;
-                // Gio moi dong PFD cu
-                closePfd();
-                currentPfd = newPfd;
+                // Giu PFD cu song den khi play() chay xong
+                // Tranh dong FD khi libVLC van dang doc
+                android.os.ParcelFileDescriptor oldPfd = currentPfd;
+                currentPfd = getContentResolver().openFileDescriptor(u, "r");
+                if (currentPfd == null) {
+                    if (oldPfd != null) try { oldPfd.close(); } catch (Exception ignored) {}
+                    return;
+                }
                 media = new Media(libVLC, currentPfd.getFileDescriptor());
+                // Set media truoc khi dong PFD cu
+                media.setHWDecoderEnabled(true, false);
+                media.addOption(":file-caching=1500");
+                media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
+                mediaPlayer.setMedia(media);
+                media.release();
+                // Gio moi co the dong PFD cu an toan
+                if (oldPfd != null) {
+                    try { oldPfd.close(); } catch (Exception ignored) {}
+                }
             } else {
+                closePfd();
                 media = new Media(libVLC, u);
+                media.setHWDecoderEnabled(true, false);
+                media.addOption(":file-caching=1500");
+                media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
+                mediaPlayer.setMedia(media);
+                media.release();
             }
-            media.setHWDecoderEnabled(true, false);
-            media.addOption(":file-caching=1500");
-            media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-            mediaPlayer.stop();
-            mediaPlayer.setMedia(media);
-            media.release();
+
             mediaPlayer.play();
+
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
-        // Resume position
+        // Resume position async
         dbExecutor.execute(() -> {
             if (!uri.equals(pendingUri)) return;
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
