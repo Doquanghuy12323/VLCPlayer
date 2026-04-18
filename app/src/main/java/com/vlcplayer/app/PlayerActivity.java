@@ -479,19 +479,13 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void playMedia(String uri) {
-        // Stop hien tai tren UI thread truoc khi load media moi
-        if (mediaPlayer != null) {
         pendingUri = uri;
-            mediaPlayer.stop();
-            mediaPlayer.detachViews();
-            mediaPlayer.attachViews(videoLayout, null, false, false);
-        }
         dbExecutor.execute(() -> {
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
             final long resumePos = (history != null && history.lastPosition > 5000) ? history.lastPosition : 0;
             runOnUiThread(() -> {
-                try {
                 if (!uri.equals(pendingUri)) return;
+                try {
                     Uri u = Uri.parse(uri);
                     Media media;
                     if ("content".equals(u.getScheme())) {
@@ -505,8 +499,8 @@ public class PlayerActivity extends AppCompatActivity {
                     media.setHWDecoderEnabled(true, false);
                     media.addOption(":file-caching=1500");
                     media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-                mediaPlayer.setMedia(media);
-                media.release();
+                    mediaPlayer.setMedia(media);
+                    media.release();
                     mediaPlayer.play();
                     if (resumePos > 0) {
                         handler.postDelayed(() -> {
@@ -520,6 +514,7 @@ public class PlayerActivity extends AppCompatActivity {
             });
         });
     }
+
 
     private void saveHistory() {
         if (uriString == null) return;
