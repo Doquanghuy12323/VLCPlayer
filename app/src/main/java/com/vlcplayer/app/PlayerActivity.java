@@ -478,13 +478,9 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-            private void playMedia(String uri) {
+                private void playMedia(String uri) {
         pendingUri = uri;
         try {
-            // Phai stop() truoc khi doi codec (mkv<->mp4)
-            mediaPlayer.stop();
-            mediaPlayer.detachViews();
-
             Uri u = Uri.parse(uri);
             Media media;
             if ("content".equals(u.getScheme())) {
@@ -498,17 +494,24 @@ public class PlayerActivity extends AppCompatActivity {
             media.setHWDecoderEnabled(true, false);
             media.addOption(":file-caching=1500");
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
+
+            // Lang nghe event Opening de attach surface dung luc
+            mediaPlayer.setEventListener(event -> {
+                if (event.type == org.videolan.libvlc.MediaPlayer.Event.Opening) {
+                    runOnUiThread(() -> {
+                        try {
+                            mediaPlayer.detachViews();
+                            mediaPlayer.attachViews(videoLayout, null, false, false);
+                        } catch (Exception ignored) {}
+                    });
+                    // Xoa listener sau khi da xu ly
+                    mediaPlayer.setEventListener(null);
+                }
+            });
+
             mediaPlayer.setMedia(media);
             media.release();
-
-            // Doi surface san sang roi attach va play
-            videoLayout.postDelayed(() -> {
-                if (!uri.equals(pendingUri)) return;
-                try {
-                    mediaPlayer.attachViews(videoLayout, null, false, false);
-                } catch (Exception ignored) {}
-                mediaPlayer.play();
-            }, 150);
+            mediaPlayer.play();
 
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
