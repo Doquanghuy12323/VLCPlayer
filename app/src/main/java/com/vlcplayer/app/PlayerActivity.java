@@ -478,9 +478,13 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-        private void playMedia(String uri) {
+            private void playMedia(String uri) {
         pendingUri = uri;
         try {
+            // Phai stop() truoc khi doi codec (mkv<->mp4)
+            mediaPlayer.stop();
+            mediaPlayer.detachViews();
+
             Uri u = Uri.parse(uri);
             Media media;
             if ("content".equals(u.getScheme())) {
@@ -494,22 +498,22 @@ public class PlayerActivity extends AppCompatActivity {
             media.setHWDecoderEnabled(true, false);
             media.addOption(":file-caching=1500");
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-            // setMedia tu dong dung playback cu
             mediaPlayer.setMedia(media);
             media.release();
-            // Dung post() de dam bao setMedia xu ly xong truoc khi refresh surface
-            videoLayout.post(() -> {
+
+            // Doi surface san sang roi attach va play
+            videoLayout.postDelayed(() -> {
                 if (!uri.equals(pendingUri)) return;
                 try {
-                    mediaPlayer.detachViews();
                     mediaPlayer.attachViews(videoLayout, null, false, false);
                 } catch (Exception ignored) {}
                 mediaPlayer.play();
-            });
+            }, 150);
+
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
-        // Load resume position async
+        // Resume position
         dbExecutor.execute(() -> {
             if (!uri.equals(pendingUri)) return;
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
