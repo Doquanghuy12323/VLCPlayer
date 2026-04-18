@@ -478,9 +478,8 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-    private void playMedia(String uri) {
+        private void playMedia(String uri) {
         pendingUri = uri;
-        // Play ngay tren UI thread, khong qua dbExecutor
         try {
             Uri u = Uri.parse(uri);
             Media media;
@@ -495,28 +494,33 @@ public class PlayerActivity extends AppCompatActivity {
             media.setHWDecoderEnabled(true, false);
             media.addOption(":file-caching=1500");
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-            mediaPlayer.detachViews();
+            // setMedia tu dong dung playback cu
             mediaPlayer.setMedia(media);
             media.release();
-            mediaPlayer.attachViews(videoLayout, null, false, false);
-            mediaPlayer.play();
+            // Dung post() de dam bao setMedia xu ly xong truoc khi refresh surface
+            videoLayout.post(() -> {
+                if (!uri.equals(pendingUri)) return;
+                try {
+                    mediaPlayer.detachViews();
+                    mediaPlayer.attachViews(videoLayout, null, false, false);
+                } catch (Exception ignored) {}
+                mediaPlayer.play();
+            });
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
-        // Load history async sau khi da play
+        // Load resume position async
         dbExecutor.execute(() -> {
+            if (!uri.equals(pendingUri)) return;
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
             if (history != null && history.lastPosition > 5000) {
-                final long resumePos = history.lastPosition;
-                runOnUiThread(() -> {
-                    if (!uri.equals(pendingUri)) return;
-                    handler.postDelayed(() -> {
-                        if (uri.equals(pendingUri)) {
-                            mediaPlayer.setTime(resumePos);
-                            Toast.makeText(this, "Tiep tuc tu " + formatTime(resumePos), Toast.LENGTH_SHORT).show();
-                        }
-                    }, 1000);
-                });
+                final long pos = history.lastPosition;
+                handler.postDelayed(() -> {
+                    if (uri.equals(pendingUri)) {
+                        mediaPlayer.setTime(pos);
+                        Toast.makeText(this, "Tiep tuc tu " + formatTime(pos), Toast.LENGTH_SHORT).show();
+                    }
+                }, 1500);
             }
         });
     }
