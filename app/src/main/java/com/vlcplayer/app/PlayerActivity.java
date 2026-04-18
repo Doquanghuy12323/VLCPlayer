@@ -63,6 +63,7 @@ public class PlayerActivity extends AppCompatActivity {
     private VLCVideoLayout videoLayout;
     private boolean isInBackground = false;
     private long lastPosition = 0;
+    private volatile String pendingUri = null;
     private ParcelFileDescriptor currentPfd;
     private Equalizer equalizer;
 
@@ -480,6 +481,7 @@ public class PlayerActivity extends AppCompatActivity {
     private void playMedia(String uri) {
         // Stop hien tai tren UI thread truoc khi load media moi
         if (mediaPlayer != null) {
+        pendingUri = uri;
             mediaPlayer.stop();
             mediaPlayer.detachViews();
             mediaPlayer.attachViews(videoLayout, null, false, false);
@@ -489,6 +491,7 @@ public class PlayerActivity extends AppCompatActivity {
             final long resumePos = (history != null && history.lastPosition > 5000) ? history.lastPosition : 0;
             runOnUiThread(() -> {
                 try {
+                if (!uri.equals(pendingUri)) return;
                     Uri u = Uri.parse(uri);
                     Media media;
                     if ("content".equals(u.getScheme())) {
