@@ -495,8 +495,10 @@ public class PlayerActivity extends AppCompatActivity {
             media.setHWDecoderEnabled(true, false);
             media.addOption(":file-caching=1500");
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
+            mediaPlayer.detachViews();
             mediaPlayer.setMedia(media);
             media.release();
+            mediaPlayer.attachViews(videoLayout, null, false, false);
             mediaPlayer.play();
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
