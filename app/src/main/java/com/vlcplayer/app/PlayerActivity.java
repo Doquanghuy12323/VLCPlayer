@@ -478,15 +478,13 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-                        private void playMedia(String uri) {
+                            private void playMedia(String uri) {
         pendingUri = uri;
         try {
             Uri u = Uri.parse(uri);
             Media media;
 
             if ("content".equals(u.getScheme())) {
-                // Giu PFD cu song den khi play() chay xong
-                // Tranh dong FD khi libVLC van dang doc
                 android.os.ParcelFileDescriptor oldPfd = currentPfd;
                 currentPfd = getContentResolver().openFileDescriptor(u, "r");
                 if (currentPfd == null) {
@@ -494,13 +492,11 @@ public class PlayerActivity extends AppCompatActivity {
                     return;
                 }
                 media = new Media(libVLC, currentPfd.getFileDescriptor());
-                // Set media truoc khi dong PFD cu
                 media.setHWDecoderEnabled(true, false);
                 media.addOption(":file-caching=1500");
                 media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
                 mediaPlayer.setMedia(media);
                 media.release();
-                // Gio moi co the dong PFD cu an toan
                 if (oldPfd != null) {
                     try { oldPfd.close(); } catch (Exception ignored) {}
                 }
@@ -514,6 +510,10 @@ public class PlayerActivity extends AppCompatActivity {
                 media.release();
             }
 
+            // Simulate tab out/in: detach + attach de force surface refresh
+            // Day la dieu duy nhat fix duoc loi (da verify qua tab out/in)
+            try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
+            mediaPlayer.attachViews(videoLayout, null, false, false);
             mediaPlayer.play();
 
         } catch (Exception e) {
