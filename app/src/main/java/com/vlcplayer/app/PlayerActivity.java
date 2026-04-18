@@ -294,14 +294,6 @@ public class PlayerActivity extends AppCompatActivity {
         } catch (Exception ignored) {}
         mediaPlayer.setEventListener(event -> {
             switch (event.type) {
-                case MediaPlayer.Event.Opening:
-                    runOnUiThread(() -> {
-                        try {
-                            mediaPlayer.detachViews();
-                            mediaPlayer.attachViews(videoLayout, null, false, false);
-                        } catch (Exception ignored) {}
-                    });
-                    break;
                 case MediaPlayer.Event.Playing:
                     runOnUiThread(() -> {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
