@@ -294,6 +294,14 @@ public class PlayerActivity extends AppCompatActivity {
         } catch (Exception ignored) {}
         mediaPlayer.setEventListener(event -> {
             switch (event.type) {
+                case MediaPlayer.Event.Opening:
+                    runOnUiThread(() -> {
+                        try {
+                            mediaPlayer.detachViews();
+                            mediaPlayer.attachViews(videoLayout, null, false, false);
+                        } catch (Exception ignored) {}
+                    });
+                    break;
                 case MediaPlayer.Event.Playing:
                     runOnUiThread(() -> {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
@@ -494,21 +502,6 @@ public class PlayerActivity extends AppCompatActivity {
             media.setHWDecoderEnabled(true, false);
             media.addOption(":file-caching=1500");
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-
-            // Lang nghe event Opening de attach surface dung luc
-            mediaPlayer.setEventListener(event -> {
-                if (event.type == org.videolan.libvlc.MediaPlayer.Event.Opening) {
-                    runOnUiThread(() -> {
-                        try {
-                            mediaPlayer.detachViews();
-                            mediaPlayer.attachViews(videoLayout, null, false, false);
-                        } catch (Exception ignored) {}
-                    });
-                    // Xoa listener sau khi da xu ly
-                    mediaPlayer.setEventListener(null);
-                }
-            });
-
             mediaPlayer.setMedia(media);
             media.release();
             mediaPlayer.play();
