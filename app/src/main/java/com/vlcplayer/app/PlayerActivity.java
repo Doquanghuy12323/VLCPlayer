@@ -486,15 +486,20 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-                private void playMedia(String uri) {
+                    private void playMedia(String uri) {
         pendingUri = uri;
         try {
             Uri u = Uri.parse(uri);
             Media media;
             if ("content".equals(u.getScheme())) {
+                // Mo PFD moi TRUOC khi dong PFD cu
+                // Tranh dong PFD khi media cu con dang su dung
+                android.os.ParcelFileDescriptor newPfd =
+                    getContentResolver().openFileDescriptor(u, "r");
+                if (newPfd == null) return;
+                // Gio moi dong PFD cu
                 closePfd();
-                currentPfd = getContentResolver().openFileDescriptor(u, "r");
-                if (currentPfd == null) return;
+                currentPfd = newPfd;
                 media = new Media(libVLC, currentPfd.getFileDescriptor());
             } else {
                 media = new Media(libVLC, u);
@@ -505,7 +510,6 @@ public class PlayerActivity extends AppCompatActivity {
             mediaPlayer.setMedia(media);
             media.release();
             mediaPlayer.play();
-
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
