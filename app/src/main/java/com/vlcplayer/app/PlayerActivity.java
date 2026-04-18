@@ -478,6 +478,12 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void playMedia(String uri) {
+        // Stop hien tai tren UI thread truoc khi load media moi
+        if (mediaPlayer != null) {
+            mediaPlayer.stop();
+            mediaPlayer.detachViews();
+            mediaPlayer.attachViews(videoLayout, null, false, false);
+        }
         dbExecutor.execute(() -> {
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
             final long resumePos = (history != null && history.lastPosition > 5000) ? history.lastPosition : 0;
