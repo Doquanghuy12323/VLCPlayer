@@ -478,7 +478,7 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-                                private void playMedia(String uri) {
+                                    private void playMedia(String uri) {
         pendingUri = uri;
         try {
             Uri u = Uri.parse(uri);
@@ -497,9 +497,7 @@ public class PlayerActivity extends AppCompatActivity {
                 media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
                 mediaPlayer.setMedia(media);
                 media.release();
-                if (oldPfd != null) {
-                    try { oldPfd.close(); } catch (Exception ignored) {}
-                }
+                if (oldPfd != null) try { oldPfd.close(); } catch (Exception ignored) {}
             } else {
                 closePfd();
                 media = new Media(libVLC, u);
@@ -510,11 +508,14 @@ public class PlayerActivity extends AppCompatActivity {
                 media.release();
             }
 
-            // Giong het onStop/onResume: pause -> detach -> attach -> play
-            mediaPlayer.pause();
-            try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
-            mediaPlayer.attachViews(videoLayout, null, false, false);
-            mediaPlayer.play();
+            // Dung post() giong onResume - doi frame UI tiep theo
+            // Day la dieu onResume lam khi tab vao va no LUON FIX duoc
+            videoLayout.post(() -> {
+                if (!uri.equals(pendingUri)) return;
+                try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
+                mediaPlayer.attachViews(videoLayout, null, false, false);
+                mediaPlayer.play();
+            });
 
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
