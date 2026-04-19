@@ -478,7 +478,7 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-                                    private void playMedia(String uri) {
+                                        private void playMedia(String uri) {
         pendingUri = uri;
         try {
             Uri u = Uri.parse(uri);
@@ -508,13 +508,13 @@ public class PlayerActivity extends AppCompatActivity {
                 media.release();
             }
 
-            // Dung post() giong onResume - doi frame UI tiep theo
-            // Day la dieu onResume lam khi tab vao va no LUON FIX duoc
+            // Giong het flow tab out/in da verify:
+            // play() TRUOC -> decoder khoi tao -> roi detach/attach surface
+            mediaPlayer.play();
             videoLayout.post(() -> {
                 if (!uri.equals(pendingUri)) return;
                 try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
                 mediaPlayer.attachViews(videoLayout, null, false, false);
-                mediaPlayer.play();
             });
 
         } catch (Exception e) {
