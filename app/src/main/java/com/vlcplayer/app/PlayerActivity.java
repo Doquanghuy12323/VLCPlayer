@@ -478,7 +478,7 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-                            private void playMedia(String uri) {
+                                private void playMedia(String uri) {
         pendingUri = uri;
         try {
             Uri u = Uri.parse(uri);
@@ -510,8 +510,8 @@ public class PlayerActivity extends AppCompatActivity {
                 media.release();
             }
 
-            // Simulate tab out/in: detach + attach de force surface refresh
-            // Day la dieu duy nhat fix duoc loi (da verify qua tab out/in)
+            // Giong het onStop/onResume: pause -> detach -> attach -> play
+            mediaPlayer.pause();
             try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
             mediaPlayer.attachViews(videoLayout, null, false, false);
             mediaPlayer.play();
@@ -519,7 +519,6 @@ public class PlayerActivity extends AppCompatActivity {
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
-        // Resume position async
         dbExecutor.execute(() -> {
             if (!uri.equals(pendingUri)) return;
             HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
