@@ -246,15 +246,7 @@
         android:padding="6dp"
         android:contentDescription="Audio Track"/>
 
-    <ImageButton
-        android:id="@+id/btn_audio"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:src="@android:drawable/ic_lock_silent_mode_off"
-        android:tint="#FFFFFF"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:padding="6dp"
-        android:contentDescription="Audio Track"/>
+    
 
     <ImageButton
         android:id="@+id/btn_handy"
