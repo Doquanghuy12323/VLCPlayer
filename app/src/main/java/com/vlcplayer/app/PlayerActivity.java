@@ -478,12 +478,11 @@ public class PlayerActivity extends AppCompatActivity {
         Toast.makeText(this, labels[scaleMode], Toast.LENGTH_SHORT).show();
     }
 
-                                        private void playMedia(String uri) {
+                                            private void playMedia(String uri) {
         pendingUri = uri;
         try {
             Uri u = Uri.parse(uri);
             Media media;
-
             if ("content".equals(u.getScheme())) {
                 android.os.ParcelFileDescriptor oldPfd = currentPfd;
                 currentPfd = getContentResolver().openFileDescriptor(u, "r");
@@ -492,31 +491,22 @@ public class PlayerActivity extends AppCompatActivity {
                     return;
                 }
                 media = new Media(libVLC, currentPfd.getFileDescriptor());
-                media.setHWDecoderEnabled(true, false);
-                media.addOption(":file-caching=1500");
-                media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-                mediaPlayer.setMedia(media);
-                media.release();
                 if (oldPfd != null) try { oldPfd.close(); } catch (Exception ignored) {}
             } else {
                 closePfd();
                 media = new Media(libVLC, u);
-                media.setHWDecoderEnabled(true, false);
-                media.addOption(":file-caching=1500");
-                media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
-                mediaPlayer.setMedia(media);
-                media.release();
             }
-
-            // Giong het flow tab out/in da verify:
-            // play() TRUOC -> decoder khoi tao -> roi detach/attach surface
+            media.setHWDecoderEnabled(true, false);
+            media.addOption(":file-caching=1500");
+            media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
+            mediaPlayer.setMedia(media);
+            media.release();
             mediaPlayer.play();
             videoLayout.post(() -> {
                 if (!uri.equals(pendingUri)) return;
                 try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
                 mediaPlayer.attachViews(videoLayout, null, false, false);
             });
-
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
