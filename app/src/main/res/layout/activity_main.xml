@@ -9,15 +9,18 @@
     <com.google.android.material.appbar.AppBarLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar">
+        android:background="@color/surface_darker"
+        app:elevation="0dp">
 
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            android:background="@color/surface_dark"
+            android:background="@color/surface_darker"
             app:title="@string/app_name"
-            app:titleTextColor="@color/text_primary" />
+            app:titleTextColor="@color/text_primary"
+            app:titleTextAppearance="@style/ToolbarTitleStyle" />
+
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.recyclerview.widget.RecyclerView
@@ -25,36 +28,38 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:paddingBottom="80dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="88dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior" />
-
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fab"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="16dp"
-        android:contentDescription="@string/open_file"
-        app:srcCompat="@android:drawable/ic_input_add"
-        app:backgroundTint="@color/accent"
-        app:tint="@color/white" />
-
-    <ProgressBar
-        android:id="@+id/progress_bar"
-        style="?android:attr/progressBarStyle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:visibility="gone"/>
 
     <TextView
         android:id="@+id/tv_empty"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="Khong co video"
-        android:textColor="#AAFFFFFF"
+        android:text="Không có video"
+        android:textColor="@color/text_muted"
         android:textSize="16sp"
         android:visibility="gone"/>
+
+    <ProgressBar
+        android:id="@+id/progress_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminateTint="@color/accent"
+        android:visibility="gone"/>
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="20dp"
+        android:contentDescription="@string/open_file"
+        app:backgroundTint="@color/accent"
+        app:srcCompat="@android:drawable/ic_input_add"
+        app:tint="@color/white"
+        app:elevation="6dp"/>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
