@@ -267,7 +267,15 @@ public class MainActivity extends AppCompatActivity
         boolean current = new PrivacyManager(this).isEnabled();
         boolean next = !current;
         java.util.List<String> paths2 = new java.util.ArrayList<>();
-        new PrivacyManager(this).setEnabled(next, paths2);
+        new PrivacyManager(this).setEnabled(next, paths2, () -> {
+            runOnUiThread(() -> {
+                loadVideos();
+                android.widget.Toast.makeText(this,
+                    next ? getString(R.string.privacy_enabled_toast)
+                         : getString(R.string.privacy_disabled_toast),
+                    android.widget.Toast.LENGTH_LONG).show();
+            });
+        });
         Toast.makeText(this,
             next ? "Che do bao mat: BAT (Gallery se an video)"
                  : "Che do bao mat: TAT (Gallery se hien video lai)",
@@ -446,7 +454,15 @@ public class MainActivity extends AppCompatActivity
                         } catch (Exception ignored) {}
                     }
                 }
-                new PrivacyManager(this).setEnabled(next, paths2);
+                new PrivacyManager(this).setEnabled(next, paths2, () -> {
+                    runOnUiThread(() -> {
+                        loadVideos();
+                        android.widget.Toast.makeText(this,
+                            next ? getString(R.string.privacy_enabled_toast)
+                                 : getString(R.string.privacy_disabled_toast),
+                            android.widget.Toast.LENGTH_LONG).show();
+                    });
+                });
                 android.widget.Toast.makeText(this,
                     next ? getString(R.string.privacy_enabled_toast) : getString(R.string.privacy_disabled_toast),
                     android.widget.Toast.LENGTH_LONG).show();
