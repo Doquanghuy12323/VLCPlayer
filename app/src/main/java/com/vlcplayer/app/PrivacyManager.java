@@ -2,12 +2,8 @@ package com.vlcplayer.app;
 
 import android.content.Context;
 import android.media.MediaScannerConnection;
+import android.os.Environment;
 import java.io.File;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class PrivacyManager {
     private static final String PREF = "privacy_prefs";
@@ -21,73 +17,31 @@ public class PrivacyManager {
             .getBoolean(KEY_ENABLED, false);
     }
 
-    public void setEnabled(boolean enabled, List<String> filePaths, Runnable onDone) {
+    public void setEnabled(boolean enabled, java.util.List<String> paths) {
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_ENABLED, enabled).apply();
-
-        Set<String> folders = new HashSet<>();
-        for (String path : filePaths) {
-            File f = new File(path);
-            if (f.getParentFile() != null) folders.add(f.getParent());
+        // Them/xoa .nomedia trong thu muc
+        for (String path : paths) {
+            File dir = new File(path).getParentFile();
+            if (dir == null) continue;
+            File nomedia = new File(dir, ".nomedia");
+            try {
+                if (enabled) { if (!nomedia.exists()) nomedia.createNewFile(); }
+                else { if (nomedia.exists()) { nomedia.delete(); MediaScannerConnection.scanFile(ctx, new String[]{dir.getAbsolutePath()}, null, null); } }
+            } catch (Exception ignored) {}
         }
+    }
 
-        // Xu ly .nomedia
-        for (String folder : folders) {
-            File nomedia = new File(folder, ".nomedia");
-            if (enabled) {
-                try { if (!nomedia.exists()) nomedia.createNewFile(); }
-                catch (Exception ignored) {}
-            } else {
-                if (nomedia.exists()) nomedia.delete();
-            }
-        }
+    public void hideFolder(String folderPath) {
+        File nomedia = new File(folderPath, ".nomedia");
+        try { if (!nomedia.exists()) nomedia.createNewFile(); } catch (Exception ignored) {}
+    }
 
-        if (enabled) {
-            // An: scan .nomedia de bao cho MediaStore biet
-            List<String> nomediaPaths = new ArrayList<>();
-            for (String folder : folders) {
-                nomediaPaths.add(folder + "/.nomedia");
-            }
-            MediaScannerConnection.scanFile(ctx,
-                nomediaPaths.toArray(new String[0]), null,
-                (p, u) -> { if (onDone != null) onDone.run(); });
-        } else {
-            // Hien: scan TUNG FILE de force MediaStore index lai
-            if (filePaths.isEmpty()) {
-                if (onDone != null) onDone.run();
-                return;
-            }
-            // Lay danh sach tat ca file video trong cac folder
-            List<String> videoFiles = new ArrayList<>();
-            for (String folder : folders) {
-                File dir = new File(folder);
-                File[] files = dir.listFiles();
-                if (files != null) {
-                    for (File f : files) {
-                        String name = f.getName().toLowerCase();
-                        if (name.endsWith(".mp4") || name.endsWith(".mkv") ||
-                            name.endsWith(".avi") || name.endsWith(".mov") ||
-                            name.endsWith(".wmv") || name.endsWith(".flv") ||
-                            name.endsWith(".webm")) {
-                            videoFiles.add(f.getAbsolutePath());
-                        }
-                    }
-                }
-            }
-            if (videoFiles.isEmpty()) {
-                if (onDone != null) onDone.run();
-                return;
-            }
-            // Dem so file da scan xong
-            AtomicInteger done = new AtomicInteger(0);
-            int total = videoFiles.size();
-            MediaScannerConnection.scanFile(ctx,
-                videoFiles.toArray(new String[0]), null,
-                (p, u) -> {
-                    if (done.incrementAndGet() >= total) {
-                        if (onDone != null) onDone.run();
-                    }
-                });
+    public void unhideFolder(String folderPath) {
+        File nomedia = new File(folderPath, ".nomedia");
+        if (nomedia.exists()) {
+            nomedia.delete();
+            MediaScannerConnection.scanFile(ctx, new String[]{folderPath}, null, null);
         }
     }
 }

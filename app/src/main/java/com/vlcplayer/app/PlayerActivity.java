@@ -120,11 +120,6 @@ public class PlayerActivity extends AppCompatActivity {
     };
 
     @Override
-    protected void attachBaseContext(android.content.Context base) {
-        super.attachBaseContext(AppLanguageManager.applyLanguage(base));
-    }
-
-    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(

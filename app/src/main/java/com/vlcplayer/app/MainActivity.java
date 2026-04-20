@@ -48,11 +48,6 @@ public class MainActivity extends AppCompatActivity
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
-    protected void attachBaseContext(android.content.Context base) {
-        super.attachBaseContext(AppLanguageManager.applyLanguage(base));
-    }
-
-    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
@@ -267,15 +262,7 @@ public class MainActivity extends AppCompatActivity
         boolean current = new PrivacyManager(this).isEnabled();
         boolean next = !current;
         java.util.List<String> paths2 = new java.util.ArrayList<>();
-        new PrivacyManager(this).setEnabled(next, paths2, () -> {
-            runOnUiThread(() -> {
-                loadVideos();
-                android.widget.Toast.makeText(this,
-                    next ? getString(R.string.privacy_enabled_toast)
-                         : getString(R.string.privacy_disabled_toast),
-                    android.widget.Toast.LENGTH_LONG).show();
-            });
-        });
+        new PrivacyManager(this).setEnabled(next, paths2);
         Toast.makeText(this,
             next ? "Che do bao mat: BAT (Gallery se an video)"
                  : "Che do bao mat: TAT (Gallery se hien video lai)",
@@ -297,7 +284,7 @@ public class MainActivity extends AppCompatActivity
                     startActivity(i);
                 }
             })
-            .setNegativeButton(getString(R.string.cancel), null).show();
+            .setNegativeButton("Huy", null).show();
     }
 
     private void showHistoryDialog() {
@@ -346,7 +333,7 @@ public class MainActivity extends AppCompatActivity
                 Toast.makeText(this, "Da chon: " + langs[sel[0]][0],
                     Toast.LENGTH_SHORT).show();
             })
-            .setNegativeButton(getString(R.string.cancel), null).show();
+            .setNegativeButton("Huy", null).show();
     }
 
     private void cleanApp() {
@@ -381,7 +368,7 @@ public class MainActivity extends AppCompatActivity
                     });
                 }).start();
             })
-            .setNegativeButton(getString(R.string.cancel), null).show();
+            .setNegativeButton("Huy", null).show();
     }
 
     private long getDirSize(java.io.File dir) {
@@ -417,83 +404,41 @@ public class MainActivity extends AppCompatActivity
                         String nk = et.getText().toString().trim();
                         if (!nk.isEmpty()) { p.edit().putString("connection_key", nk).apply();
                         android.widget.Toast.makeText(this,"Da luu!",android.widget.Toast.LENGTH_SHORT).show(); }
-                    }).setNegativeButton(getString(R.string.cancel), null).show())
+                    }).setNegativeButton("Huy", null).show())
             .setNegativeButton("Dong", null).show();
     }
 
     private void showPrivacyDialog() {
         boolean current = new PrivacyManager(this).isEnabled();
         boolean next = !current;
-        String msg = current
-            ? "Tat che do bao mat?\nVideo se hien lai trong thu vien."
-            : "Bat che do bao mat?\nVideo se bi an khoi thu vien may anh va cac ung dung khac.";
+        String msg = current ? "Tat che do bao mat?" : "Bat che do bao mat?";
         new androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.privacy_title))
+            .setTitle("Che do bao mat")
             .setMessage(msg)
-            .setPositiveButton(getString(R.string.ok), (d, w) -> {
-                // Lay tat ca folder chua video
+            .setPositiveButton("Dong y", (d, w) -> {
                 java.util.List<String> paths2 = new java.util.ArrayList<>();
-                if (videoList != null) {
-                    for (VideoItem v : videoList) {
-                        String p = v.getUri().toString();
-                        try {
-                            android.net.Uri u = android.net.Uri.parse(p);
-                            String filePath = null;
-                            if ("file".equals(u.getScheme())) {
-                                filePath = u.getPath();
-                            } else if ("content".equals(u.getScheme())) {
-                                android.database.Cursor c = getContentResolver().query(
-                                    u, new String[]{android.provider.MediaStore.Video.Media.DATA},
-                                    null, null, null);
-                                if (c != null && c.moveToFirst()) {
-                                    filePath = c.getString(0);
-                                    c.close();
-                                }
-                            }
-                            if (filePath != null) paths2.add(filePath);
-                        } catch (Exception ignored) {}
-                    }
-                }
-                new PrivacyManager(this).setEnabled(next, paths2, () -> {
-                    runOnUiThread(() -> {
-                        android.widget.Toast.makeText(this,
-                            next ? getString(R.string.privacy_enabled_toast)
-                                 : getString(R.string.privacy_disabled_toast),
-                            android.widget.Toast.LENGTH_LONG).show();
-                        new android.os.Handler(android.os.Looper.getMainLooper())
-                            .postDelayed(() -> loadVideos(), next ? 500 : 5000);
-                    });
-                });
+                new PrivacyManager(this).setEnabled(next, paths2);
                 android.widget.Toast.makeText(this,
-                    next ? getString(R.string.privacy_enabled_toast) : getString(R.string.privacy_disabled_toast),
-                    android.widget.Toast.LENGTH_LONG).show();
-                if (!next) loadVideos(); // Reload khi tat bao mat
+                    next ? "Da bat bao mat" : "Da tat bao mat",
+                    android.widget.Toast.LENGTH_SHORT).show();
             })
-            .setNegativeButton(getString(R.string.cancel), null).show();
+            .setNegativeButton("Huy", null).show();
     }
 
-    private void showLanguageDialog() {
-        String[][] langs = AppLanguageManager.LANGUAGES;
-        String[] names = new String[langs.length];
-        for (int i = 0; i < langs.length; i++) names[i] = langs[i][0];
-        String current = AppLanguageManager.getSavedLanguage(this);
-        int checked = 0;
-        for (int i = 0; i < langs.length; i++) {
-            if (langs[i][1].equals(current)) { checked = i; break; }
-        }
+        private void showLanguageDialog() {
+        String[] langs = {"Tieng Viet", "English"};
+        String[] codes = {"vi", "en"};
         new androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.language_title))
-            .setSingleChoiceItems(names, checked, null)
-            .setPositiveButton("OK", (d, w) -> {
-                int sel = ((androidx.appcompat.app.AlertDialog) d)
-                    .getListView().getCheckedItemPosition();
-                AppLanguageManager.saveLanguage(this, langs[sel][1]);
+            .setTitle("Ngon ngu / Language")
+            .setItems(langs, (d, which) -> {
+                android.content.SharedPreferences prefs =
+                    getSharedPreferences("app_prefs", MODE_PRIVATE);
+                prefs.edit().putString("language", codes[which]).apply();
                 android.widget.Toast.makeText(this,
-                    "Da chon: " + langs[sel][0],
+                    "Da chon: " + langs[which],
                     android.widget.Toast.LENGTH_SHORT).show();
                 recreate();
-            })
-            .setNegativeButton(getString(R.string.cancel), null).show();
+            }).show();
     }
 
 }
