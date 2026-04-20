@@ -17,4 +17,13 @@
     <string name="privacy_on">Privacy: ON</string>
     <string name="privacy_off">Privacy: OFF</string>
     <string name="handy_connect">The Handy</string>
+    <string name="cancel">Hủy</string>
+    <string name="ok">Đồng ý</string>
+    <string name="refresh">Làm mới</string>
+    <string name="language_title">Ngôn ngữ / Language</string>
+    <string name="privacy_title">Chế độ bảo mật</string>
+    <string name="privacy_enable_msg">Bật chế độ bảo mật?\nVideo sẽ bị ẩn khỏi thư viện.</string>
+    <string name="privacy_disable_msg">Tắt chế độ bảo mật?\nVideo sẽ hiện lại trong thư viện.</string>
+    <string name="privacy_enabled_toast">Đã bật bảo mật - Video đã bị ẩn</string>
+    <string name="privacy_disabled_toast">Đã tắt bảo mật - Video hiển thị lại</string>
 </resources>

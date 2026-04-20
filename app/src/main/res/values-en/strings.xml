@@ -6,4 +6,20 @@
     <string name="settings_language">App Language</string>
     <string name="privacy_on">Privacy: ON</string>
     <string name="privacy_off">Privacy: OFF</string>
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="refresh">Refresh</string>
+    <string name="language_title">Language</string>
+    <string name="privacy_title">Privacy Mode</string>
+    <string name="privacy_enable_msg">Enable privacy mode?\nVideos will be hidden from gallery.</string>
+    <string name="privacy_disable_msg">Disable privacy mode?\nVideos will appear in gallery again.</string>
+    <string name="privacy_enabled_toast">Privacy ON - Videos hidden</string>
+    <string name="privacy_disabled_toast">Privacy OFF - Videos visible</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="open_file">Open video file</string>
+    <string name="back">Back</string>
+    <string name="play_pause">Play/Pause</string>
+    <string name="rewind">Rewind 10s</string>
+    <string name="forward">Forward 10s</string>
+    <string name="handy_connect">The Handy</string>
 </resources>
