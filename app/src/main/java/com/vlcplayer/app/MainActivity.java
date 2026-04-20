@@ -460,9 +460,8 @@ public class MainActivity extends AppCompatActivity
                             next ? getString(R.string.privacy_enabled_toast)
                                  : getString(R.string.privacy_disabled_toast),
                             android.widget.Toast.LENGTH_LONG).show();
-                        // Doi MediaScanner index xong roi load
                         new android.os.Handler(android.os.Looper.getMainLooper())
-                            .postDelayed(() -> loadVideos(), next ? 500 : 3000);
+                            .postDelayed(() -> loadVideos(), next ? 500 : 5000);
                     });
                 });
                 android.widget.Toast.makeText(this,
