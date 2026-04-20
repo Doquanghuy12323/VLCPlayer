@@ -48,6 +48,11 @@ public class MainActivity extends AppCompatActivity
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(AppLanguageManager.applyLanguage(base));
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
@@ -411,34 +416,67 @@ public class MainActivity extends AppCompatActivity
     private void showPrivacyDialog() {
         boolean current = new PrivacyManager(this).isEnabled();
         boolean next = !current;
-        String msg = current ? "Tat che do bao mat?" : "Bat che do bao mat?";
+        String msg = current
+            ? "Tat che do bao mat?\nVideo se hien lai trong thu vien."
+            : "Bat che do bao mat?\nVideo se bi an khoi thu vien may anh va cac ung dung khac.";
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Che do bao mat")
             .setMessage(msg)
             .setPositiveButton("Dong y", (d, w) -> {
+                // Lay tat ca folder chua video
                 java.util.List<String> paths2 = new java.util.ArrayList<>();
+                if (videoList != null) {
+                    for (VideoItem v : videoList) {
+                        String p = v.getUri();
+                        try {
+                            android.net.Uri u = android.net.Uri.parse(p);
+                            String filePath = null;
+                            if ("file".equals(u.getScheme())) {
+                                filePath = u.getPath();
+                            } else if ("content".equals(u.getScheme())) {
+                                android.database.Cursor c = getContentResolver().query(
+                                    u, new String[]{android.provider.MediaStore.Video.Media.DATA},
+                                    null, null, null);
+                                if (c != null && c.moveToFirst()) {
+                                    filePath = c.getString(0);
+                                    c.close();
+                                }
+                            }
+                            if (filePath != null) paths2.add(filePath);
+                        } catch (Exception ignored) {}
+                    }
+                }
                 new PrivacyManager(this).setEnabled(next, paths2);
                 android.widget.Toast.makeText(this,
-                    next ? "Da bat bao mat" : "Da tat bao mat",
-                    android.widget.Toast.LENGTH_SHORT).show();
+                    next ? "Da bat bao mat - Video da bi an" : "Da tat bao mat - Video hien thi lai",
+                    android.widget.Toast.LENGTH_LONG).show();
+                if (!next) loadVideos(); // Reload khi tat bao mat
             })
             .setNegativeButton("Huy", null).show();
     }
 
-        private void showLanguageDialog() {
-        String[] langs = {"Tieng Viet", "English"};
-        String[] codes = {"vi", "en"};
+    private void showLanguageDialog() {
+        String[][] langs = AppLanguageManager.LANGUAGES;
+        String[] names = new String[langs.length];
+        for (int i = 0; i < langs.length; i++) names[i] = langs[i][0];
+        String current = AppLanguageManager.getSavedLanguage(this);
+        int checked = 0;
+        for (int i = 0; i < langs.length; i++) {
+            if (langs[i][1].equals(current)) { checked = i; break; }
+        }
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Ngon ngu / Language")
-            .setItems(langs, (d, which) -> {
-                android.content.SharedPreferences prefs =
-                    getSharedPreferences("app_prefs", MODE_PRIVATE);
-                prefs.edit().putString("language", codes[which]).apply();
+            .setSingleChoiceItems(names, checked, null)
+            .setPositiveButton("OK", (d, w) -> {
+                int sel = ((androidx.appcompat.app.AlertDialog) d)
+                    .getListView().getCheckedItemPosition();
+                AppLanguageManager.saveLanguage(this, langs[sel][1]);
                 android.widget.Toast.makeText(this,
-                    "Da chon: " + langs[which],
+                    "Da chon: " + langs[sel][0],
                     android.widget.Toast.LENGTH_SHORT).show();
                 recreate();
-            }).show();
+            })
+            .setNegativeButton("Huy", null).show();
     }
 
 }
