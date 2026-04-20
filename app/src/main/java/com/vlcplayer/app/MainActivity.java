@@ -427,7 +427,7 @@ public class MainActivity extends AppCompatActivity
                 java.util.List<String> paths2 = new java.util.ArrayList<>();
                 if (videoList != null) {
                     for (VideoItem v : videoList) {
-                        String p = v.getUri();
+                        String p = v.getUri().toString();
                         try {
                             android.net.Uri u = android.net.Uri.parse(p);
                             String filePath = null;
