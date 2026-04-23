@@ -52,7 +52,7 @@
             android:imeOptions="actionGo"
             android:inputType="textUri"
             android:hint="Nhap URL..."
-            android:hintTextColor="#80848E"/>
+            />
 
         <ImageButton
             android:id="@+id/btn_go"
