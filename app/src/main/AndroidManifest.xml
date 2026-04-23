@@ -56,5 +56,17 @@
                 android:resource="@xml/provider_paths" />
         </provider>
 
-    </application>
+    
+        <activity
+            android:name=".MangaActivity"
+            android:theme="@style/Theme.VLCPlayer.Fullscreen"
+            android:screenOrientation="unspecified"
+            android:configChanges="orientation|screenSize"/>
+
+        <activity
+            android:name=".MangaBrowserActivity"
+            android:theme="@style/Theme.VLCPlayer"
+            android:screenOrientation="portrait"/>
+
+</application>
 </manifest>

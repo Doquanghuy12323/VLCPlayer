@@ -10,4 +10,14 @@
     <item android:id="@+id/action_update" android:title="Kiểm tra cập nhật" app:showAsAction="never"/>
     <item android:id="@+id/action_language" android:title="Ngôn ngữ / Language" app:showAsAction="never"/>
     <item android:id="@+id/action_handy" android:title="The Handy" app:showAsAction="never"/>
+    <item
+        android:id="@+id/action_manga_local"
+        android:title="Đọc truyện (Local)"
+        android:showAsAction="never"/>
+
+    <item
+        android:id="@+id/action_manga_online"
+        android:title="Đọc truyện (Online)"
+        android:showAsAction="never"/>
+
 </menu>
