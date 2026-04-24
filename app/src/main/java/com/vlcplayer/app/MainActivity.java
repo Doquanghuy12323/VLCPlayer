@@ -429,6 +429,15 @@ public class MainActivity extends AppCompatActivity
             .setNegativeButton("Huy", null).show();
     }
 
+    private void openMangaFilePicker() {
+        android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("*/*");
+        intent.putExtra(android.content.Intent.EXTRA_MIME_TYPES,
+            new String[]{"application/zip","application/x-cbz","application/x-cbr"});
+        intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, 2001);
+    }
+
         private void showLanguageDialog() {
         String[] langs = {"Tieng Viet", "English"};
         String[] codes = {"vi", "en"};
