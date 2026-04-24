@@ -31,13 +31,23 @@ public class MangaBrowserActivity extends AppCompatActivity {
 
     // Ad block domains
     private static final Set<String> AD_DOMAINS = new HashSet<>(Arrays.asList(
-        "stripchat.com", "trafficjunky.com", "exoclick.com",
-        "juicyads.com", "adnium.com", "plugrush.com",
-        "tsyndicate.com", "trafficstars.com", "adspyglass.com",
-        "adtng.com", "etahub.com", "silvercdn.com",
-        "ads.com", "doubleclick.net", "googlesyndication.com",
-        "adservice.google.com", "amazon-adsystem.com",
-        "scorecardresearch.com", "quantserve.com"
+        // Live streams / cam ads
+        "stripchat.com","stripchat.global","trafficjunky.com","trafficjunky.net",
+        // Adult ad networks
+        "exoclick.com","juicyads.com","adnium.com","plugrush.com",
+        "tsyndicate.com","trafficstars.com","adspyglass.com","adtng.com",
+        "etahub.com","silvercdn.com","ero-advertising.com","hilltopads.net",
+        "revcontent.com","popcash.net","propellerads.com","popads.net",
+        "adcash.com","clickadu.com","bidvertiser.com","yllix.com",
+        "zeropark.com","clickaine.com","adsterra.com","pushcrew.com",
+        // General ad networks
+        "doubleclick.net","googlesyndication.com","adservice.google.com",
+        "amazon-adsystem.com","scorecardresearch.com","quantserve.com",
+        "outbrain.com","taboola.com","criteo.com","rubiconproject.com",
+        "openx.net","pubmatic.com","appnexus.com","advertising.com",
+        // Trackers
+        "googletagmanager.com","hotjar.com","mixpanel.com",
+        "segment.com","intercom.io","zendesk.com"
     ));
 
     @Override
@@ -96,18 +106,45 @@ public class MangaBrowserActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 etUrl.setText(url);
-                // Inject CSS to hide common ad elements
-                String css = "javascript:(function(){" +
+                // Inject advanced CSS + JS adblock
+                String adblock = "javascript:(function(){" +
+                    // Xoa popup overlay
+                    "document.querySelectorAll('[class*=popup],[class*=modal],[id*=popup],[id*=modal],[class*=overlay]').forEach(e=>e.remove());" +
+                    // CSS an quang cao
                     "var s=document.createElement('style');" +
                     "s.innerHTML='" +
-                    ".exo-container,.adnium,.ads-container," +
-                    "[class*=\'ad-banner\'],[id*=\'ad-banner\']," +
-                    "[class*=\'advertisement\'],[id*=\'advertisement\']," +
-                    "iframe[src*=\'ads\'],iframe[src*=\'banner\']" +
-                    "{display:none!important}';" +
+                    "iframe,object,embed{display:none!important}" +
+                    "[class*=ad],[id*=ad],[class*=ads],[id*=ads]," +
+                    "[class*=banner],[id*=banner]," +
+                    "[class*=sponsor],[id*=sponsor]," +
+                    "[class*=popup],[id*=popup]," +
+                    "[class*=promo],[id*=promo]," +
+                    "[class*=adverti],[id*=adverti]," +
+                    ".exo-container,.adnium,.adsbox," +
+                    "div[style*=\'position:fixed\'],div[style*=\'position: fixed\']" +
+                    "{display:none!important;visibility:hidden!important;}" +
+                    // Fit anh manga vua man hinh
+                    "img{max-width:100%!important;height:auto!important}" +
+                    "body{overflow-x:hidden!important;margin:0!important;padding:0!important}" +
+                    "';" +
                     "document.head.appendChild(s);" +
+                    // Chan push notification
+                    "if(window.Notification)window.Notification.requestPermission=function(){return Promise.resolve('denied')};" +
+                    // An fixed elements (thường là ads)
+                    "document.querySelectorAll('*').forEach(function(el){" +
+                    "var style=window.getComputedStyle(el);" +
+                    "if(style.position==='fixed'&&el.tagName!=='VIDEO'&&el.tagName!=='CANVAS'){" +
+                    "var rect=el.getBoundingClientRect();" +
+                    "if(rect.width>100&&rect.height>100)el.style.display='none'" +
+                    "}});" +
                     "})()";
-                v.loadUrl(css);
+                v.loadUrl(adblock);
+                // Fit man hinh doc truyen
+                v.loadUrl("javascript:(function(){" +
+                    "var meta=document.querySelector('meta[name=viewport]');" +
+                    "if(!meta){meta=document.createElement('meta');meta.name='viewport';document.head.appendChild(meta);}" +
+                    "meta.content='width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes';" +
+                    "})()");
             }
         });
 
