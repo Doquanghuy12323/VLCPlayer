@@ -5,8 +5,8 @@
     android:orientation="vertical"
     android:background="#1E1F22">
 
-    <!-- Address bar -->
     <LinearLayout
+        android:id="@+id/address_bar"
         android:layout_width="match_parent"
         android:layout_height="52dp"
         android:orientation="horizontal"
@@ -47,17 +47,17 @@
             android:background="#313338"
             android:paddingHorizontal="10dp"
             android:textColor="#FFFFFF"
-            android:textSize="13sp"
+            android:textSize="12sp"
             android:singleLine="true"
             android:imeOptions="actionGo"
             android:inputType="textUri"
             android:hint="Nhap URL..."
-            />
+            android:textColorHint="#80848E"/>
 
         <ImageButton
             android:id="@+id/btn_go"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_play"
             android:tint="#5865F2"/>
@@ -69,6 +69,14 @@
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_rotate"
             android:tint="#B5BAC1"/>
+
+        <ImageButton
+            android:id="@+id/btn_fullscreen"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_zoom"
+            android:tint="#5865F2"/>
 
     </LinearLayout>
 
