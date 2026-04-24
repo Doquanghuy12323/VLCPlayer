@@ -445,4 +445,18 @@ public class MainActivity extends AppCompatActivity
             }).show();
     }
 
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 2001 && resultCode == RESULT_OK && data != null) {
+            android.net.Uri uri = data.getData();
+            if (uri != null) {
+                android.content.Intent intent = new android.content.Intent(this, MangaActivity.class);
+                intent.setData(uri);
+                startActivity(intent);
+            }
+        }
+    }
+
 }
