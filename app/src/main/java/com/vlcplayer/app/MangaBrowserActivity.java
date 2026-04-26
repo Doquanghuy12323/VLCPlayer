@@ -60,11 +60,7 @@ public class MangaBrowserActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         // Fullscreen window
-        getWindow().setFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
-        );
-        setContentView(R.layout.activity_manga_browser);
+setContentView(R.layout.activity_manga_browser);
 
         webView     = findViewById(R.id.webView);
         etUrl       = findViewById(R.id.et_url);
@@ -141,9 +137,13 @@ public class MangaBrowserActivity extends AppCompatActivity {
                 v.loadUrl(adblock);
                 // Fit man hinh doc truyen
                 v.loadUrl("javascript:(function(){" +
-                    "var meta=document.querySelector('meta[name=viewport]');" +
-                    "if(!meta){meta=document.createElement('meta');meta.name='viewport';document.head.appendChild(meta);}" +
-                    "meta.content='width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes';" +
+                    // Fit anh truyen vua chieu rong man hinh
+                    "var style=document.createElement('style');" +
+                    "style.innerHTML=" +
+                    "'img{width:100%!important;max-width:100vw!important;height:auto!important;display:block!important;margin:0 auto!important;}'" +
+                    "+'#image-container,#image,.image-container,.reader-container{width:100%!important;max-width:100vw!important;padding:0!important;margin:0!important;}'" +
+                    "+'body,html{width:100%!important;overflow-x:hidden!important;}';" +
+                    "document.head.appendChild(style);" +
                     "})()");
             }
         });
