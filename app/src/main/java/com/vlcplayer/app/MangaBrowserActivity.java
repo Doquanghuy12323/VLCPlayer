@@ -164,6 +164,29 @@ setContentView(R.layout.activity_manga_browser);
         btnRefresh.setOnClickListener(v -> webView.reload());
         btnNavBack.setOnClickListener(v -> { if (webView.canGoBack()) webView.goBack(); });
         btnNavFwd.setOnClickListener(v -> { if (webView.canGoForward()) webView.goForward(); });
+        ImageButton btnBookmark = findViewById(R.id.btn_bookmark);
+        btnBookmark.setOnClickListener(v -> {
+            String url = webView.getUrl();
+            String title = webView.getTitle();
+            if (url == null) return;
+            // Luu vao SharedPreferences
+            android.content.SharedPreferences prefs = getSharedPreferences("manga_bookmarks", MODE_PRIVATE);
+            String json = prefs.getString("bookmarks", "[]");
+            // Them vao dau danh sach
+            String entry = "{"url":"" + url + "","title":"" + (title != null ? title.replace(""","") : url) + ""}";
+            if (!json.contains(url)) {
+                json = "[" + entry + (json.length() > 2 ? "," + json.substring(1) : "]");
+                prefs.edit().putString("bookmarks", json).apply();
+                android.widget.Toast.makeText(this, "Đã lưu trang!", android.widget.Toast.LENGTH_SHORT).show();
+            } else {
+                android.widget.Toast.makeText(this, "Đã lưu rồi", android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Hien danh sach bookmark
+        ImageButton btnBookmarkList = findViewById(R.id.btn_bookmark_list);
+        btnBookmarkList.setOnClickListener(v -> showBookmarks());
+
         btnFullscreen.setOnClickListener(v -> {
             webView.loadUrl("javascript:(function(){" +
                 // Tim anh lon nhat tren trang
@@ -221,6 +244,42 @@ setContentView(R.layout.activity_manga_browser);
         String url = etUrl.getText().toString().trim();
         if (!url.startsWith("http")) url = "https://" + url;
         webView.loadUrl(url);
+    }
+
+    private void showBookmarks() {
+        android.content.SharedPreferences prefs = getSharedPreferences("manga_bookmarks", MODE_PRIVATE);
+        String json = prefs.getString("bookmarks", "[]");
+        // Parse don gian
+        java.util.List<String[]> items = new java.util.ArrayList<>();
+        if (json.length() > 2) {
+            String inner = json.substring(1, json.length()-1);
+            for (String entry : inner.split("\},\{")) {
+                entry = entry.replace("{","").replace("}","").replace(""","");
+                String[] parts = entry.split(",");
+                String title = "", url = "";
+                for (String p : parts) {
+                    if (p.startsWith("title:")) title = p.substring(6);
+                    if (p.startsWith("url:")) url = p.substring(4);
+                }
+                if (!url.isEmpty()) items.add(new String[]{title.isEmpty() ? url : title, url});
+            }
+        }
+        if (items.isEmpty()) {
+            android.widget.Toast.makeText(this, "Chưa có trang đã lưu", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] titles = items.stream().map(i -> i[0]).toArray(String[]::new);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Trang đã lưu")
+            .setItems(titles, (d, which) -> {
+                webView.loadUrl(items.get(which)[1]);
+            })
+            .setNegativeButton("Xóa tất cả", (d, w) -> {
+                prefs.edit().remove("bookmarks").apply();
+                android.widget.Toast.makeText(this, "Đã xóa", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .setPositiveButton("Đóng", null)
+            .show();
     }
 
     @Override

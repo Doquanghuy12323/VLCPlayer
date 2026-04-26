@@ -71,6 +71,22 @@
             android:tint="#B5BAC1"/>
 
         <ImageButton
+            android:id="@+id/btn_bookmark"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?selectableItemBackgroundBorderless"
+            android:src="@android:drawable/btn_star_big_off"
+            android:tint="#FFD700"/>
+
+        <ImageButton
+            android:id="@+id/btn_bookmark_list"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_agenda"
+            android:tint="#B5BAC1"/>
+
+        <ImageButton
             android:id="@+id/btn_fullscreen"
             android:layout_width="32dp"
             android:layout_height="32dp"
