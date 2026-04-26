@@ -2,9 +2,9 @@ package com.vlcplayer.app;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.View;
-import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -15,10 +15,14 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class MangaBrowserActivity extends AppCompatActivity {
@@ -27,27 +31,17 @@ public class MangaBrowserActivity extends AppCompatActivity {
     private EditText etUrl;
     private ProgressBar progressBar;
     private LinearLayout addressBar;
-    private boolean isFullscreen = false;
 
-    // Ad block domains
     private static final Set<String> AD_DOMAINS = new HashSet<>(Arrays.asList(
-        // Live streams / cam ads
         "stripchat.com","stripchat.global","trafficjunky.com","trafficjunky.net",
-        // Adult ad networks
         "exoclick.com","juicyads.com","adnium.com","plugrush.com",
         "tsyndicate.com","trafficstars.com","adspyglass.com","adtng.com",
         "etahub.com","silvercdn.com","ero-advertising.com","hilltopads.net",
-        "revcontent.com","popcash.net","propellerads.com","popads.net",
-        "adcash.com","clickadu.com","bidvertiser.com","yllix.com",
-        "zeropark.com","clickaine.com","adsterra.com","pushcrew.com",
-        // General ad networks
+        "popcash.net","propellerads.com","popads.net","adcash.com",
+        "clickadu.com","bidvertiser.com","adsterra.com","zeropark.com",
         "doubleclick.net","googlesyndication.com","adservice.google.com",
         "amazon-adsystem.com","scorecardresearch.com","quantserve.com",
-        "outbrain.com","taboola.com","criteo.com","rubiconproject.com",
-        "openx.net","pubmatic.com","appnexus.com","advertising.com",
-        // Trackers
-        "googletagmanager.com","hotjar.com","mixpanel.com",
-        "segment.com","intercom.io","zendesk.com"
+        "outbrain.com","taboola.com","criteo.com","rubiconproject.com"
     ));
 
     @Override
@@ -59,20 +53,21 @@ public class MangaBrowserActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Fullscreen window
-setContentView(R.layout.activity_manga_browser);
+        setContentView(R.layout.activity_manga_browser);
 
         webView     = findViewById(R.id.webView);
         etUrl       = findViewById(R.id.et_url);
         progressBar = findViewById(R.id.progress);
         addressBar  = findViewById(R.id.address_bar);
 
-        ImageButton btnBack    = findViewById(R.id.btn_back);
-        ImageButton btnGo      = findViewById(R.id.btn_go);
-        ImageButton btnRefresh = findViewById(R.id.btn_refresh);
-        ImageButton btnNavBack = findViewById(R.id.btn_nav_back);
-        ImageButton btnNavFwd  = findViewById(R.id.btn_nav_fwd);
-        ImageButton btnFullscreen = findViewById(R.id.btn_fullscreen);
+        ImageButton btnBack         = findViewById(R.id.btn_back);
+        ImageButton btnGo           = findViewById(R.id.btn_go);
+        ImageButton btnRefresh      = findViewById(R.id.btn_refresh);
+        ImageButton btnNavBack      = findViewById(R.id.btn_nav_back);
+        ImageButton btnNavFwd       = findViewById(R.id.btn_nav_fwd);
+        ImageButton btnFullscreen   = findViewById(R.id.btn_fullscreen);
+        ImageButton btnBookmark     = findViewById(R.id.btn_bookmark);
+        ImageButton btnBookmarkList = findViewById(R.id.btn_bookmark_list);
 
         WebSettings ws = webView.getSettings();
         ws.setJavaScriptEnabled(true);
@@ -90,7 +85,6 @@ setContentView(R.layout.activity_manga_browser);
                 if (host != null) {
                     for (String ad : AD_DOMAINS) {
                         if (host.contains(ad)) {
-                            // Block ad request
                             return new WebResourceResponse("text/plain", "utf-8",
                                 new ByteArrayInputStream("".getBytes()));
                         }
@@ -102,48 +96,15 @@ setContentView(R.layout.activity_manga_browser);
             @Override
             public void onPageFinished(WebView v, String url) {
                 etUrl.setText(url);
-                // Inject advanced CSS + JS adblock
-                String adblock = "javascript:(function(){" +
-                    // Xoa popup overlay
-                    "document.querySelectorAll('[class*=popup],[class*=modal],[id*=popup],[id*=modal],[class*=overlay]').forEach(e=>e.remove());" +
-                    // CSS an quang cao
-                    "var s=document.createElement('style');" +
-                    "s.innerHTML='" +
-                    "iframe,object,embed{display:none!important}" +
-                    "[class*=ad],[id*=ad],[class*=ads],[id*=ads]," +
-                    "[class*=banner],[id*=banner]," +
-                    "[class*=sponsor],[id*=sponsor]," +
-                    "[class*=popup],[id*=popup]," +
-                    "[class*=promo],[id*=promo]," +
-                    "[class*=adverti],[id*=adverti]," +
-                    ".exo-container,.adnium,.adsbox," +
-                    "div[style*=\'position:fixed\'],div[style*=\'position: fixed\']" +
-                    "{display:none!important;visibility:hidden!important;}" +
-                    // Fit anh manga vua man hinh
-                    "img{max-width:100%!important;height:auto!important}" +
-                    "body{overflow-x:hidden!important;margin:0!important;padding:0!important}" +
-                    "';" +
-                    "document.head.appendChild(s);" +
-                    // Chan push notification
-                    "if(window.Notification)window.Notification.requestPermission=function(){return Promise.resolve('denied')};" +
-                    // An fixed elements (thường là ads)
-                    "document.querySelectorAll('*').forEach(function(el){" +
-                    "var style=window.getComputedStyle(el);" +
-                    "if(style.position==='fixed'&&el.tagName!=='VIDEO'&&el.tagName!=='CANVAS'){" +
-                    "var rect=el.getBoundingClientRect();" +
-                    "if(rect.width>100&&rect.height>100)el.style.display='none'" +
-                    "}});" +
-                    "})()";
-                v.loadUrl(adblock);
-                // Fit man hinh doc truyen
+                // Fit anh manga vua man hinh + an quang cao
                 v.loadUrl("javascript:(function(){" +
-                    // Fit anh truyen vua chieu rong man hinh
-                    "var style=document.createElement('style');" +
-                    "style.innerHTML=" +
-                    "'img{width:100%!important;max-width:100vw!important;height:auto!important;display:block!important;margin:0 auto!important;}'" +
-                    "+'#image-container,#image,.image-container,.reader-container{width:100%!important;max-width:100vw!important;padding:0!important;margin:0!important;}'" +
-                    "+'body,html{width:100%!important;overflow-x:hidden!important;}';" +
-                    "document.head.appendChild(style);" +
+                    "var s=document.createElement('style');" +
+                    "s.innerHTML='img{max-width:100vw!important;width:100%!important;height:auto!important;}" +
+                    "body{overflow-x:hidden!important;margin:0!important}" +
+                    "iframe,object,embed,[class*=ad],[id*=ad],[class*=banner],[id*=banner]" +
+                    "{display:none!important}';" +
+                    "document.head.appendChild(s);" +
+                    "if(window.Notification)window.Notification.requestPermission=function(){return Promise.resolve('denied')};" +
                     "})()");
             }
         });
@@ -156,57 +117,30 @@ setContentView(R.layout.activity_manga_browser);
             }
         });
 
-        // Toggle address bar khi tap vao webview
-        webView.setOnClickListener(v -> toggleAddressBar());
-
         btnBack.setOnClickListener(v -> finish());
         btnGo.setOnClickListener(v -> navigate());
         btnRefresh.setOnClickListener(v -> webView.reload());
         btnNavBack.setOnClickListener(v -> { if (webView.canGoBack()) webView.goBack(); });
         btnNavFwd.setOnClickListener(v -> { if (webView.canGoForward()) webView.goForward(); });
-        ImageButton btnBookmark = findViewById(R.id.btn_bookmark);
-        btnBookmark.setOnClickListener(v -> {
-            String url = webView.getUrl();
-            String title = webView.getTitle();
-            if (url == null) return;
-            // Luu vao SharedPreferences
-            android.content.SharedPreferences prefs = getSharedPreferences("manga_bookmarks", MODE_PRIVATE);
-            String json = prefs.getString("bookmarks", "[]");
-            // Them vao dau danh sach
-            String entry = "{"url":"" + url + "","title":"" + (title != null ? title.replace(""","") : url) + ""}";
-            if (!json.contains(url)) {
-                json = "[" + entry + (json.length() > 2 ? "," + json.substring(1) : "]");
-                prefs.edit().putString("bookmarks", json).apply();
-                android.widget.Toast.makeText(this, "Đã lưu trang!", android.widget.Toast.LENGTH_SHORT).show();
-            } else {
-                android.widget.Toast.makeText(this, "Đã lưu rồi", android.widget.Toast.LENGTH_SHORT).show();
-            }
-        });
-
-        // Hien danh sach bookmark
-        ImageButton btnBookmarkList = findViewById(R.id.btn_bookmark_list);
-        btnBookmarkList.setOnClickListener(v -> showBookmarks());
 
         btnFullscreen.setOnClickListener(v -> {
+            // Zoom fit anh lon nhat vua man hinh
             webView.loadUrl("javascript:(function(){" +
-                // Tim anh lon nhat tren trang
-                "var allImgs=Array.from(document.querySelectorAll('img'));" +
-                "var img=allImgs.sort(function(a,b){return b.naturalWidth-a.naturalWidth})[0];" +
+                "var imgs=Array.from(document.querySelectorAll('img'));" +
+                "var img=imgs.sort(function(a,b){return b.naturalWidth-a.naturalWidth})[0];" +
                 "if(!img)return;" +
-                // Tinh ty le zoom de vua man hinh
-                "var vw=window.innerWidth;" +
-                "var vh=window.innerHeight;" +
-                "var iw=img.naturalWidth||img.width||vw;" +
-                "var ih=img.naturalHeight||img.height||vh;" +
+                "var vw=window.innerWidth,vh=window.innerHeight;" +
+                "var iw=img.naturalWidth||vw,ih=img.naturalHeight||vh;" +
                 "var scale=Math.min(vw/iw,vh/ih);" +
-                // Set zoom qua meta viewport
                 "var meta=document.querySelector('meta[name=viewport]');" +
                 "if(!meta){meta=document.createElement('meta');meta.name='viewport';document.head.appendChild(meta);}" +
                 "meta.content='width='+iw+',initial-scale='+scale+',maximum-scale=5,user-scalable=yes';" +
-                // Di chuyen den anh
-                "img.scrollIntoView({behavior:'smooth',block:'start'});" +
+                "img.scrollIntoView({block:'start'});" +
                 "})()");
         });
+
+        btnBookmark.setOnClickListener(v -> saveBookmark());
+        btnBookmarkList.setOnClickListener(v -> showBookmarks());
 
         etUrl.setOnEditorActionListener((v, action, e) -> { navigate(); return true; });
 
@@ -215,29 +149,49 @@ setContentView(R.layout.activity_manga_browser);
         webView.loadUrl(startUrl);
     }
 
-    private void toggleAddressBar() {
-        if (addressBar.getVisibility() == View.VISIBLE) {
-            addressBar.setVisibility(View.GONE);
+    private void saveBookmark() {
+        String url = webView.getUrl();
+        String title = webView.getTitle();
+        if (url == null) return;
+        SharedPreferences prefs = getSharedPreferences("manga_bookmarks", MODE_PRIVATE);
+        String existing = prefs.getString("bookmarks", "");
+        // Format: url1|title1\nurl2|title2
+        String entry = url + "|" + (title != null ? title : url);
+        if (!existing.contains(url)) {
+            String newVal = entry + (existing.isEmpty() ? "" : "\n" + existing);
+            prefs.edit().putString("bookmarks", newVal).apply();
+            Toast.makeText(this, "Da luu trang!", Toast.LENGTH_SHORT).show();
         } else {
-            addressBar.setVisibility(View.VISIBLE);
+            Toast.makeText(this, "Da luu roi", Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void toggleFullscreen() {
-        isFullscreen = !isFullscreen;
-        if (isFullscreen) {
-            addressBar.setVisibility(View.GONE);
-            getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN |
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            );
-        } else {
-            addressBar.setVisibility(View.VISIBLE);
-            getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_VISIBLE
-            );
+    private void showBookmarks() {
+        SharedPreferences prefs = getSharedPreferences("manga_bookmarks", MODE_PRIVATE);
+        String data = prefs.getString("bookmarks", "");
+        if (data.isEmpty()) {
+            Toast.makeText(this, "Chua co trang da luu", Toast.LENGTH_SHORT).show();
+            return;
         }
+        String[] lines = data.split("\n");
+        List<String> titles = new ArrayList<>();
+        List<String> urls = new ArrayList<>();
+        for (String line : lines) {
+            int sep = line.indexOf("|");
+            if (sep > 0) {
+                urls.add(line.substring(0, sep));
+                titles.add(line.substring(sep + 1));
+            }
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Trang da luu")
+            .setItems(titles.toArray(new String[0]), (d, which) -> webView.loadUrl(urls.get(which)))
+            .setNegativeButton("Xoa tat ca", (d, w) -> {
+                prefs.edit().remove("bookmarks").apply();
+                Toast.makeText(this, "Da xoa", Toast.LENGTH_SHORT).show();
+            })
+            .setPositiveButton("Dong", null)
+            .show();
     }
 
     private void navigate() {
@@ -246,50 +200,9 @@ setContentView(R.layout.activity_manga_browser);
         webView.loadUrl(url);
     }
 
-    private void showBookmarks() {
-        android.content.SharedPreferences prefs = getSharedPreferences("manga_bookmarks", MODE_PRIVATE);
-        String json = prefs.getString("bookmarks", "[]");
-        // Parse don gian
-        java.util.List<String[]> items = new java.util.ArrayList<>();
-        if (json.length() > 2) {
-            String inner = json.substring(1, json.length()-1);
-            for (String entry : inner.split("\},\{")) {
-                entry = entry.replace("{","").replace("}","").replace(""","");
-                String[] parts = entry.split(",");
-                String title = "", url = "";
-                for (String p : parts) {
-                    if (p.startsWith("title:")) title = p.substring(6);
-                    if (p.startsWith("url:")) url = p.substring(4);
-                }
-                if (!url.isEmpty()) items.add(new String[]{title.isEmpty() ? url : title, url});
-            }
-        }
-        if (items.isEmpty()) {
-            android.widget.Toast.makeText(this, "Chưa có trang đã lưu", android.widget.Toast.LENGTH_SHORT).show();
-            return;
-        }
-        String[] titles = items.stream().map(i -> i[0]).toArray(String[]::new);
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Trang đã lưu")
-            .setItems(titles, (d, which) -> {
-                webView.loadUrl(items.get(which)[1]);
-            })
-            .setNegativeButton("Xóa tất cả", (d, w) -> {
-                prefs.edit().remove("bookmarks").apply();
-                android.widget.Toast.makeText(this, "Đã xóa", android.widget.Toast.LENGTH_SHORT).show();
-            })
-            .setPositiveButton("Đóng", null)
-            .show();
-    }
-
     @Override
     public void onBackPressed() {
-        if (isFullscreen) {
-            toggleFullscreen();
-        } else if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-        }
+        if (webView.canGoBack()) webView.goBack();
+        else super.onBackPressed();
     }
 }
