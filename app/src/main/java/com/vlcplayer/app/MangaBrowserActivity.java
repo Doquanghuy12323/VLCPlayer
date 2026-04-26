@@ -165,18 +165,23 @@ setContentView(R.layout.activity_manga_browser);
         btnNavBack.setOnClickListener(v -> { if (webView.canGoBack()) webView.goBack(); });
         btnNavFwd.setOnClickListener(v -> { if (webView.canGoForward()) webView.goForward(); });
         btnFullscreen.setOnClickListener(v -> {
-            // Fit anh truyen vua man hinh, zoom out de thay ca trang
             webView.loadUrl("javascript:(function(){" +
-                "var imgs=document.querySelectorAll('#image-container img,#image img,.page img,img[id*=image],img[class*=image]');" +
-                "if(imgs.length==0)imgs=document.querySelectorAll('img');" +
-                "imgs.forEach(function(img){" +
-                "img.style.width='100vw';" +
-                "img.style.height='100vh';" +
-                "img.style.objectFit='contain';" +
-                "img.style.display='block';" +
-                "img.style.margin='0 auto';" +
-                "});" +
-                "window.scrollTo(0,0);" +
+                // Tim anh lon nhat tren trang
+                "var allImgs=Array.from(document.querySelectorAll('img'));" +
+                "var img=allImgs.sort(function(a,b){return b.naturalWidth-a.naturalWidth})[0];" +
+                "if(!img)return;" +
+                // Tinh ty le zoom de vua man hinh
+                "var vw=window.innerWidth;" +
+                "var vh=window.innerHeight;" +
+                "var iw=img.naturalWidth||img.width||vw;" +
+                "var ih=img.naturalHeight||img.height||vh;" +
+                "var scale=Math.min(vw/iw,vh/ih);" +
+                // Set zoom qua meta viewport
+                "var meta=document.querySelector('meta[name=viewport]');" +
+                "if(!meta){meta=document.createElement('meta');meta.name='viewport';document.head.appendChild(meta);}" +
+                "meta.content='width='+iw+',initial-scale='+scale+',maximum-scale=5,user-scalable=yes';" +
+                // Di chuyen den anh
+                "img.scrollIntoView({behavior:'smooth',block:'start'});" +
                 "})()");
         });
 
