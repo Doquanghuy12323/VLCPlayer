@@ -164,7 +164,21 @@ setContentView(R.layout.activity_manga_browser);
         btnRefresh.setOnClickListener(v -> webView.reload());
         btnNavBack.setOnClickListener(v -> { if (webView.canGoBack()) webView.goBack(); });
         btnNavFwd.setOnClickListener(v -> { if (webView.canGoForward()) webView.goForward(); });
-        btnFullscreen.setOnClickListener(v -> toggleFullscreen());
+        btnFullscreen.setOnClickListener(v -> {
+            // Fit anh truyen vua man hinh, zoom out de thay ca trang
+            webView.loadUrl("javascript:(function(){" +
+                "var imgs=document.querySelectorAll('#image-container img,#image img,.page img,img[id*=image],img[class*=image]');" +
+                "if(imgs.length==0)imgs=document.querySelectorAll('img');" +
+                "imgs.forEach(function(img){" +
+                "img.style.width='100vw';" +
+                "img.style.height='100vh';" +
+                "img.style.objectFit='contain';" +
+                "img.style.display='block';" +
+                "img.style.margin='0 auto';" +
+                "});" +
+                "window.scrollTo(0,0);" +
+                "})()");
+        });
 
         etUrl.setOnEditorActionListener((v, action, e) -> { navigate(); return true; });
 
