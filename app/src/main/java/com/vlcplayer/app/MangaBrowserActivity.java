@@ -202,7 +202,6 @@ setContentView(R.layout.activity_manga_browser);
         String url = etUrl.getText().toString().trim();
         if (!url.startsWith("http")) url = "https://" + url;
         webView.loadUrl(url);
-        addressBar.setVisibility(View.GONE);
     }
 
     @Override
