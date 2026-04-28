@@ -218,7 +218,9 @@ public class PlayerActivity extends AppCompatActivity {
         findViewById(R.id.btn_pip).setOnClickListener(v -> enterPiP());
         findViewById(R.id.btn_lock).setOnClickListener(v -> toggleLock());
         findViewById(R.id.btn_unlock).setOnClickListener(v -> toggleLock());
-        findViewById(R.id.btn_translate).setOnClickListener(v -> showTranslateDialog());
+        // Mo Gemini AI chat voi context video hien tai
+            View btnAiChat = findViewById(R.id.btn_translate);
+            if (btnAiChat != null) btnAiChat.setOnClickListener(v -> openGeminiChat());
         View btnFunscript = findViewById(R.id.btn_funscript);
         if (btnFunscript != null) btnFunscript.setOnClickListener(v -> showFunscriptDialog());
         View btnHandy = findViewById(R.id.btn_handy);
@@ -612,7 +614,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
 
-    private void showTranslateDialog() {
+    private void openGeminiChat() {
         TranslationManager tm = new TranslationManager(this);
         String[] opts = {"Dich subtitle tu URL", "Doi ngon ngu (hien tai: " + tm.getTargetLanguageName() + ")"};
         new AlertDialog.Builder(this).setTitle("Dich AI")
