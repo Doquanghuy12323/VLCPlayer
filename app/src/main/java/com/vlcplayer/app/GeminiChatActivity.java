@@ -72,7 +72,10 @@ public class GeminiChatActivity extends AppCompatActivity {
 
         // Giu context hoi thoai
         history.append("User: ").append(text).append("\n");
-        String prompt = history.toString() + "Assistant:";
+        // Chi giu 1500 ky tu cuoi de tiet kiem token
+        String histStr = history.toString();
+        if (histStr.length() > 1500) histStr = histStr.substring(histStr.length() - 1500);
+        String prompt = histStr + "Assistant:";
 
         gemini.ask(prompt, new GeminiHelper.Callback() {
             @Override public void onResult(String result) {

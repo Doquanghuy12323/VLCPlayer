@@ -56,6 +56,17 @@ public class GeminiHelper {
 
                 String response = sb.toString();
                 // Parse text from JSON
+                // Kiem tra loi
+                if (code == 429) {
+                    handler.post(() -> callback.onError(
+                        "Vượt giới hạn API miễn phí.\nVui lòng thử lại sau ít phút,\nhoặc lấy API key mới tại aistudio.google.com"));
+                    return;
+                }
+                if (code != 200) {
+                    handler.post(() -> callback.onError(
+                        "Lỗi API (" + code + "). Vui lòng thử lại sau."));
+                    return;
+                }
                 String result = parseText(response);
                 handler.post(() -> callback.onResult(result));
 
