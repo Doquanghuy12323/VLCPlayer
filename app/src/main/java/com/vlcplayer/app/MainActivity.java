@@ -248,6 +248,9 @@ public class MainActivity extends AppCompatActivity
         } else if (id == R.id.action_update) {
             android.widget.Toast.makeText(this, "Dang kiem tra cap nhat...", android.widget.Toast.LENGTH_SHORT).show();
             return true;
+        } else if (id == R.id.action_ai) {
+            android.content.Intent aiIntent = new android.content.Intent(this, GeminiChatActivity.class);
+            startActivity(aiIntent);
         } else if (id == R.id.action_manga_local) {
             openMangaFilePicker();
         } else if (id == R.id.action_manga_online) {
