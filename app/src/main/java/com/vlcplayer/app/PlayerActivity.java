@@ -322,7 +322,7 @@ public class PlayerActivity extends AppCompatActivity {
                     break;
             }
         });
-        mediaPlayer.attachViews(videoLayout, null, false, false);
+        mediaPlayer.attachViews(videoLayout, null, false, true);
     }
 
     private void playNext() {
@@ -507,7 +507,7 @@ public class PlayerActivity extends AppCompatActivity {
             videoLayout.post(() -> {
                 if (!uri.equals(pendingUri)) return;
                 try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
-                mediaPlayer.attachViews(videoLayout, null, false, false);
+                mediaPlayer.attachViews(videoLayout, null, false, true);
             });
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -998,7 +998,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer != null && videoLayout != null) {
             videoLayout.post(() -> {
                 try {
-                    mediaPlayer.attachViews(videoLayout, null, false, false);
+                    mediaPlayer.attachViews(videoLayout, null, false, true);
                     if (isInBackground) {
                         mediaPlayer.play();
                 mediaPlayer.play();
