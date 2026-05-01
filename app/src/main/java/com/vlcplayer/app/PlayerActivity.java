@@ -442,9 +442,15 @@ public class PlayerActivity extends AppCompatActivity {
     private void applyFilters() {
         if (videoLayout == null) return;
         if (!filtersEnabled) {
+            // Tat bo loc: dung lai SurfaceView de tang hieu nang
+            mediaPlayer.detachViews();
             videoLayout.setLayerType(View.LAYER_TYPE_NONE, null);
+            mediaPlayer.attachViews(videoLayout, null, false, false);
             return;
         }
+        // Bat bo loc: dung TextureView
+        mediaPlayer.detachViews();
+        mediaPlayer.attachViews(videoLayout, null, false, true);
         float c = filterContrast;
         float b = (filterBrightness - 1.0f) * 255f;
         float[] matrix = {
