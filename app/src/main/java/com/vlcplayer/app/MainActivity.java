@@ -285,10 +285,18 @@ public class MainActivity extends AppCompatActivity
             .setPositiveButton("Phat", (d, w) -> {
                 String url = et.getText().toString().trim();
                 if (!url.isEmpty()) {
-                    Intent i = new Intent(this, PlayerActivity.class);
-                    i.putExtra(PlayerActivity.EXTRA_URI, url);
-                    i.putExtra(PlayerActivity.EXTRA_TITLE, "URL Stream");
-                    startActivity(i);
+                    if (url.contains("mega.nz") || url.contains("mega.co.nz")) {
+                        // MEGA dung ma hoa rieng, mo WebView de xem/tai
+                        Intent i = new Intent(this, MangaBrowserActivity.class);
+                        i.putExtra("start_url", url);
+                        startActivity(i);
+                    } else {
+                        // URL binh thuong → phat bang VLC
+                        Intent i = new Intent(this, PlayerActivity.class);
+                        i.putExtra(PlayerActivity.EXTRA_URI, url);
+                        i.putExtra(PlayerActivity.EXTRA_TITLE, "URL Stream");
+                        startActivity(i);
+                    }
                 }
             })
             .setNegativeButton("Huy", null).show();

@@ -144,7 +144,12 @@ public class MangaBrowserActivity extends AppCompatActivity {
 
         etUrl.setOnEditorActionListener((v, action, e) -> { navigate(); return true; });
 
+        // Nhan URL tu intent neu co
         String startUrl = "https://nhentai.net";
+        android.content.Intent startIntent = getIntent();
+        if (startIntent != null && startIntent.getStringExtra("start_url") != null) {
+            startUrl = startIntent.getStringExtra("start_url");
+        }
         etUrl.setText(startUrl);
         webView.loadUrl(startUrl);
     }
