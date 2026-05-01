@@ -322,7 +322,7 @@ public class PlayerActivity extends AppCompatActivity {
                     break;
             }
         });
-        mediaPlayer.attachViews(videoLayout, null, false, true);
+        mediaPlayer.attachViews(videoLayout, null, false, false);
     }
 
     private void playNext() {
@@ -442,15 +442,9 @@ public class PlayerActivity extends AppCompatActivity {
     private void applyFilters() {
         if (videoLayout == null) return;
         if (!filtersEnabled) {
-            // Tat bo loc: dung lai SurfaceView de tang hieu nang
-            mediaPlayer.detachViews();
             videoLayout.setLayerType(View.LAYER_TYPE_NONE, null);
-            mediaPlayer.attachViews(videoLayout, null, false, false);
             return;
         }
-        // Bat bo loc: dung TextureView
-        mediaPlayer.detachViews();
-        mediaPlayer.attachViews(videoLayout, null, false, true);
         float c = filterContrast;
         float b = (filterBrightness - 1.0f) * 255f;
         float[] matrix = {
@@ -513,7 +507,7 @@ public class PlayerActivity extends AppCompatActivity {
             videoLayout.post(() -> {
                 if (!uri.equals(pendingUri)) return;
                 try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
-                mediaPlayer.attachViews(videoLayout, null, false, true);
+                mediaPlayer.attachViews(videoLayout, null, false, false);
             });
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -1004,7 +998,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer != null && videoLayout != null) {
             videoLayout.post(() -> {
                 try {
-                    mediaPlayer.attachViews(videoLayout, null, false, true);
+                    mediaPlayer.attachViews(videoLayout, null, false, false);
                     if (isInBackground) {
                         mediaPlayer.play();
                 mediaPlayer.play();
