@@ -72,5 +72,8 @@
             android:name=".GeminiChatActivity"
             android:theme="@style/Theme.VLCPlayer"
             android:windowSoftInputMode="adjustResize"/>
+        <activity
+            android:name=".TorrentActivity"
+            android:theme="@style/Theme.VLCPlayer"/>
 </application>
 </manifest>

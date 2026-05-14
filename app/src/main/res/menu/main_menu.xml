@@ -24,4 +24,8 @@
         android:id="@+id/action_ai"
         android:title="Tro ly AI (Gemini)"
         android:showAsAction="never"/>
+    <item
+        android:id="@+id/action_torrent"
+        android:title="Torrent Stream"
+        android:showAsAction="never"/>
 </menu>
