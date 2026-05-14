@@ -55,7 +55,7 @@ public class TorrentManager {
                     if (callback != null) callback.onProgress(
                         (int)(status.progress * 100),
                         status.downloadSpeed / 1024f, // KB/s
-                        status.uploadSpeed / 1024f
+                        0f
                     );
                 });
             }
