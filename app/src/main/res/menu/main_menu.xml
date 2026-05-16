@@ -28,4 +28,8 @@
         android:id="@+id/action_torrent"
         android:title="Torrent Stream"
         android:showAsAction="never"/>
+    <item
+        android:id="@+id/action_schedule"
+        android:title="Lịch phát video"
+        android:showAsAction="never"/>
 </menu>
