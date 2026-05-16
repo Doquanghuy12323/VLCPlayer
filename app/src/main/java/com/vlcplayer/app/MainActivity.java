@@ -249,12 +249,20 @@ public class MainActivity extends AppCompatActivity
             android.widget.Toast.makeText(this, "Dang kiem tra cap nhat...", android.widget.Toast.LENGTH_SHORT).show();
             return true;
         } else if (id == R.id.action_ai) {
-            android.content.Intent aiIntent = new android.content.Intent(this, GeminiChatActivity.class);
-            startActivity(aiIntent);
+            startActivity(new android.content.Intent(this, GeminiChatActivity.class));
+            return true;
         } else if (id == R.id.action_manga_local) {
             openMangaFilePicker();
+            return true;
         } else if (id == R.id.action_manga_online) {
             startActivity(new android.content.Intent(this, MangaBrowserActivity.class));
+            return true;
+        } else if (id == R.id.action_torrent) {
+            startActivity(new android.content.Intent(this, TorrentActivity.class));
+            return true;
+        } else if (id == R.id.action_schedule) {
+            startActivity(new android.content.Intent(this, ScheduleActivity.class));
+            return true;
         } else if (id == R.id.action_language) {
             showLanguageDialog();
             return true;
