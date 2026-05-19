@@ -259,7 +259,7 @@ public class MainActivity extends AppCompatActivity
             return true;
         } else if (id == R.id.action_torrent) {
             startActivity(new android.content.Intent(this, TorrentActivity.class));
-            return true; else if (id == R.id.action_language) {
+            } else if (id == R.id.action_language) {
             showLanguageDialog();
             return true;
         } else if (id == R.id.action_handy) {
