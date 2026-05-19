@@ -113,6 +113,11 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
+        // Xoa tien to file:// de thu vien C++ co the doc duoc duong dan that
+        if (url.startsWith("file://")) {
+            url = url.replace("file://", "");
+        }
+
         btnStream.setEnabled(false);
         btnStop.setEnabled(true);
         progressBar.setProgress(0);
