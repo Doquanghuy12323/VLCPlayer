@@ -118,7 +118,7 @@ public class TorrentActivity extends AppCompatActivity {
                     }
 
                     // Dat luong duong dan co file:// de pass qua validation cua TorrentStream URL
-                    etMagnet.setText(tempFile.getAbsolutePath());
+                    etMagnet.setText("file://" + tempFile.getAbsolutePath());
                     startStream();
                 } catch (Exception e) {
                     Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -134,10 +134,8 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        if (url.startsWith("file://")) {
-            url = url.replace("file://", "");
-        }
-        if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("/")) {
+        
+        if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("file://") && !url.startsWith("/")) {
             Toast.makeText(this, "Link không hợp lệ", Toast.LENGTH_SHORT).show();
             return;
         }
