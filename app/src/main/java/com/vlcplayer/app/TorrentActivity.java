@@ -86,15 +86,24 @@ public class TorrentActivity extends AppCompatActivity {
                     byte[] buffer = new byte[1024];
                     int length;
                     long totalBytes = 0;
+                    boolean isFirstBuffer = true;
+                    boolean isBencode = false;
                     while ((length = is.read(buffer)) > 0) {
+                        if (isFirstBuffer && length > 0) {
+                            // File torrent chuan phai bat dau bang 'd' (Bencode Dictionary)
+                            if (buffer[0] == 'd') isBencode = true;
+                            isFirstBuffer = false;
+                        }
                         fos.write(buffer, 0, length);
                         totalBytes += length;
                     }
                     fos.close();
                     is.close();
 
-                    if (totalBytes > 5 * 1024 * 1024) {
-                        android.widget.Toast.makeText(this, "⚠ CẢNH BÁO: File nặng " + (totalBytes/1024/1024) + "MB. Có vẻ là file Video, không phải file .torrent!", android.widget.Toast.LENGTH_LONG).show();
+                    if (!isBencode) {
+                        android.widget.Toast.makeText(TorrentActivity.this, "⚠ TỪ CHỐI: File KHÔNG PHẢI định dạng .torrent hợp lệ! (Thiếu Bencode)", android.widget.Toast.LENGTH_LONG).show();
+                        tvStatus.setText("Lỗi: Không phải file .torrent thật");
+                        return; // Chặn luôn, không gọi C++
                     }
 
                     etMagnet.setText(tempFile.getAbsolutePath());
