@@ -85,19 +85,28 @@ public class TorrentActivity extends AppCompatActivity {
                     java.io.FileOutputStream fos = new java.io.FileOutputStream(tempFile);
                     byte[] buffer = new byte[1024];
                     int length;
+                    long totalBytes = 0;
                     while ((length = is.read(buffer)) > 0) {
                         fos.write(buffer, 0, length);
+                        totalBytes += length;
                     }
                     fos.close();
                     is.close();
-                    
-                    etMagnet.setText("file://" + tempFile.getAbsolutePath());
+
+                    // Kiem tra neu file > 5MB -> Chac chan la chon nham file Video hoac file rac!
+                    if (totalBytes > 5 * 1024 * 1024) {
+                        android.widget.Toast.makeText(this, "⚠ CẢNH BÁO: File bạn chọn nặng " + (totalBytes/1024/1024) + "MB. Đây có vẻ là file Video, không phải file .torrent hợp lệ!", android.widget.Toast.LENGTH_LONG).show();
+                    }
+
+                    // Dat luon duong dan tuyet doi, bo tien to file://
+                    etMagnet.setText(tempFile.getAbsolutePath());
                     startStream();
                 } catch (Exception e) {
-                    android.widget.Toast.makeText(this, "Lỗi: " + e.getMessage(), android.widget.Toast.LENGTH_SHORT).show();
+                    android.widget.Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), android.widget.Toast.LENGTH_SHORT).show();
                 }
             }
         }
+    }
     }
 
 
