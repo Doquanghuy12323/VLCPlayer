@@ -30,6 +30,7 @@ public class TorrentManager {
         TorrentOptions options = new TorrentOptions.Builder()
             .saveLocation(saveDir)
             .removeFilesAfterStop(false) // Giu file sau khi xem
+            .anonymousMode(false)
             .maxConnections(200)
             .build();
 
