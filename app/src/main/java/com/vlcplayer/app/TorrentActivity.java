@@ -113,7 +113,7 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("file://")) {
+        if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("file://") && !url.startsWith("/")) {
             Toast.makeText(this, "Link khong hop le", Toast.LENGTH_SHORT).show();
             return;
         }
