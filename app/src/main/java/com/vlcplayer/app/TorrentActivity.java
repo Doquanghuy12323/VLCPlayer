@@ -21,6 +21,7 @@ import java.util.List;
 public class TorrentActivity extends AppCompatActivity {
 
     private EditText etMagnet;
+    private android.widget.ImageButton btnPickFile;
     private Button btnStream, btnStop;
     private ProgressBar progressBar;
     private TextView tvStatus, tvSpeed;
@@ -39,6 +40,8 @@ public class TorrentActivity extends AppCompatActivity {
         setContentView(R.layout.activity_torrent);
 
         etMagnet   = findViewById(R.id.et_magnet);
+        btnPickFile = findViewById(R.id.btn_pick_file);
+        btnPickFile.setOnClickListener(v -> pickTorrentFile());
         btnStream  = findViewById(R.id.btn_stream);
         btnStop    = findViewById(R.id.btn_stop);
         progressBar = findViewById(R.id.progress_bar);
@@ -71,7 +74,7 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        if (!url.startsWith("magnet:") && !url.startsWith("http")) {
+        if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("file://")) {
             Toast.makeText(this, "Link khong hop le", Toast.LENGTH_SHORT).show();
             return;
         }
