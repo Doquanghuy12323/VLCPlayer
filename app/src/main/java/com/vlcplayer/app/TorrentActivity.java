@@ -66,9 +66,35 @@ public class TorrentActivity extends AppCompatActivity {
         btnStream.setOnClickListener(v -> startStream());
         btnStop.setOnClickListener(v -> stopStream());
 
-        String magnet = getIntent().getStringExtra("magnet");
-        if (magnet != null) {
-            etMagnet.setText(magnet);
+        // Xu ly file hoac link truyen tu ben ngoai (khi mo tu File Manager)
+        processExternalIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        processExternalIntent(intent);
+    }
+
+    private void processExternalIntent(Intent intent) {
+        if (intent == null) return;
+        
+        if (Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
+            Uri data = intent.getData();
+            // Neu la link magnet -> Dan vao o text va chay luon
+            if ("magnet".equals(data.getScheme())) {
+                etMagnet.setText(data.toString());
+                startStream();
+            } else {
+                // Neu la file tu File Manager -> Xu ly doc file va chay
+                handleTorrentUri(data);
+            }
+        } else {
+            String magnet = intent.getStringExtra("magnet");
+            if (magnet != null) {
+                etMagnet.setText(magnet);
+            }
         }
     }
 
@@ -83,47 +109,46 @@ public class TorrentActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == 1001 && resultCode == RESULT_OK && data != null) {
-            Uri uri = data.getData();
-            if (uri != null) {
-                try {
-                    InputStream is = getContentResolver().openInputStream(uri);
-                    File tempFile = new File(getCacheDir(), "local_stream.torrent");
-                    FileOutputStream fos = new FileOutputStream(tempFile);
-                    byte[] buffer = new byte[1024];
-                    int length;
-                    while ((length = is.read(buffer)) > 0) {
-                        fos.write(buffer, 0, length);
-                    }
-                    fos.close();
-                    is.close();
+            handleTorrentUri(data.getData());
+        }
+    }
 
-                    // Kiem tra noi dung file
-                    FileInputStream fis = new FileInputStream(tempFile);
-                    byte[] headerBytes = new byte[100];
-                    int readChars = fis.read(headerBytes);
-                    fis.close();
-                    String header = new String(headerBytes, 0, Math.max(0, readChars));
-
-                    // File torrent chuan Bencode luon bat dau bang ky tu 'd' (dictionary)
-                    if (!header.startsWith("d")) {
-                        new AlertDialog.Builder(this)
-                            .setTitle("⚠ Cảnh báo định dạng")
-                            .setMessage("File có đuôi .torrent nhưng nội dung thực tế lại là:\n\n" +
-                                        header.substring(0, Math.min(header.length(), 60)) +
-                                        "...\n\nĐây có vẻ là trang web HTML (do yêu cầu đăng nhập/chặn bot của trình duyệt). Thư viện sẽ không thể đọc được file này!")
-                            .setPositiveButton("Đã hiểu", null)
-                            .show();
-                        // Dung lai luon
-                        return;
-                    }
-
-                    // Dat luong duong dan co file:// de pass qua validation cua TorrentStream URL
-                    etMagnet.setText("file://" + tempFile.getAbsolutePath());
-                    startStream();
-                } catch (Exception e) {
-                    Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                }
+    // Ham dung chung de phan tich file Torrent duoc chon tu App hoac tu File Manager
+    private void handleTorrentUri(Uri uri) {
+        if (uri == null) return;
+        try {
+            InputStream is = getContentResolver().openInputStream(uri);
+            File tempFile = new File(getCacheDir(), "local_stream.torrent");
+            FileOutputStream fos = new FileOutputStream(tempFile);
+            byte[] buffer = new byte[1024];
+            int length;
+            while ((length = is.read(buffer)) > 0) {
+                fos.write(buffer, 0, length);
             }
+            fos.close();
+            is.close();
+
+            // Kiem tra noi dung file
+            FileInputStream fis = new FileInputStream(tempFile);
+            byte[] headerBytes = new byte[100];
+            int readChars = fis.read(headerBytes);
+            fis.close();
+            String header = new String(headerBytes, 0, Math.max(0, readChars));
+
+            // File torrent chuan Bencode luon bat dau bang ky tu 'd'
+            if (!header.startsWith("d")) {
+                new AlertDialog.Builder(this)
+                    .setTitle("⚠ Cảnh báo định dạng")
+                    .setMessage("File không phải chuẩn Bencode Torrent.\n\nĐây có thể là trang web HTML (do yêu cầu đăng nhập/chặn bot của trình duyệt). Thư viện sẽ không thể đọc được file này!")
+                    .setPositiveButton("Đã hiểu", null)
+                    .show();
+                return;
+            }
+
+            etMagnet.setText("file://" + tempFile.getAbsolutePath());
+            startStream(); // Tu dong phat ngay
+        } catch (Exception e) {
+            Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -134,7 +159,6 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        
         if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("file://") && !url.startsWith("/")) {
             Toast.makeText(this, "Link không hợp lệ", Toast.LENGTH_SHORT).show();
             return;
