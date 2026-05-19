@@ -66,6 +66,40 @@ public class TorrentActivity extends AppCompatActivity {
             etMagnet.setText(magnet);
         }
     }
+    private void pickTorrentFile() {
+        android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*");
+        intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+        startActivityForResult(intent, 1001);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 1001 && resultCode == RESULT_OK && data != null) {
+            android.net.Uri uri = data.getData();
+            if (uri != null) {
+                try {
+                    java.io.InputStream is = getContentResolver().openInputStream(uri);
+                    java.io.File tempFile = new java.io.File(getCacheDir(), "local_stream.torrent");
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(tempFile);
+                    byte[] buffer = new byte[1024];
+                    int length;
+                    while ((length = is.read(buffer)) > 0) {
+                        fos.write(buffer, 0, length);
+                    }
+                    fos.close();
+                    is.close();
+                    
+                    etMagnet.setText("file://" + tempFile.getAbsolutePath());
+                    startStream();
+                } catch (Exception e) {
+                    android.widget.Toast.makeText(this, "Lỗi: " + e.getMessage(), android.widget.Toast.LENGTH_SHORT).show();
+                }
+            }
+        }
+    }
+
 
     private void startStream() {
         String url = etMagnet.getText().toString().trim();
