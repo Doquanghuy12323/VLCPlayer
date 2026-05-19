@@ -5,7 +5,6 @@
     android:orientation="vertical"
     android:background="#313338">
 
-    <!-- Toolbar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="56dp"
@@ -45,7 +44,6 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- Input -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -54,21 +52,37 @@
                 android:textSize="13sp"
                 android:paddingBottom="6dp"/>
 
-            <EditText
-                android:id="@+id/et_magnet"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:orientation="horizontal"
                 android:background="#2B2D31"
-                android:padding="12dp"
-                android:textColor="#FFFFFF"
-                android:textSize="13sp"
-                android:hint="magnet:?xt=urn:btih:..."
-                android:textColorHint="#4E5058"
-                android:inputType="textUri"
-                android:minLines="2"
-                android:maxLines="4"/>
+                android:gravity="center_vertical">
 
-            <!-- Buttons -->
+                <EditText
+                    android:id="@+id/et_magnet"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:background="@null"
+                    android:padding="12dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:hint="Magnet / URL / Chọn File..."
+                    android:textColorHint="#4E5058"
+                    android:inputType="textUri"
+                    android:minLines="2"
+                    android:maxLines="4"/>
+
+                <ImageButton
+                    android:id="@+id/btn_pick_file"
+                    android:layout_width="48dp"
+                    android:layout_height="match_parent"
+                    android:background="?selectableItemBackground"
+                    android:src="@android:drawable/ic_menu_search"
+                    android:tint="#5865F2"/>
+            </LinearLayout>
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -95,7 +109,6 @@
 
             </LinearLayout>
 
-            <!-- Progress -->
             <ProgressBar
                 android:id="@+id/progress_bar"
                 style="?android:attr/progressBarStyleHorizontal"
@@ -121,7 +134,6 @@
                 android:textSize="13sp"
                 android:paddingTop="4dp"/>
 
-            <!-- Da tai -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
