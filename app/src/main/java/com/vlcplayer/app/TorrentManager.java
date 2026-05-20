@@ -8,6 +8,7 @@ import com.frostwire.jlibtorrent.TorrentHandle;
 import com.frostwire.jlibtorrent.TorrentInfo;
 import com.frostwire.jlibtorrent.TorrentStatus;
 import com.frostwire.jlibtorrent.FileStorage;
+import com.frostwire.jlibtorrent.Sha1Hash;
 import java.io.File;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -50,6 +51,8 @@ public class TorrentManager {
             try {
                 handler.post(() -> cb.onStatusUpdate("Đang khởi tạo cấu hình P2P Swarm mạng..."));
 
+                Sha1Hash sha1 = null;
+
                 if (urlOrPath.startsWith("magnet:") || urlOrPath.startsWith("http")) {
                     String optimizedUrl = urlOrPath;
                     if (optimizedUrl.startsWith("magnet:") && !optimizedUrl.contains("&tr=")) {
@@ -58,6 +61,15 @@ public class TorrentManager {
                                         "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
                                         "&tr=udp://tracker.openbittorrent.com:6099/announce";
                     }
+
+                    // Giải mã cắt chuỗi lấy mã băm HEX từ liên kết Magnet để chuẩn bị định danh findTorrent
+                    if (optimizedUrl.startsWith("magnet:?xt=urn:btih:")) {
+                        int start = 20;
+                        int end = optimizedUrl.indexOf("&", start);
+                        String infoHashHex = (end == -1) ? optimizedUrl.substring(start) : optimizedUrl.substring(start, end);
+                        sha1 = new Sha1Hash(infoHashHex.trim());
+                    }
+
                     sessionManager.download(optimizedUrl, saveDir);
                 } else {
                     File file = new File(urlOrPath.replace("file://", ""));
@@ -66,21 +78,25 @@ public class TorrentManager {
                         return;
                     }
                     TorrentInfo ti = new TorrentInfo(file);
+                    // Lấy mã băm Sha1Hash trực tiếp từ cấu trúc file local tĩnh
+                    sha1 = ti.infoHash();
                     sessionManager.download(ti, saveDir);
                 }
 
+                // Vòng lặp ngắn đợi nhân C++ ánh xạ file, định danh bằng hàm findTorrent chuẩn tuyệt đối
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
-                    // SỬA CHUẨN: Gọi qua session().torrents() khớp cấu trúc lõi FrostWire 1.2.x
-                    for (TorrentHandle th : sessionManager.session().torrents()) {
-                        torrentHandle = th;
+                    if (sha1 != null) {
+                        torrentHandle = sessionManager.findTorrent(sha1);
+                    }
+                    if (torrentHandle != null) {
                         break;
                     }
                     Thread.sleep(200);
                 }
 
                 if (torrentHandle == null) {
-                    handler.post(() -> cb.onError("Không thể liên kết Torrent Handle"));
+                    handler.post(() -> cb.onError("Không tìm thấy tệp hoặc liên kết băm bám mạng (Vui lòng thử lại)"));
                     return;
                 }
 
@@ -127,10 +143,7 @@ public class TorrentManager {
                         int videoIdx = 0;
                         long maxBytes = 0;
                         for (int i = 0; i < fs.numFiles(); i++) {
-                            if (fs.fileSize(i) > maxBytes) {
-                                maxBytes = fs.fileSize(i);
-                                videoIdx = i;
-                            }
+                            if (fs.fileSize(i) > maxBytes) {maxBytes = fs.fileSize(i); videoIdx = i;}
                         }
                         File videoFile = new File(saveDir, fs.filePath(videoIdx));
                         handler.post(() -> cb.onReady(videoFile.getAbsolutePath()));
