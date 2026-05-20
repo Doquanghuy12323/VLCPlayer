@@ -71,7 +71,7 @@ public class TorrentManager {
 
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
-                    // SỬA ĐÚNG: Gọi trực tiếp torrents() từ SessionManager
+                    // ĐÃ SỬA: Gọi trực tiếp torrents() từ đối tượng SessionManager gốc của bản 1.2.5.0
                     for (TorrentHandle th : sessionManager.torrents()) {
                         torrentHandle = th;
                         break;
@@ -83,9 +83,6 @@ public class TorrentManager {
                     handler.post(() -> cb.onError("Không thể liên kết Torrent Handle"));
                     return;
                 }
-
-                // SỬA ĐÚNG: sequentialDownload(true) tuân thủ JNI map nguyên bản từ libtorrent
-                torrentHandle.sequentialDownload(true);
 
                 startMonitoring(cb);
 
