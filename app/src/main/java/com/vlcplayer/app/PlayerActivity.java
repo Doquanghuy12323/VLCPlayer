@@ -135,6 +135,9 @@ public class PlayerActivity extends AppCompatActivity {
         screenH = dm.heightPixels;
 
         uriString  = getIntent().getStringExtra(EXTRA_URI);
+        if (uriString == null && getIntent().getData() != null) {
+            uriString = getIntent().getData().toString();
+        }
         videoTitle = getIntent().getStringExtra(EXTRA_TITLE);
 
         videoLayout     = findViewById(R.id.vlc_video_layout);
@@ -1159,4 +1162,10 @@ public class PlayerActivity extends AppCompatActivity {
             .setNegativeButton("Huy", null).show();
     }
 
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+    }
 }
