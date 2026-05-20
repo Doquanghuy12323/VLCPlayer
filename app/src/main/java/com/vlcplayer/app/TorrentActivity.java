@@ -165,7 +165,7 @@ public class TorrentActivity extends AppCompatActivity {
             File torrentFile = new File(filePath);
             if (torrentFile.exists() && torrentFile.getName().endsWith(".torrent")) {
                 try {
-                    com.frostwire.frostwire.jlibtorrent.TorrentInfo ti = new com.frostwire.jlibtorrent.TorrentInfo(torrentFile);
+                    com.frostwire.jlibtorrent.TorrentInfo ti = new com.frostwire.jlibtorrent.TorrentInfo(torrentFile);
                     url = "magnet:?xt=urn:btih:" + ti.infoHash().toString() +
                           "&tr=udp://tracker.opentrackr.org:1337/announce" +
                           "&tr=udp://open.stealth.si:80/announce" +
