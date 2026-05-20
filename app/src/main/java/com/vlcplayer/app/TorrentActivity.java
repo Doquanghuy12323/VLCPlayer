@@ -35,6 +35,7 @@ public class TorrentActivity extends AppCompatActivity {
     private RecyclerView rvDownloaded;
     private TorrentManager torrentManager;
     private DownloadedAdapter adapter;
+    private com.sun.net.httpserver.HttpServer localHttpServer;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -66,7 +67,6 @@ public class TorrentActivity extends AppCompatActivity {
         btnStream.setOnClickListener(v -> startStream());
         btnStop.setOnClickListener(v -> stopStream());
 
-        // Xu ly file hoac link truyen tu ben ngoai (khi mo tu File Manager)
         processExternalIntent(getIntent());
     }
 
@@ -82,12 +82,10 @@ public class TorrentActivity extends AppCompatActivity {
         
         if (Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
             Uri data = intent.getData();
-            // Neu la link magnet -> Dan vao o text va chay luon
             if ("magnet".equals(data.getScheme())) {
                 etMagnet.setText(data.toString());
                 startStream();
             } else {
-                // Neu la file tu File Manager -> Xu ly doc file va chay
                 handleTorrentUri(data);
             }
         } else {
@@ -113,7 +111,6 @@ public class TorrentActivity extends AppCompatActivity {
         }
     }
 
-    // Ham dung chung de phan tich file Torrent duoc chon tu App hoac tu File Manager
     private void handleTorrentUri(Uri uri) {
         if (uri == null) return;
         try {
@@ -128,14 +125,12 @@ public class TorrentActivity extends AppCompatActivity {
             fos.close();
             is.close();
 
-            // Kiem tra noi dung file
             FileInputStream fis = new FileInputStream(tempFile);
             byte[] headerBytes = new byte[100];
             int readChars = fis.read(headerBytes);
             fis.close();
             String header = new String(headerBytes, 0, Math.max(0, readChars));
 
-            // File torrent chuan Bencode luon bat dau bang ky tu 'd'
             if (!header.startsWith("d")) {
                 new AlertDialog.Builder(this)
                     .setTitle("⚠ Cảnh báo định dạng")
@@ -146,7 +141,7 @@ public class TorrentActivity extends AppCompatActivity {
             }
 
             etMagnet.setText("file://" + tempFile.getAbsolutePath());
-            startStream(); // Tu dong phat ngay
+            startStream();
         } catch (Exception e) {
             Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
@@ -162,6 +157,40 @@ public class TorrentActivity extends AppCompatActivity {
         if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("file://") && !url.startsWith("/")) {
             Toast.makeText(this, "Link không hợp lệ", Toast.LENGTH_SHORT).show();
             return;
+        }
+
+        // Nếu là file local, khởi chạy embedded local HTTP server để đánh lừa OkHttp trong thư viện
+        if (url.startsWith("file://") || url.startsWith("/")) {
+            String filePath = url.replace("file://", "");
+            File torrentFile = new File(filePath);
+            if (!torrentFile.exists()) {
+                Toast.makeText(this, "File không tồn tại", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            try {
+                if (localHttpServer != null) {
+                    localHttpServer.stop(0);
+                }
+                localHttpServer = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+                localHttpServer.createContext("/torrent", exchange -> {
+                    byte[] bytes = new byte[(int) torrentFile.length()];
+                    FileInputStream fis = new FileInputStream(torrentFile);
+                    fis.read(bytes);
+                    fis.close();
+
+                    exchange.getResponseHeaders().set("Content-Type", "application/x-bittorrent");
+                    exchange.sendResponseHeaders(200, bytes.length);
+                    java.io.OutputStream os = exchange.getResponseBody();
+                    os.write(bytes);
+                    os.close();
+                });
+                localHttpServer.start();
+                int port = localHttpServer.getAddress().getPort();
+                url = "http://127.0.0.1:" + port + "/torrent";
+            } catch (Exception e) {
+                Toast.makeText(this, "Lỗi khởi tạo local server: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                return;
+            }
         }
 
         btnStream.setEnabled(false);
@@ -183,6 +212,7 @@ public class TorrentActivity extends AppCompatActivity {
             public void onReady(String videoPath) {
                 tvStatus.setText("Sẵn sàng xem!");
                 progressBar.setVisibility(View.GONE);
+                stopLocalServer();
 
                 Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
                 intent.putExtra(PlayerActivity.EXTRA_URI, "file://" + videoPath);
@@ -198,6 +228,7 @@ public class TorrentActivity extends AppCompatActivity {
                 progressBar.setVisibility(View.GONE);
                 btnStream.setEnabled(true);
                 btnStop.setEnabled(false);
+                stopLocalServer();
                 Toast.makeText(TorrentActivity.this, "Lỗi: " + error, Toast.LENGTH_LONG).show();
             }
 
@@ -207,16 +238,27 @@ public class TorrentActivity extends AppCompatActivity {
                 progressBar.setVisibility(View.GONE);
                 btnStream.setEnabled(true);
                 btnStop.setEnabled(false);
+                stopLocalServer();
             }
         });
     }
 
     private void stopStream() {
         torrentManager.stop();
+        stopLocalServer();
         btnStream.setEnabled(true);
         btnStop.setEnabled(false);
         progressBar.setVisibility(View.GONE);
         tvStatus.setText("Đã dừng");
+    }
+
+    private void stopLocalServer() {
+        if (localHttpServer != null) {
+            try {
+                localHttpServer.stop(0);
+            } catch (Exception ignored) {}
+            localHttpServer = null;
+        }
     }
 
     private void loadDownloadedFiles() {
@@ -287,6 +329,7 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     @Override protected void onDestroy() {
+        stopLocalServer();
         super.onDestroy();
     }
 }
