@@ -308,10 +308,10 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     private void loadDownloadedFiles() {
-        // Thay đổi đồng bộ danh mục kiểm tra sang getCacheDir()
-        File dir = new File(getCacheDir(), "torrents");
+        // Đồng bộ thư mục quét hiển thị trùng khớp với getExternalFilesDir
+        File dir = getExternalFilesDir("torrents");
         List<File> files = new ArrayList<>();
-        if (dir.exists()) {
+        if (dir != null && dir.exists()) {
             File[] all = dir.listFiles();
             if (all != null) {
                 for (File f : all) {
