@@ -42,7 +42,6 @@ public class TorrentActivity extends AppCompatActivity {
     private TorrentManager torrentManager;
     private DownloadedAdapter adapter;
     
-    // Server Socket thuần Android bảo mật, tương thích hoàn toàn với GitHub Actions
     private ServerSocket localServerSocket;
     private boolean isServerRunning = false;
     private int localServerPort = 0;
@@ -144,7 +143,7 @@ public class TorrentActivity extends AppCompatActivity {
             if (!header.startsWith("d")) {
                 new AlertDialog.Builder(this)
                     .setTitle("⚠ Cảnh báo định dạng")
-                    .setMessage("File không phải chuẩn Bencode Torrent.\n\nĐây có thể là trang web HTML (do yêu cầu đăng nhập/chặn bot của trình duyệt). Thư viện sẽ không thể đọc được file này!")
+                    .setMessage("File không phải chuẩn Bencode Torrent.\n\nĐây có thể là trang web HTML. Thư viện sẽ không thể đọc được file này!")
                     .setPositiveButton("Đã hiểu", null)
                     .show();
                 return;
@@ -169,7 +168,6 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        // Khởi động server trung gian đa luồng nếu nhận diện thấy file local
         if (url.startsWith("file://") || url.startsWith("/")) {
             String filePath = url.replace("file://", "");
             File torrentFile = new File(filePath);
@@ -188,16 +186,13 @@ public class TorrentActivity extends AppCompatActivity {
                     while (isServerRunning) {
                         try {
                             final Socket socket = localServerSocket.accept();
-                            // Chạy mỗi kết nối trên một sub-thread độc lập để tránh deadlock mạng
                             new Thread(() -> {
                                 try (Socket s = socket;
                                      OutputStream os = s.getOutputStream();
                                      BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()))) {
                                     
                                     String line;
-                                    while ((line = in.readLine()) != null && !line.isEmpty()) {
-                                        // Đọc sạch gói tin request header gửi lên
-                                    }
+                                    while ((line = in.readLine()) != null && !line.isEmpty()) {}
 
                                     if (finalFile.exists()) {
                                         byte[] bytes = new byte[(int) finalFile.length()];
@@ -218,7 +213,6 @@ public class TorrentActivity extends AppCompatActivity {
                                         os.write(bytes);
                                         os.flush();
 
-                                        // Toast thông báo thời gian thực chứng minh server đã phản hồi
                                         runOnUiThread(() -> Toast.makeText(TorrentActivity.this, "⚡ Local Server: Đã chuyển file torrent sang nhân P2P!", Toast.LENGTH_SHORT).show());
                                     } else {
                                         os.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".getBytes("UTF-8"));
@@ -251,6 +245,7 @@ public class TorrentActivity extends AppCompatActivity {
             public void onStatusUpdate(String status) {
                 tvStatus.setText(status);
             }
+
             @Override
             public void onProgress(int progress, float dlSpeed, float ulSpeed) {
                 progressBar.setProgress(progress);
@@ -313,7 +308,8 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     private void loadDownloadedFiles() {
-        File dir = new File(getExternalFilesDir(null), "torrents");
+        // Thay đổi đồng bộ danh mục kiểm tra sang getCacheDir()
+        File dir = new File(getCacheDir(), "torrents");
         List<File> files = new ArrayList<>();
         if (dir.exists()) {
             File[] all = dir.listFiles();

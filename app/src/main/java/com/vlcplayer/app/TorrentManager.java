@@ -25,12 +25,13 @@ public class TorrentManager {
     private Callback callback;
 
     public TorrentManager(Context ctx) {
-        File saveDir = new File(ctx.getExternalFilesDir(null), "torrents");
+        // GIẢI PHÁP: Sử dụng getCacheDir() nội bộ để bypass hoàn toàn tầng ảo hóa FUSE của Android, giải quyết lỗi treo file lớn
+        File saveDir = new File(ctx.getCacheDir(), "torrents");
         if (!saveDir.exists()) saveDir.mkdirs();
 
         TorrentOptions options = new TorrentOptions.Builder()
             .saveLocation(saveDir)
-            .removeFilesAfterStop(false)
+            .removeFilesAfterStop(true) // Tự động xóa giải phóng bộ nhớ trong ngay sau khi stop stream
             .anonymousMode(false)
             .maxConnections(200)
             .build();
