@@ -43,11 +43,22 @@
 
         <activity android:name=".PlayerActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape"
             android:supportsPictureInPicture="true"
-            android:theme="@style/Theme.VLCPlayer.Fullscreen" />
+            android:theme="@style/Theme.VLCPlayer.Fullscreen">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="video/*" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -59,7 +70,6 @@
                 android:resource="@xml/provider_paths" />
         </provider>
 
-    
         <activity
             android:name=".MangaActivity"
             android:theme="@style/Theme.VLCPlayer.Fullscreen"
@@ -75,6 +85,7 @@
             android:name=".GeminiChatActivity"
             android:theme="@style/Theme.VLCPlayer"
             android:windowSoftInputMode="adjustResize"/>
+
         <activity
             android:name=".TorrentActivity"
             android:theme="@style/Theme.VLCPlayer"
@@ -107,5 +118,5 @@
                 <data android:pathPattern=".*\.torrent" />
             </intent-filter>
         </activity>
-</application>
+    </application>
 </manifest>
