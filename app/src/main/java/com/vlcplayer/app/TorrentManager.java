@@ -52,24 +52,22 @@ public class TorrentManager {
                 handler.post(() -> cb.onStatusUpdate("Đang khởi tạo cấu hình P2P Swarm mạng..."));
 
                 Sha1Hash sha1 = null;
+                String finalDownloadUrl = urlOrPath;
 
                 if (urlOrPath.startsWith("magnet:") || urlOrPath.startsWith("http")) {
-                    String optimizedUrl = urlOrPath;
-                    if (optimizedUrl.startsWith("magnet:") && !optimizedUrl.contains("&tr=")) {
-                        optimizedUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
-                                        "&tr=udp://open.stealth.si:80/announce" +
-                                        "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
-                                        "&tr=udp://tracker.openbittorrent.com:6099/announce";
+                    if (urlOrPath.startsWith("magnet:") && !urlOrPath.contains("&tr=")) {
+                        finalDownloadUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
+                                            "&tr=udp://open.stealth.si:80/announce" +
+                                            "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
+                                            "&tr=udp://tracker.openbittorrent.com:6099/announce";
                     }
 
-                    if (optimizedUrl.startsWith("magnet:?xt=urn:btih:")) {
+                    if (finalDownloadUrl.startsWith("magnet:?xt=urn:btih:")) {
                         int start = 20;
-                        int end = optimizedUrl.indexOf("&", start);
-                        String infoHashHex = (end == -1) ? optimizedUrl.substring(start) : optimizedUrl.substring(start, end);
+                        int end = finalDownloadUrl.indexOf("&", start);
+                        String infoHashHex = (end == -1) ? finalDownloadUrl.substring(start) : finalDownloadUrl.substring(start, end);
                         sha1 = new Sha1Hash(infoHashHex.trim());
                     }
-
-                    sessionManager.download(optimizedUrl, saveDir);
                 } else {
                     File file = new File(urlOrPath.replace("file://", ""));
                     if (!file.exists()) {
@@ -78,15 +76,30 @@ public class TorrentManager {
                     }
                     TorrentInfo ti = new TorrentInfo(file);
                     sha1 = ti.infoHash();
-                    sessionManager.download(ti, saveDir);
+
+                    // GIẢI PHÁP ĐỘT PHÁ: Biến đổi file local thành chuỗi Magnet và bơm trực tiếp dàn Tracker tối ưu mạng Swarm vào
+                    String magnetUrl = "magnet:?xt=urn:btih:" + sha1.toString();
+                    if (ti.name() != null && !ti.name().isEmpty()) {
+                        try {
+                            magnetUrl += "&dn=" + java.net.URLEncoder.encode(ti.name(), "UTF-8");
+                        } catch (Exception ignored) {}
+                    }
+                    magnetUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
+                                 "&tr=udp://open.stealth.si:80/announce" +
+                                 "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
+                                 "&tr=udp://tracker.openbittorrent.com:6099/announce" +
+                                 "&tr=udp://explodie.org:6969/announce";
+                    
+                    finalDownloadUrl = magnetUrl;
                 }
 
-                // CƠ CHẾ PHẢN XẠ RUNTIME: Tự động rà quét cấu trúc đối tượng để tìm TorrentHandle mà không check lỗi lúc biên dịch
+                // Thực hiện tải thông qua chuỗi URL đã được tối ưu hóa Tracker bám mạng
+                sessionManager.download(finalDownloadUrl, saveDir);
+
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
                     if (sha1 != null) {
                         try {
-                            // 1. Tìm hàm kiếm trực tiếp theo Sha1Hash trong SessionManager
                             for (java.lang.reflect.Method m : SessionManager.class.getDeclaredMethods()) {
                                 if (m.getParameterTypes().length == 1 && 
                                     m.getParameterTypes()[0] == Sha1Hash.class && 
@@ -96,8 +109,6 @@ public class TorrentManager {
                                     break;
                                 }
                             }
-
-                            // 2. Nếu không có, duyệt mảng danh sách Torrent trong cấu trúc SessionManager công nghiệp
                             if (torrentHandle == null) {
                                 for (java.lang.reflect.Method m : SessionManager.class.getDeclaredMethods()) {
                                     if (m.getParameterTypes().length == 0 && java.util.List.class.isAssignableFrom(m.getReturnType())) {
@@ -118,47 +129,14 @@ public class TorrentManager {
                                     if (torrentHandle != null) break;
                                 }
                             }
-
-                            // 3. Fallback: Tìm kiếm thông qua phần lõi của SessionHandle nội bộ
-                            if (torrentHandle == null) {
-                                for (java.lang.reflect.Method m : SessionManager.class.getDeclaredMethods()) {
-                                    if (m.getParameterTypes().length == 0 && 
-                                        (m.getReturnType().getName().contains("Session") || m.getReturnType().getName().contains("Handle") || m.getReturnType().getName().contains("swig"))) {
-                                        m.setAccessible(true);
-                                        Object coreSession = m.invoke(sessionManager);
-                                        if (coreSession != null) {
-                                            for (java.lang.reflect.Method sm : coreSession.getClass().getDeclaredMethods()) {
-                                                if (sm.getParameterTypes().length == 0 && java.util.List.class.isAssignableFrom(sm.getReturnType())) {
-                                                    sm.setAccessible(true);
-                                                    java.util.List<?> list = (java.util.List<?>) sm.invoke(coreSession);
-                                                    if (list != null) {
-                                                        for (Object obj : list) {
-                                                            if (obj instanceof TorrentHandle) {
-                                                                TorrentHandle th = (TorrentHandle) obj;
-                                                                if (th.infoHash() != null && th.infoHash().toString().equalsIgnoreCase(sha1.toString())) {
-                                                                    torrentHandle = th;
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                if (torrentHandle != null) break;
-                                            }
-                                        }
-                                    }
-                                    if (torrentHandle != null) break;
-                                }
-                            }
                         } catch (Exception ignored) {}
                     }
-
                     if (torrentHandle != null) break;
                     Thread.sleep(250);
                 }
 
                 if (torrentHandle == null) {
-                    handler.post(() -> cb.onError("Đang nạp dữ liệu Swarm mạng (Vui lòng bấm Phát lại sau vài giây)"));
+                    handler.post(() -> cb.onError("Hệ thống mạng P2P bận, vui lòng bấm PHÁT lại sau ít giây!"));
                     return;
                 }
 
