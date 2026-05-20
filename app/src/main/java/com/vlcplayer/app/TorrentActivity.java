@@ -42,7 +42,7 @@ public class TorrentActivity extends AppCompatActivity {
     private TorrentManager torrentManager;
     private DownloadedAdapter adapter;
     
-    // Server Socket thuan Android de tranh loi compile tren GitHub Actions
+    // Server Socket thuần Android bảo mật, tương thích hoàn toàn với GitHub Actions
     private ServerSocket localServerSocket;
     private boolean isServerRunning = false;
     private int localServerPort = 0;
@@ -169,7 +169,7 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        // Tạo Embedded Socket HTTP Server cục bộ bằng java.net thuần túy để đánh lừa thư viện
+        // Khởi động server trung gian đa luồng nếu nhận diện thấy file local
         if (url.startsWith("file://") || url.startsWith("/")) {
             String filePath = url.replace("file://", "");
             File torrentFile = new File(filePath);
@@ -179,8 +179,7 @@ public class TorrentActivity extends AppCompatActivity {
             }
             try {
                 stopLocalServer();
-                // Khởi tạo cổng ngẫu nhiên tại card mạng nội bộ loopback 127.0.0.1
-                localServerSocket = new ServerSocket(0, 5, InetAddress.getByName("127.0.0.1"));
+                localServerSocket = new ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"));
                 localServerPort = localServerSocket.getLocalPort();
                 isServerRunning = true;
 
@@ -188,41 +187,45 @@ public class TorrentActivity extends AppCompatActivity {
                 new Thread(() -> {
                     while (isServerRunning) {
                         try {
-                            Socket socket = localServerSocket.accept();
-                            try (OutputStream os = socket.getOutputStream();
-                                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
-                                
-                                String line;
-                                while ((line = in.readLine()) != null && !line.isEmpty()) {
-                                    // Đọc hết dữ liệu headers từ Client gửi tới
-                                }
-
-                                if (finalFile.exists()) {
-                                    byte[] bytes = new byte[(int) finalFile.length()];
-                                    try (FileInputStream fis = new FileInputStream(finalFile)) {
-                                        int totalRead = 0;
-                                        while (totalRead < bytes.length) {
-                                            int read = fis.read(bytes, totalRead, bytes.length - totalRead);
-                                            if (read == -1) break;
-                                            totalRead += read;
-                                        }
+                            final Socket socket = localServerSocket.accept();
+                            // Chạy mỗi kết nối trên một sub-thread độc lập để tránh deadlock mạng
+                            new Thread(() -> {
+                                try (Socket s = socket;
+                                     OutputStream os = s.getOutputStream();
+                                     BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()))) {
+                                    
+                                    String line;
+                                    while ((line = in.readLine()) != null && !line.isEmpty()) {
+                                        // Đọc sạch gói tin request header gửi lên
                                     }
 
-                                    // Tạo header chuẩn phản hồi HTTP phản hồi cho OkHttp của thư viện đọc
-                                    String resHeaders = "HTTP/1.1 200 OK\r\n" +
-                                            "Content-Type: application/x-bittorrent\r\n" +
-                                            "Content-Length: " + bytes.length + "\r\n" +
-                                            "Connection: close\r\n\r\n";
+                                    if (finalFile.exists()) {
+                                        byte[] bytes = new byte[(int) finalFile.length()];
+                                        try (FileInputStream fis = new FileInputStream(finalFile)) {
+                                            int offset = 0;
+                                            int numRead;
+                                            while (offset < bytes.length && (numRead = fis.read(bytes, offset, bytes.length - offset)) >= 0) {
+                                                offset += numRead;
+                                            }
+                                        }
 
-                                    os.write(resHeaders.getBytes("UTF-8"));
-                                    os.write(bytes);
-                                    os.flush();
-                                } else {
-                                    String errRes = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
-                                    os.write(errRes.getBytes("UTF-8"));
-                                    os.flush();
-                                }
-                            } catch (Exception ignored) {}
+                                        String resHeaders = "HTTP/1.1 200 OK\r\n" +
+                                                "Content-Type: application/x-bittorrent\r\n" +
+                                                "Content-Length: " + bytes.length + "\r\n" +
+                                                "Connection: close\r\n\r\n";
+
+                                        os.write(resHeaders.getBytes("UTF-8"));
+                                        os.write(bytes);
+                                        os.flush();
+
+                                        // Toast thông báo thời gian thực chứng minh server đã phản hồi
+                                        runOnUiThread(() -> Toast.makeText(TorrentActivity.this, "⚡ Local Server: Đã chuyển file torrent sang nhân P2P!", Toast.LENGTH_SHORT).show());
+                                    } else {
+                                        os.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".getBytes("UTF-8"));
+                                        os.flush();
+                                    }
+                                } catch (Exception ignored) {}
+                            }).start();
                         } catch (Exception e) {
                             if (!isServerRunning) break;
                         }
