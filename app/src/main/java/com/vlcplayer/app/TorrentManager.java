@@ -52,23 +52,26 @@ public class TorrentManager {
                 handler.post(() -> cb.onStatusUpdate("Đang khởi tạo cấu hình P2P Swarm mạng..."));
 
                 Sha1Hash sha1 = null;
-                String finalDownloadUrl = urlOrPath;
 
                 if (urlOrPath.startsWith("magnet:") || urlOrPath.startsWith("http")) {
-                    if (urlOrPath.startsWith("magnet:") && !urlOrPath.contains("&tr=")) {
-                        finalDownloadUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
-                                            "&tr=udp://open.stealth.si:80/announce" +
-                                            "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
-                                            "&tr=udp://tracker.openbittorrent.com:6099/announce";
+                    String optimizedUrl = urlOrPath;
+                    if (optimizedUrl.startsWith("magnet:") && !optimizedUrl.contains("&tr=")) {
+                        optimizedUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
+                                        "&tr=udp://open.stealth.si:80/announce" +
+                                        "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
+                                        "&tr=udp://tracker.openbittorrent.com:6099/announce";
                     }
 
-                    if (finalDownloadUrl.startsWith("magnet:?xt=urn:btih:")) {
+                    if (optimizedUrl.startsWith("magnet:?xt=urn:btih:")) {
                         int start = 20;
-                        int end = finalDownloadUrl.indexOf("&", start);
-                        String infoHashHex = (end == -1) ? finalDownloadUrl.substring(start) : finalDownloadUrl.substring(start, end);
+                        int end = optimizedUrl.indexOf("&", start);
+                        String infoHashHex = (end == -1) ? optimizedUrl.substring(start) : optimizedUrl.substring(start, end);
                         sha1 = new Sha1Hash(infoHashHex.trim());
                     }
+
+                    sessionManager.download(optimizedUrl, saveDir);
                 } else {
+                    // GIẢI PHÁP: Giữ nguyên dạng TorrentInfo để nạp Metadata có sẵn lập tức, bỏ qua giai đoạn chờ tải qua mạng!
                     File file = new File(urlOrPath.replace("file://", ""));
                     if (!file.exists()) {
                         handler.post(() -> cb.onError("Tệp tin torrent không tồn tại"));
@@ -76,25 +79,8 @@ public class TorrentManager {
                     }
                     TorrentInfo ti = new TorrentInfo(file);
                     sha1 = ti.infoHash();
-
-                    // GIẢI PHÁP ĐỘT PHÁ: Biến đổi file local thành chuỗi Magnet và bơm trực tiếp dàn Tracker tối ưu mạng Swarm vào
-                    String magnetUrl = "magnet:?xt=urn:btih:" + sha1.toString();
-                    if (ti.name() != null && !ti.name().isEmpty()) {
-                        try {
-                            magnetUrl += "&dn=" + java.net.URLEncoder.encode(ti.name(), "UTF-8");
-                        } catch (Exception ignored) {}
-                    }
-                    magnetUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
-                                 "&tr=udp://open.stealth.si:80/announce" +
-                                 "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
-                                 "&tr=udp://tracker.openbittorrent.com:6099/announce" +
-                                 "&tr=udp://explodie.org:6969/announce";
-                    
-                    finalDownloadUrl = magnetUrl;
+                    sessionManager.download(ti, saveDir);
                 }
-
-                // Thực hiện tải thông qua chuỗi URL đã được tối ưu hóa Tracker bám mạng
-                sessionManager.download(finalDownloadUrl, saveDir);
 
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
@@ -136,9 +122,25 @@ public class TorrentManager {
                 }
 
                 if (torrentHandle == null) {
-                    handler.post(() -> cb.onError("Hệ thống mạng P2P bận, vui lòng bấm PHÁT lại sau ít giây!"));
+                    handler.post(() -> cb.onError("Đang nạp luồng P2P, vui lòng nhấn PHÁT lại sau ít giây!"));
                     return;
                 }
+
+                // TIÊM TRACKER DYNAMIC: Dùng Reflection tiêm dàn Tracker mồi sóng của Stremio cho cả tệp cục bộ
+                try {
+                    java.lang.reflect.Constructor<?> certCtor = Class.forName("com.frostwire.jlibtorrent.AnnounceEntry").getConstructor(String.class);
+                    String[] trackers = {
+                        "udp://tracker.opentrackr.org:1337/announce",
+                        "udp://open.stealth.si:80/announce",
+                        "udp://tracker.coppersurfer.tk:6969/announce",
+                        "udp://tracker.openbittorrent.com:6099/announce",
+                        "udp://explodie.org:6969/announce"
+                    };
+                    for (String tr : trackers) {
+                        Object entry = certCtor.newInstance(tr);
+                        torrentHandle.getClass().getMethod("addTracker", Class.forName("com.frostwire.jlibtorrent.AnnounceEntry")).invoke(torrentHandle, entry);
+                    }
+                } catch (Exception ignored) {}
 
                 startMonitoring(cb);
 
