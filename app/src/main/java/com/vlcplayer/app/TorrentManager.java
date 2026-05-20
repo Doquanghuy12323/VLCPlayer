@@ -37,7 +37,7 @@ public class TorrentManager {
             new Thread(() -> {
                 try {
                     sessionManager.start();
-                    // KÍCH HOẠT NATIVE DHT: Giúp dò tìm Seeder toàn cầu siêu tốc như Stremio
+                    // Kích hoạt DHT tìm kiếm node mạng ngang hàng
                     sessionManager.startDht();
                 } catch (Exception ignored) {}
             }).start();
@@ -51,10 +51,8 @@ public class TorrentManager {
             try {
                 handler.post(() -> cb.onStatusUpdate("Đang khởi tạo cấu hình P2P Swarm mạng..."));
 
-                // Phân loại đầu vào là file cục bộ hay liên kết mạng mạng
                 if (urlOrPath.startsWith("magnet:") || urlOrPath.startsWith("http")) {
                     String optimizedUrl = urlOrPath;
-                    // Tự động tiêm thêm cụm máy chủ Tracker lõi của Stremio nếu thiếu
                     if (optimizedUrl.startsWith("magnet:") && !optimizedUrl.contains("&tr=")) {
                         optimizedUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
                                         "&tr=udp://open.stealth.si:80/announce" +
@@ -72,10 +70,10 @@ public class TorrentManager {
                     sessionManager.download(ti, saveDir);
                 }
 
-                // Vòng lặp chờ nạp Torrent vào Session hệ thống
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
-                    for (TorrentHandle th : sessionManager.torrentHandles()) {
+                    // SỬA: Đổi torrentHandles() thành torrents() để khớp thư viện gốc
+                    for (TorrentHandle th : sessionManager.torrents()) {
                         torrentHandle = th;
                         break;
                     }
@@ -87,10 +85,9 @@ public class TorrentManager {
                     return;
                 }
 
-                // ÉP TRÌNH PHÁT CHẠY CHẾ ĐỘ PHÁT TUẦN TỰ (SEQUENTIAL) ĐỂ TRÁNH KHỰNG VIDEO
-                torrentHandle.setSequentialDownload(true);
+                // SỬA: Đổi setSequentialDownload(true) thành sequentialDownload(true)
+                torrentHandle.sequentialDownload(true);
 
-                // Khởi chạy bộ giám sát luồng dữ liệu thời gian thực
                 startMonitoring(cb);
 
             } catch (Exception e) {
@@ -126,7 +123,6 @@ public class TorrentManager {
                     }
                 });
 
-                // Chỉ cần tải mồi được mảnh đầu tiên là cấp quyền mở PlayerActivity ngay lập tức
                 if (hasMetadata && (progress >= 1 || dlSpeed > 50) && !isReadyCalled) {
                     isReadyCalled = true;
                     TorrentInfo ti = torrentHandle.torrentFile();
@@ -157,7 +153,7 @@ public class TorrentManager {
             try {
                 sessionManager.remove(torrentHandle);
             } catch (Exception ignored) {}
-                torrentHandle = null;
+            torrentHandle = null;
         }
     }
 
