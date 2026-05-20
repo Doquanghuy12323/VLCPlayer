@@ -37,7 +37,7 @@ public class TorrentManager {
             new Thread(() -> {
                 try {
                     sessionManager.start();
-                    // Kích hoạt DHT tìm kiếm node mạng ngang hàng
+                    // Kích hoạt DHT tìm kiếm node mạng ngang hàng toàn cầu
                     sessionManager.startDht();
                 } catch (Exception ignored) {}
             }).start();
@@ -72,8 +72,8 @@ public class TorrentManager {
 
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
-                    // SỬA: Đổi torrentHandles() thành torrents() để khớp thư viện gốc
-                    for (TorrentHandle th : sessionManager.torrents()) {
+                    // FIX: Gọi qua sessionHandle().torrents() để lấy danh sách chuẩn từ core C++
+                    for (TorrentHandle th : sessionManager.sessionHandle().torrents()) {
                         torrentHandle = th;
                         break;
                     }
@@ -85,8 +85,8 @@ public class TorrentManager {
                     return;
                 }
 
-                // SỬA: Đổi setSequentialDownload(true) thành sequentialDownload(true)
-                torrentHandle.sequentialDownload(true);
+                // FIX: Đổi về hàm chuẩn setSequentialDownload của jlibtorrent
+                torrentHandle.setSequentialDownload(true);
 
                 startMonitoring(cb);
 
