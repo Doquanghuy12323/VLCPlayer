@@ -248,6 +248,10 @@ public class TorrentActivity extends AppCompatActivity {
 
         torrentManager.startStream(url, new TorrentManager.Callback() {
             @Override
+            public void onStatusUpdate(String status) {
+                tvStatus.setText(status);
+            }
+            @Override
             public void onProgress(int progress, float dlSpeed, float ulSpeed) {
                 progressBar.setProgress(progress);
                 tvStatus.setText("Đang tải: " + progress + "%");

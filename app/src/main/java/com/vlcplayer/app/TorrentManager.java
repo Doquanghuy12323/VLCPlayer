@@ -17,6 +17,7 @@ public class TorrentManager {
         void onReady(String videoPath);
         void onError(String error);
         void onStopped();
+        default void onStatusUpdate(String status) {}
     }
 
     private TorrentStream torrentStream;
@@ -29,7 +30,7 @@ public class TorrentManager {
 
         TorrentOptions options = new TorrentOptions.Builder()
             .saveLocation(saveDir)
-            .removeFilesAfterStop(false) // Giu file sau khi xem
+            .removeFilesAfterStop(false)
             .anonymousMode(false)
             .maxConnections(200)
             .build();
@@ -43,7 +44,6 @@ public class TorrentManager {
         torrentStream.addListener(new TorrentListener() {
             @Override
             public void onStreamReady(Torrent torrent) {
-                // Co du du lieu de bat dau xem
                 String path = torrent.getVideoFile().getAbsolutePath();
                 handler.post(() -> {
                     if (callback != null) callback.onReady(path);
@@ -55,7 +55,7 @@ public class TorrentManager {
                 handler.post(() -> {
                     if (callback != null) callback.onProgress(
                         (int)(status.progress * 100),
-                        status.downloadSpeed / 1024f, // KB/s
+                        status.downloadSpeed / 1024f,
                         0f
                     );
                 });
@@ -69,16 +69,24 @@ public class TorrentManager {
             }
 
             @Override
-            public void onStreamPrepared(Torrent torrent) {}
+            public void onStreamPrepared(Torrent torrent) {
+                handler.post(() -> {
+                    if (callback != null) callback.onStatusUpdate("Phân tích xong tệp. Đang cấu hình bộ nhớ đệm...");
+                });
+            }
 
             @Override
-            public void onStreamStarted(Torrent torrent) {}
+            public void onStreamStarted(Torrent torrent) {
+                handler.post(() -> {
+                    if (callback != null) callback.onStatusUpdate("Đang kết nối DHT & Dò tìm Seeders/Peers toàn cầu...");
+                });
+            }
 
             @Override
             public void onStreamError(Torrent torrent, Exception e) {
                 handler.post(() -> {
                     if (callback != null) callback.onError(
-                        e.getMessage() != null ? e.getMessage() : "Loi khong xac dinh"
+                        e.getMessage() != null ? e.getMessage() : "Lỗi hệ thống Torrent ngầm"
                     );
                 });
             }
