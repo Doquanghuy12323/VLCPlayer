@@ -18,10 +18,16 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,7 +41,11 @@ public class TorrentActivity extends AppCompatActivity {
     private RecyclerView rvDownloaded;
     private TorrentManager torrentManager;
     private DownloadedAdapter adapter;
-    private com.sun.net.httpserver.HttpServer localHttpServer;
+    
+    // Server Socket thuan Android de tranh loi compile tren GitHub Actions
+    private ServerSocket localServerSocket;
+    private boolean isServerRunning = false;
+    private int localServerPort = 0;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -159,7 +169,7 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        // Nếu là file local, khởi chạy embedded local HTTP server để đánh lừa OkHttp trong thư viện
+        // Tạo Embedded Socket HTTP Server cục bộ bằng java.net thuần túy để đánh lừa thư viện
         if (url.startsWith("file://") || url.startsWith("/")) {
             String filePath = url.replace("file://", "");
             File torrentFile = new File(filePath);
@@ -168,25 +178,58 @@ public class TorrentActivity extends AppCompatActivity {
                 return;
             }
             try {
-                if (localHttpServer != null) {
-                    localHttpServer.stop(0);
-                }
-                localHttpServer = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
-                localHttpServer.createContext("/torrent", exchange -> {
-                    byte[] bytes = new byte[(int) torrentFile.length()];
-                    FileInputStream fis = new FileInputStream(torrentFile);
-                    fis.read(bytes);
-                    fis.close();
+                stopLocalServer();
+                // Khởi tạo cổng ngẫu nhiên tại card mạng nội bộ loopback 127.0.0.1
+                localServerSocket = new ServerSocket(0, 5, InetAddress.getByName("127.0.0.1"));
+                localServerPort = localServerSocket.getLocalPort();
+                isServerRunning = true;
 
-                    exchange.getResponseHeaders().set("Content-Type", "application/x-bittorrent");
-                    exchange.sendResponseHeaders(200, bytes.length);
-                    java.io.OutputStream os = exchange.getResponseBody();
-                    os.write(bytes);
-                    os.close();
-                });
-                localHttpServer.start();
-                int port = localHttpServer.getAddress().getPort();
-                url = "http://127.0.0.1:" + port + "/torrent";
+                final File finalFile = torrentFile;
+                new Thread(() -> {
+                    while (isServerRunning) {
+                        try {
+                            Socket socket = localServerSocket.accept();
+                            try (OutputStream os = socket.getOutputStream();
+                                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+                                
+                                String line;
+                                while ((line = in.readLine()) != null && !line.isEmpty()) {
+                                    // Đọc hết dữ liệu headers từ Client gửi tới
+                                }
+
+                                if (finalFile.exists()) {
+                                    byte[] bytes = new byte[(int) finalFile.length()];
+                                    try (FileInputStream fis = new FileInputStream(finalFile)) {
+                                        int totalRead = 0;
+                                        while (totalRead < bytes.length) {
+                                            int read = fis.read(bytes, totalRead, bytes.length - totalRead);
+                                            if (read == -1) break;
+                                            totalRead += read;
+                                        }
+                                    }
+
+                                    // Tạo header chuẩn phản hồi HTTP phản hồi cho OkHttp của thư viện đọc
+                                    String resHeaders = "HTTP/1.1 200 OK\r\n" +
+                                            "Content-Type: application/x-bittorrent\r\n" +
+                                            "Content-Length: " + bytes.length + "\r\n" +
+                                            "Connection: close\r\n\r\n";
+
+                                    os.write(resHeaders.getBytes("UTF-8"));
+                                    os.write(bytes);
+                                    os.flush();
+                                } else {
+                                    String errRes = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+                                    os.write(errRes.getBytes("UTF-8"));
+                                    os.flush();
+                                }
+                            } catch (Exception ignored) {}
+                        } catch (Exception e) {
+                            if (!isServerRunning) break;
+                        }
+                    }
+                }).start();
+
+                url = "http://127.0.0.1:" + localServerPort + "/torrent";
             } catch (Exception e) {
                 Toast.makeText(this, "Lỗi khởi tạo local server: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                 return;
@@ -253,11 +296,12 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     private void stopLocalServer() {
-        if (localHttpServer != null) {
+        isServerRunning = false;
+        if (localServerSocket != null) {
             try {
-                localHttpServer.stop(0);
+                localServerSocket.close();
             } catch (Exception ignored) {}
-            localHttpServer = null;
+            localServerSocket = null;
         }
     }
 
