@@ -71,8 +71,8 @@ public class TorrentManager {
 
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
-                    // ĐÃ SỬA: Gọi trực tiếp torrents() từ đối tượng SessionManager gốc của bản 1.2.5.0
-                    for (TorrentHandle th : sessionManager.torrents()) {
+                    // SỬA CHUẨN: Gọi qua session().torrents() khớp cấu trúc lõi FrostWire 1.2.x
+                    for (TorrentHandle th : sessionManager.session().torrents()) {
                         torrentHandle = th;
                         break;
                     }
