@@ -18,16 +18,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,10 +34,6 @@ public class TorrentActivity extends AppCompatActivity {
     private RecyclerView rvDownloaded;
     private TorrentManager torrentManager;
     private DownloadedAdapter adapter;
-    
-    private ServerSocket localServerSocket;
-    private boolean isServerRunning = false;
-    private int localServerPort = 0;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -120,6 +109,7 @@ public class TorrentActivity extends AppCompatActivity {
         }
     }
 
+    // GIẢI PHÁP CỐT LÕI: Biến đổi file .torrent cục bộ thành Magnet Link tích hợp siêu Tracker ngầm
     private void handleTorrentUri(Uri uri) {
         if (uri == null) return;
         try {
@@ -134,25 +124,31 @@ public class TorrentActivity extends AppCompatActivity {
             fos.close();
             is.close();
 
-            FileInputStream fis = new FileInputStream(tempFile);
-            byte[] headerBytes = new byte[100];
-            int readChars = fis.read(headerBytes);
-            fis.close();
-            String header = new String(headerBytes, 0, Math.max(0, readChars));
+            // Sử dụng thư viện jlibtorrent có sẵn để bóc tách mã băm Info-Hash
+            com.frostwire.jlibtorrent.TorrentInfo ti = new com.frostwire.jlibtorrent.TorrentInfo(tempFile);
+            String infoHash = ti.infoHash().toString();
+            String displayName = ti.name();
 
-            if (!header.startsWith("d")) {
-                new AlertDialog.Builder(this)
-                    .setTitle("⚠ Cảnh báo định dạng")
-                    .setMessage("File không phải chuẩn Bencode Torrent.\n\nĐây có thể là trang web HTML. Thư viện sẽ không thể đọc được file này!")
-                    .setPositiveButton("Đã hiểu", null)
-                    .show();
-                return;
+            // Khởi tạo chuỗi liên kết Magnet tiêu chuẩn toàn cầu
+            String magnetUrl = "magnet:?xt=urn:btih:" + infoHash;
+            if (displayName != null && !displayName.isEmpty()) {
+                magnetUrl += "&dn=" + Uri.encode(displayName);
             }
 
-            etMagnet.setText("file://" + tempFile.getAbsolutePath());
+            // Bơm tổ hợp các cụm máy chủ Trackers có mật độ seeder dày đặc nhất của Stremio
+            magnetUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
+                         "&tr=udp://open.stealth.si:80/announce" +
+                         "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
+                         "&tr=udp://tracker.leechers-paradise.org:6969/announce" +
+                         "&tr=udp://tracker.openbittorrent.com:6099/announce" +
+                         "&tr=udp://explodie.org:6969/announce";
+
+            etMagnet.setText(magnetUrl);
+            Toast.makeText(this, "⚡ Đã chuyển đổi Torrent File sang High-Speed Magnet Link!", Toast.LENGTH_SHORT).show();
+            
             startStream();
         } catch (Exception e) {
-            Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Lỗi phân tích tệp Torrent: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -163,74 +159,25 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        if (!url.startsWith("magnet:") && !url.startsWith("http") && !url.startsWith("file://") && !url.startsWith("/")) {
-            Toast.makeText(this, "Link không hợp lệ", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
+        // Tự động phân giải nếu người dùng dán hoặc gõ đường dẫn file tĩnh vào EditText
         if (url.startsWith("file://") || url.startsWith("/")) {
             String filePath = url.replace("file://", "");
             File torrentFile = new File(filePath);
-            if (!torrentFile.exists()) {
-                Toast.makeText(this, "File không tồn tại", Toast.LENGTH_SHORT).show();
-                return;
+            if (torrentFile.exists() && torrentFile.getName().endsWith(".torrent")) {
+                try {
+                    com.frostwire.frostwire.jlibtorrent.TorrentInfo ti = new com.frostwire.jlibtorrent.TorrentInfo(torrentFile);
+                    url = "magnet:?xt=urn:btih:" + ti.infoHash().toString() +
+                          "&tr=udp://tracker.opentrackr.org:1337/announce" +
+                          "&tr=udp://open.stealth.si:80/announce" +
+                          "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
+                          "&tr=udp://tracker.openbittorrent.com:6099/announce";
+                } catch (Exception ignored) {}
             }
-            try {
-                stopLocalServer();
-                localServerSocket = new ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"));
-                localServerPort = localServerSocket.getLocalPort();
-                isServerRunning = true;
+        }
 
-                final File finalFile = torrentFile;
-                new Thread(() -> {
-                    while (isServerRunning) {
-                        try {
-                            final Socket socket = localServerSocket.accept();
-                            new Thread(() -> {
-                                try (Socket s = socket;
-                                     OutputStream os = s.getOutputStream();
-                                     BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()))) {
-                                    
-                                    String line;
-                                    while ((line = in.readLine()) != null && !line.isEmpty()) {}
-
-                                    if (finalFile.exists()) {
-                                        byte[] bytes = new byte[(int) finalFile.length()];
-                                        try (FileInputStream fis = new FileInputStream(finalFile)) {
-                                            int offset = 0;
-                                            int numRead;
-                                            while (offset < bytes.length && (numRead = fis.read(bytes, offset, bytes.length - offset)) >= 0) {
-                                                offset += numRead;
-                                            }
-                                        }
-
-                                        String resHeaders = "HTTP/1.1 200 OK\r\n" +
-                                                "Content-Type: application/x-bittorrent\r\n" +
-                                                "Content-Length: " + bytes.length + "\r\n" +
-                                                "Connection: close\r\n\r\n";
-
-                                        os.write(resHeaders.getBytes("UTF-8"));
-                                        os.write(bytes);
-                                        os.flush();
-
-                                        runOnUiThread(() -> Toast.makeText(TorrentActivity.this, "⚡ Local Server: Đã chuyển file torrent sang nhân P2P!", Toast.LENGTH_SHORT).show());
-                                    } else {
-                                        os.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".getBytes("UTF-8"));
-                                        os.flush();
-                                    }
-                                } catch (Exception ignored) {}
-                            }).start();
-                        } catch (Exception e) {
-                            if (!isServerRunning) break;
-                        }
-                    }
-                }).start();
-
-                url = "http://127.0.0.1:" + localServerPort + "/torrent";
-            } catch (Exception e) {
-                Toast.makeText(this, "Lỗi khởi tạo local server: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                return;
-            }
+        if (!url.startsWith("magnet:") && !url.startsWith("http")) {
+            Toast.makeText(this, "Đường dẫn không hợp lệ", Toast.LENGTH_SHORT).show();
+            return;
         }
 
         btnStream.setEnabled(false);
@@ -257,7 +204,6 @@ public class TorrentActivity extends AppCompatActivity {
             public void onReady(String videoPath) {
                 tvStatus.setText("Sẵn sàng xem!");
                 progressBar.setVisibility(View.GONE);
-                stopLocalServer();
 
                 Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
                 intent.putExtra(PlayerActivity.EXTRA_URI, "file://" + videoPath);
@@ -273,7 +219,6 @@ public class TorrentActivity extends AppCompatActivity {
                 progressBar.setVisibility(View.GONE);
                 btnStream.setEnabled(true);
                 btnStop.setEnabled(false);
-                stopLocalServer();
                 Toast.makeText(TorrentActivity.this, "Lỗi: " + error, Toast.LENGTH_LONG).show();
             }
 
@@ -283,32 +228,19 @@ public class TorrentActivity extends AppCompatActivity {
                 progressBar.setVisibility(View.GONE);
                 btnStream.setEnabled(true);
                 btnStop.setEnabled(false);
-                stopLocalServer();
             }
         });
     }
 
     private void stopStream() {
         torrentManager.stop();
-        stopLocalServer();
         btnStream.setEnabled(true);
         btnStop.setEnabled(false);
         progressBar.setVisibility(View.GONE);
         tvStatus.setText("Đã dừng");
     }
 
-    private void stopLocalServer() {
-        isServerRunning = false;
-        if (localServerSocket != null) {
-            try {
-                localServerSocket.close();
-            } catch (Exception ignored) {}
-            localServerSocket = null;
-        }
-    }
-
     private void loadDownloadedFiles() {
-        // Đồng bộ thư mục quét hiển thị trùng khớp với getExternalFilesDir
         File dir = getExternalFilesDir("torrents");
         List<File> files = new ArrayList<>();
         if (dir != null && dir.exists()) {
@@ -376,7 +308,6 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     @Override protected void onDestroy() {
-        stopLocalServer();
         super.onDestroy();
     }
 }
