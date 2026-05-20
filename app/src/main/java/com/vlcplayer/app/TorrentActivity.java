@@ -13,7 +13,6 @@ import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -77,7 +76,6 @@ public class TorrentActivity extends AppCompatActivity {
 
     private void processExternalIntent(Intent intent) {
         if (intent == null) return;
-        
         if (Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
             Uri data = intent.getData();
             if ("magnet".equals(data.getScheme())) {
@@ -88,9 +86,7 @@ public class TorrentActivity extends AppCompatActivity {
             }
         } else {
             String magnet = intent.getStringExtra("magnet");
-            if (magnet != null) {
-                etMagnet.setText(magnet);
-            }
+            if (magnet != null) etMagnet.setText(magnet);
         }
     }
 
@@ -109,7 +105,6 @@ public class TorrentActivity extends AppCompatActivity {
         }
     }
 
-    // GIẢI PHÁP CỐT LÕI: Biến đổi file .torrent cục bộ thành Magnet Link tích hợp siêu Tracker ngầm
     private void handleTorrentUri(Uri uri) {
         if (uri == null) return;
         try {
@@ -124,31 +119,10 @@ public class TorrentActivity extends AppCompatActivity {
             fos.close();
             is.close();
 
-            // Sử dụng thư viện jlibtorrent có sẵn để bóc tách mã băm Info-Hash
-            com.frostwire.jlibtorrent.TorrentInfo ti = new com.frostwire.jlibtorrent.TorrentInfo(tempFile);
-            String infoHash = ti.infoHash().toString();
-            String displayName = ti.name();
-
-            // Khởi tạo chuỗi liên kết Magnet tiêu chuẩn toàn cầu
-            String magnetUrl = "magnet:?xt=urn:btih:" + infoHash;
-            if (displayName != null && !displayName.isEmpty()) {
-                magnetUrl += "&dn=" + Uri.encode(displayName);
-            }
-
-            // Bơm tổ hợp các cụm máy chủ Trackers có mật độ seeder dày đặc nhất của Stremio
-            magnetUrl += "&tr=udp://tracker.opentrackr.org:1337/announce" +
-                         "&tr=udp://open.stealth.si:80/announce" +
-                         "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
-                         "&tr=udp://tracker.leechers-paradise.org:6969/announce" +
-                         "&tr=udp://tracker.openbittorrent.com:6099/announce" +
-                         "&tr=udp://explodie.org:6969/announce";
-
-            etMagnet.setText(magnetUrl);
-            Toast.makeText(this, "⚡ Đã chuyển đổi Torrent File sang High-Speed Magnet Link!", Toast.LENGTH_SHORT).show();
-            
+            etMagnet.setText(tempFile.getAbsolutePath());
             startStream();
         } catch (Exception e) {
-            Toast.makeText(this, "Lỗi phân tích tệp Torrent: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -156,27 +130,6 @@ public class TorrentActivity extends AppCompatActivity {
         String url = etMagnet.getText().toString().trim();
         if (url.isEmpty()) {
             Toast.makeText(this, "Nhập magnet link hoặc chọn file", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // Tự động phân giải nếu người dùng dán hoặc gõ đường dẫn file tĩnh vào EditText
-        if (url.startsWith("file://") || url.startsWith("/")) {
-            String filePath = url.replace("file://", "");
-            File torrentFile = new File(filePath);
-            if (torrentFile.exists() && torrentFile.getName().endsWith(".torrent")) {
-                try {
-                    com.frostwire.jlibtorrent.TorrentInfo ti = new com.frostwire.jlibtorrent.TorrentInfo(torrentFile);
-                    url = "magnet:?xt=urn:btih:" + ti.infoHash().toString() +
-                          "&tr=udp://tracker.opentrackr.org:1337/announce" +
-                          "&tr=udp://open.stealth.si:80/announce" +
-                          "&tr=udp://tracker.coppersurfer.tk:6969/announce" +
-                          "&tr=udp://tracker.openbittorrent.com:6099/announce";
-                } catch (Exception ignored) {}
-            }
-        }
-
-        if (!url.startsWith("magnet:") && !url.startsWith("http")) {
-            Toast.makeText(this, "Đường dẫn không hợp lệ", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -197,7 +150,7 @@ public class TorrentActivity extends AppCompatActivity {
             public void onProgress(int progress, float dlSpeed, float ulSpeed) {
                 progressBar.setProgress(progress);
                 tvStatus.setText("Đang tải: " + progress + "%");
-                tvSpeed.setText(String.format("↓ %.1f KB/s  ↑ %.1f KB/s", dlSpeed, ulSpeed));
+                tvSpeed.setText(String.format("↓ %.1f KB/s", dlSpeed));
             }
 
             @Override
@@ -264,8 +217,7 @@ public class TorrentActivity extends AppCompatActivity {
         DownloadedAdapter(List<File> files) { this.files = files; }
 
         @Override public VH onCreateViewHolder(ViewGroup p, int t) {
-            View v = LayoutInflater.from(p.getContext())
-                .inflate(R.layout.item_torrent_file, p, false);
+            View v = LayoutInflater.from(p.getContext()).inflate(R.layout.item_torrent_file, p, false);
             return new VH(v);
         }
 
@@ -305,9 +257,5 @@ public class TorrentActivity extends AppCompatActivity {
         if (bytes < 1024*1024) return String.format("%.1f KB", bytes/1024f);
         if (bytes < 1024*1024*1024) return String.format("%.1f MB", bytes/(1024f*1024));
         return String.format("%.2f GB", bytes/(1024f*1024*1024));
-    }
-
-    @Override protected void onDestroy() {
-        super.onDestroy();
     }
 }
