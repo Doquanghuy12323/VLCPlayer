@@ -1,5 +1,7 @@
 package com.vlcplayer.app;
 
+import com.vlcplayer.app.TranscodeManager;
+
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
