@@ -90,9 +90,10 @@ public class TranscodeManager {
     }
 
     private void pipeTranscodeToClient(Socket socket, File videoFile, Callback cb) {
+        // ĐÃ SỬA CHUẨN: Loại bỏ biến 's =' thừa gây lỗi cú pháp biên dịch
         try (Socket client = socket;
              BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
-             OutputStream out = s = client.getOutputStream()) {
+             OutputStream out = client.getOutputStream()) {
 
             String requestLine = in.readLine();
             if (requestLine == null) return;
