@@ -4,8 +4,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,12 +17,9 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.frostwire.jlibtorrent.TorrentInfo;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,6 +31,7 @@ public class TorrentActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private TextView tvStatus, tvSpeed;
     private RecyclerView rvDownloaded;
+    private TorrentManager torrentManager;
     private DownloadedAdapter adapter;
 
     @Override
@@ -59,11 +55,13 @@ public class TorrentActivity extends AppCompatActivity {
 
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
 
+        torrentManager = new TorrentManager(this);
+
         rvDownloaded.setLayoutManager(new LinearLayoutManager(this));
         loadDownloadedFiles();
 
         btnPickFile.setOnClickListener(v -> pickTorrentFile());
-        btnStream.setOnClickListener(v -> startTorrentioCloudStream());
+        btnStream.setOnClickListener(v -> startLiveStream());
         btnStop.setOnClickListener(v -> stopStream());
 
         processExternalIntent(getIntent());
@@ -82,7 +80,7 @@ public class TorrentActivity extends AppCompatActivity {
             Uri data = intent.getData();
             if ("magnet".equals(data.getScheme())) {
                 etMagnet.setText(data.toString());
-                startTorrentioCloudStream();
+                startLiveStream();
             } else {
                 handleTorrentUri(data);
             }
@@ -122,81 +120,78 @@ public class TorrentActivity extends AppCompatActivity {
             is.close();
 
             etMagnet.setText(tempFile.getAbsolutePath());
-            startTorrentioCloudStream();
+            startLiveStream();
         } catch (Exception e) {
             Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void startTorrentioCloudStream() {
-        String input = etMagnet.getText().toString().trim();
-        if (input.isEmpty()) {
+    private void startLiveStream() {
+        String url = etMagnet.getText().toString().trim();
+        if (url.isEmpty()) {
             Toast.makeText(this, "Nhập magnet link hoặc chọn file", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        String infoHash = "";
-        String displayName = "Torrentio Cloud Stream";
-
-        try {
-            if (input.startsWith("magnet:?xt=urn:btih:")) {
-                int start = 20;
-                int end = input.indexOf("&", start);
-                infoHash = (end == -1) ? input.substring(start) : input.substring(start, end);
-                infoHash = infoHash.trim();
-                
-                if (input.contains("&dn=")) {
-                    int dnStart = input.indexOf("&dn=") + 4;
-                    int dnEnd = input.indexOf("&", dnStart);
-                    displayName = Uri.decode((dnEnd == -1) ? input.substring(dnStart) : input.substring(dnStart, dnEnd));
-                }
-            } else {
-                File file = new File(input.replace("file://", ""));
-                if (file.exists()) {
-                    TorrentInfo ti = new TorrentInfo(file);
-                    infoHash = ti.infoHash().toString();
-                    if (ti.name() != null && !ti.name().isEmpty()) displayName = ti.name();
-                }
-            }
-        } catch (Exception e) {
-            Toast.makeText(this, "Lỗi giải mã cấu trúc: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        if (infoHash.isEmpty()) {
-            Toast.makeText(this, "Không tìm thấy Info-Hash hợp lệ để chuyển đổi mây!", Toast.LENGTH_LONG).show();
             return;
         }
 
         btnStream.setEnabled(false);
         btnStop.setEnabled(true);
+        progressBar.setProgress(0);
         progressBar.setVisibility(View.VISIBLE);
-        tvStatus.setText("🚀 Đang đồng bộ máy chủ Torrentio Cloud...");
-        tvSpeed.setText("Băng thông: Không giới hạn (Đám mây)");
+        tvStatus.setText("Đang kết nối...");
+        tvSpeed.setText("");
 
-        // Tạo đường link HTTP Gateway chuẩn hóa trỏ trực tiếp vào luồng bóc tách file video lớn nhất của Torrentio
-        final String torrentioUrl = "https://torrentio.strem.fun/stream/movie/" + infoHash.toLowerCase() + ":0:0.mp4";
-        final String finalTitle = displayName;
+        torrentManager.startStream(url, new TorrentManager.Callback() {
+            @Override
+            public void onStatusUpdate(String status) {
+                tvStatus.setText(status);
+            }
 
-        // Trả luồng hiển thị và nhảy thẳng sang PlayerActivity phát bằng LibVLC mượt mà
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            progressBar.setVisibility(View.GONE);
-            btnStream.setEnabled(true);
-            btnStop.setEnabled(false);
-            tvStatus.setText("Đang phát qua Cloud!");
+            @Override
+            public void onProgress(int progress, float dlSpeed, float ulSpeed) {
+                progressBar.setProgress(progress);
+                tvStatus.setText("Đang tải đệm: " + progress + "%");
+                tvSpeed.setText(String.format("↓ %.1f KB/s", dlSpeed));
+            }
 
-            Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
-            intent.putExtra(PlayerActivity.EXTRA_URI, torrentioUrl);
-            intent.putExtra(PlayerActivity.EXTRA_TITLE, finalTitle);
-            startActivity(intent);
-        }, 1200);
+            @Override
+            public void onReady(String localHttpUrl) {
+                tvStatus.setText("Sẵn sàng xem!");
+                progressBar.setVisibility(View.GONE);
+
+                // Gửi cổng local HTTP Stream bảo mật sang cho màn hình phát LibVLC chạy mượt mà
+                Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
+                intent.putExtra(PlayerActivity.EXTRA_URI, localHttpUrl);
+                intent.putExtra(PlayerActivity.EXTRA_TITLE, "Torrent Live Stream");
+                startActivity(intent);
+
+                loadDownloadedFiles();
+            }
+
+            @Override
+            public void onError(String error) {
+                tvStatus.setText("Lỗi: " + error);
+                progressBar.setVisibility(View.GONE);
+                btnStream.setEnabled(true);
+                btnStop.setEnabled(false);
+                Toast.makeText(TorrentActivity.this, "Lỗi: " + error, Toast.LENGTH_LONG).show();
+            }
+
+            @Override
+            public void onStopped() {
+                tvStatus.setText("Đã dừng");
+                progressBar.setVisibility(View.GONE);
+                btnStream.setEnabled(true);
+                btnStop.setEnabled(false);
+            }
+        });
     }
 
     private void stopStream() {
-        progressBar.setVisibility(View.GONE);
+        torrentManager.stop();
         btnStream.setEnabled(true);
         btnStop.setEnabled(false);
-        tvStatus.setText("Đã dừng luồng");
+        progressBar.setVisibility(View.GONE);
+        tvStatus.setText("Đã dừng");
         tvSpeed.setText("");
     }
 
