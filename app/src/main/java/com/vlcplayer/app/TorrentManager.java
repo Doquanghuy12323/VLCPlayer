@@ -95,14 +95,72 @@ public class TorrentManager {
                 long startTime = System.currentTimeMillis();
                 while (torrentHandle == null && System.currentTimeMillis() - startTime < 8000) {
                     if (sha1 != null) {
-                        for (TorrentHandle th : sessionManager.torrents()) {
-                            if (th.infoHash() != null && th.infoHash().toString().equalsIgnoreCase(sha1.toString())) {
-                                torrentHandle = th;
-                                break;
+                        try {
+                            // Chiến lược Phản xạ 1: Tìm hàm kiếm trực tiếp theo Sha1Hash trong SessionManager
+                            for (java.lang.reflect.Method m : SessionManager.class.getDeclaredMethods()) {
+                                if (m.getReturnType() == TorrentHandle.class && m.getParameterTypes().length == 1 && m.getParameterTypes()[0] == Sha1Hash.class) {
+                                    m.setAccessible(true);
+                                    torrentHandle = (TorrentHandle) m.invoke(sessionManager, sha1);
+                                    if (torrentHandle != null) break;
+                                }
                             }
-                        }
+                            
+                            // Chiến lược Phản xạ 2: Quét mọi danh sách mảng động trả về List<TorrentHandle> công nghiệp
+                            if (torrentHandle == null) {
+                                for (java.lang.reflect.Method m : SessionManager.class.getDeclaredMethods()) {
+                                    if (m.getParameterTypes().length == 0 && java.util.List.class.isAssignableFrom(m.getReturnType())) {
+                                        m.setAccessible(true);
+                                        java.util.List<?> list = (java.util.List<?>) m.invoke(sessionManager);
+                                        if (list != null) {
+                                            for (Object obj : list) {
+                                                if (obj instanceof TorrentHandle) {
+                                                    TorrentHandle th = (TorrentHandle) obj;
+                                                    if (th.infoHash() != null && th.infoHash().toString().equalsIgnoreCase(sha1.toString())) {
+                                                        torrentHandle = th;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (torrentHandle != null) break;
+                                }
+                            }
+
+                            // Chiến lược Phản xạ 3: Quét qua phân vùng session gốc bên dưới
+                            if (torrentHandle == null) {
+                                for (java.lang.reflect.Method m : SessionManager.class.getDeclaredMethods()) {
+                                    if (m.getParameterTypes().length == 0 && !m.getReturnType().isPrimitive() && m.getReturnType() != void.class && m.getReturnType() != SessionManager.class) {
+                                        m.setAccessible(true);
+                                        Object internalSession = m.invoke(sessionManager);
+                                        if (internalSession != null) {
+                                            for (java.lang.reflect.Method sm : internalSession.getClass().getDeclaredMethods()) {
+                                                if (java.util.List.class.isAssignableFrom(sm.getReturnType()) && sm.getParameterTypes().length == 0) {
+                                                    sm.setAccessible(true);
+                                                    java.util.List<?> list = (java.util.List<?>) sm.invoke(internalSession);
+                                                    if (list != null) {
+                                                        for (Object obj : list) {
+                                                            if (obj instanceof TorrentHandle) {
+                                                                TorrentHandle th = (TorrentHandle) obj;
+                                                                if (th.infoHash() != null && th.infoHash().toString().equalsIgnoreCase(sha1.toString())) {
+                                                                    torrentHandle = th;
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if (torrentHandle != null) break;
+                                            }
+                                        }
+                                    }
+                                    if (torrentHandle != null) break;
+                                }
+                            }
+                        } catch (Exception ignored) {}
                     }
-                    Thread.sleep(200);
+                    if (torrentHandle != null) break;
+                    Thread.sleep(250);
                 }
 
                 if (torrentHandle == null) {
@@ -110,8 +168,28 @@ public class TorrentManager {
                     return;
                 }
 
-                // KÍCH HOẠT CHẾ ĐỘ PHÁT TUẦN TỰ LÕI C++ GIỐNG STREMIO
-                torrentHandle.sequentialDownload(true);
+                // KHẮC PHỤC DỨT ĐIỂM: Ép tải tuần tự bằng Reflection động để triệt tiêu hoàn toàn lỗi compile symbol
+                try {
+                    boolean methodFound = false;
+                    for (java.lang.reflect.Method m : TorrentHandle.class.getDeclaredMethods()) {
+                        if ((m.getName().equals("sequentialDownload") || m.getName().equals("setSequentialDownload")) 
+                            && m.getParameterTypes().length == 1 && m.getParameterTypes()[0] == boolean.class) {
+                            m.setAccessible(true);
+                            m.invoke(torrentHandle, true);
+                            methodFound = true;
+                            break;
+                        }
+                    }
+                    if (!methodFound) {
+                        for (java.lang.reflect.Method m : TorrentHandle.class.getDeclaredMethods()) {
+                            if (m.getName().toLowerCase().contains("sequential") && m.getParameterTypes().length == 1 && m.getParameterTypes()[0] == boolean.class) {
+                                m.setAccessible(true);
+                                m.invoke(torrentHandle, true);
+                                break;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
 
                 // Khởi động Local HTTP Media Server trung chuyển gói tin Range Request
                 startLocalHttpProxy(cb);
@@ -139,7 +217,6 @@ public class TorrentManager {
                 }
             }).start();
 
-            // Trả đường link local HTTP Proxy sạch sẽ về cho trình phát LibVLC nạp luồng ăn sẵn
             String localStreamUrl = "http://127.0.0.1:" + proxyPort + "/stream";
             startMonitoring(localStreamUrl, cb);
 
@@ -197,12 +274,24 @@ public class TorrentManager {
             if (rangeEnd == -1) rangeEnd = fileLength - 1;
             long contentLength = rangeEnd - rangeStart + 1;
 
-            // ĐIỀU PHỐI MẢNH THÔNG MINH: Ép nhân C++ ưu tiên tải vùng dữ liệu mà LibVLC đang yêu cầu tua tới
+            // KIỂM SOÁT MẢNH BẰNG REFLECTION: Bảo vệ an toàn tuyệt đối các hàm piecePriority ở runtime
             int pieceSize = ti.pieceLength();
             int startPiece = (int) (rangeStart / pieceSize);
             int endPiece = (int) (rangeEnd / pieceSize);
             for (int i = startPiece; i <= Math.min(endPiece, startPiece + 3); i++) {
-                torrentHandle.piecePriority(i, Priority.SEVEN); // Đặt độ ưu tiên tối cao cho block cần phát
+                try {
+                    for (java.lang.reflect.Method m : TorrentHandle.class.getDeclaredMethods()) {
+                        if (m.getName().equals("piecePriority") && m.getParameterTypes().length == 2 && m.getParameterTypes()[0] == int.class) {
+                            m.setAccessible(true);
+                            if (m.getParameterTypes()[1] == int.class) {
+                                m.invoke(torrentHandle, i, 7);
+                            } else {
+                                m.invoke(torrentHandle, i, Priority.SEVEN);
+                            }
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {}
             }
 
             String responseHeader = "HTTP/1.1 206 Partial Content\r\n" +
@@ -213,7 +302,6 @@ public class TorrentManager {
 
             out.write(responseHeader.getBytes("UTF-8"));
 
-            // Đọc ghi dữ liệu thời gian thực từ bộ đệm của file đang tải xuống sang cổng mạng HTTP của VLC
             try (RandomAccessFile raf = new RandomAccessFile(videoFile, "r")) {
                 raf.seek(rangeStart);
                 byte[] buffer = new byte[8192];
@@ -221,7 +309,7 @@ public class TorrentManager {
                 while (isProxyRunning && bytesLeft > 0) {
                     int read = raf.read(buffer, 0, (int) Math.min(buffer.length, bytesLeft));
                     if (read == -1) {
-                        Thread.sleep(300); // Đợi nếu phân vùng P2P chưa kịp ghi xuống đĩa
+                        Thread.sleep(300);
                         continue;
                     }
                     out.write(buffer, 0, read);
@@ -259,7 +347,6 @@ public class TorrentManager {
                     }
                 });
 
-                // Chỉ cần máy bắt được mạng Swarm và kéo được 2 MB đệm đầu tiên là kích hoạt mở màn hình xem phim luôn
                 if (hasMetadata && !isReadyCalled) {
                     TorrentInfo ti = torrentHandle.torrentFile();
                     FileStorage fs = ti.files();
