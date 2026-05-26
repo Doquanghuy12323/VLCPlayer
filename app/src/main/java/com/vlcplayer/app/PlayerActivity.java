@@ -1065,7 +1065,11 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer != null && videoLayout != null) {
             videoLayout.post(() -> {
                 try {
-                    mediaPlayer.attachViews(videoLayout, null, false, false);
+                    // Chi attach lai neu chua attach - tranh reset audio pipeline
+                    if (isInBackground) {
+                        mediaPlayer.attachViews(videoLayout, null, false,
+                            filtersEnabled);
+                    }
                     if (isInBackground) {
                         mediaPlayer.play();
                         if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
