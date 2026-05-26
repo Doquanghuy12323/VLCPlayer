@@ -83,7 +83,6 @@ public class PlayerActivity extends AppCompatActivity {
     private final Handler handler = new Handler();
     private boolean controlsVisible = true;
     private boolean userSeeking = false;
-    private boolean waveletSent = false;
     private int audioSessionId = AudioEffect.ERROR_BAD_VALUE;
     private int scaleMode = 1;
     private int screenW, screenH;
@@ -293,6 +292,7 @@ public class PlayerActivity extends AppCompatActivity {
         options.add("--audiotrack-session-id=" + audioSessionId);
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
+        requestAudioFocus();
         try {
             equalizer = new Equalizer(0, audioSessionId);
             equalizer.setEnabled(true);
@@ -304,7 +304,7 @@ public class PlayerActivity extends AppCompatActivity {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
                         handler.postDelayed(() -> applyScaleMode(), 200);
                         scheduleHideControls();
-                        if (!waveletSent) { broadcastAudioSessionOpen(); waveletSent = true; }
+                        broadcastAudioSessionOpen();
                     });
                     break;
                 case MediaPlayer.Event.Paused:
@@ -755,6 +755,64 @@ public class PlayerActivity extends AppCompatActivity {
     private void scheduleHideControls() {
         handler.removeCallbacks(hideControls);
         handler.postDelayed(hideControls, 3500);
+    }
+
+    private android.media.AudioFocusRequest audioFocusRequest;
+    private android.media.AudioManager.OnAudioFocusChangeListener focusListener =
+        focusChange -> {
+            if (mediaPlayer == null) return;
+            switch (focusChange) {
+                case android.media.AudioManager.AUDIOFOCUS_LOSS:
+                    // Mat focus hoan toan - pause
+                    runOnUiThread(() -> { if (mediaPlayer.isPlaying()) mediaPlayer.pause(); });
+                    break;
+                case android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                    // Mat focus tam thoi - giam volume
+                    runOnUiThread(() -> { if (mediaPlayer.isPlaying()) mediaPlayer.pause(); });
+                    break;
+                case android.media.AudioManager.AUDIOFOCUS_GAIN:
+                    // Lay lai focus - phat tiep va gui lai broadcast cho DSP
+                    runOnUiThread(() -> {
+                        if (!mediaPlayer.isPlaying()) mediaPlayer.play();
+                        broadcastAudioSessionOpen();
+                    });
+                    break;
+            }
+        };
+
+    private void requestAudioFocus() {
+        android.media.AudioManager am =
+            (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            android.media.AudioAttributes attrs = new android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE)
+                .build();
+            audioFocusRequest = new android.media.AudioFocusRequest.Builder(
+                android.media.AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attrs)
+                .setOnAudioFocusChangeListener(focusListener)
+                .setWillPauseWhenDucked(false)
+                .build();
+            am.requestAudioFocus(audioFocusRequest);
+        } else {
+            am.requestAudioFocus(focusListener,
+                android.media.AudioManager.STREAM_MUSIC,
+                android.media.AudioManager.AUDIOFOCUS_GAIN);
+        }
+    }
+
+    private void abandonAudioFocus() {
+        android.media.AudioManager am =
+            (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+                && audioFocusRequest != null) {
+            am.abandonAudioFocusRequest(audioFocusRequest);
+        } else {
+            am.abandonAudioFocus(focusListener);
+        }
     }
 
     private void broadcastAudioSessionOpen() {
