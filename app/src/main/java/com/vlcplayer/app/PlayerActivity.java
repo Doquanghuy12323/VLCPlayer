@@ -304,7 +304,9 @@ public class PlayerActivity extends AppCompatActivity {
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
                         handler.postDelayed(() -> applyScaleMode(), 200);
                         scheduleHideControls();
-                        broadcastAudioSessionOpen();
+                        // Delay de VLC khoi dong audiotrack truoc
+                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 300);
+                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 1000);
                     });
                     break;
                 case MediaPlayer.Event.Paused:
@@ -1056,15 +1058,21 @@ public class PlayerActivity extends AppCompatActivity {
     }    @Override
     protected void onResume() {
         super.onResume();
+        // Gui lai session cho DSP khi quay lai app
+        if (audioSessionId != android.media.audiofx.AudioEffect.ERROR_BAD_VALUE) {
+            handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
+        }
         if (mediaPlayer != null && videoLayout != null) {
             videoLayout.post(() -> {
                 try {
                     mediaPlayer.attachViews(videoLayout, null, false, false);
                     if (isInBackground) {
                         mediaPlayer.play();
-                mediaPlayer.play();
-                if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
+                        if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
                         isInBackground = false;
+                        // Gui lai session cho DSP sau khi resume
+                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
+                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 1500);
                     }
                 } catch (Exception e) {}
             });
