@@ -763,18 +763,19 @@ public class PlayerActivity extends AppCompatActivity {
             if (mediaPlayer == null) return;
             switch (focusChange) {
                 case android.media.AudioManager.AUDIOFOCUS_LOSS:
-                    // Mat focus hoan toan - pause
+                    // Chi pause khi mat focus hoan toan (call dien thoai...)
                     runOnUiThread(() -> { if (mediaPlayer.isPlaying()) mediaPlayer.pause(); });
                     break;
                 case android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                    // Mat focus tam thoi - giam volume
-                    runOnUiThread(() -> { if (mediaPlayer.isPlaying()) mediaPlayer.pause(); });
+                    // Khong pause - de DSP va cac app khac hoat dong binh thuong
+                    break;
+                case android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                    // Khong giam volume - giu nguyen
                     break;
                 case android.media.AudioManager.AUDIOFOCUS_GAIN:
-                    // Lay lai focus - phat tiep va gui lai broadcast cho DSP
                     runOnUiThread(() -> {
                         if (!mediaPlayer.isPlaying()) mediaPlayer.play();
-                        broadcastAudioSessionOpen();
+                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 200);
                     });
                     break;
             }
