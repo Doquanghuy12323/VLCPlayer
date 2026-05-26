@@ -293,10 +293,8 @@ public class PlayerActivity extends AppCompatActivity {
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
         requestAudioFocus();
-        try {
-            equalizer = new Equalizer(0, audioSessionId);
-            equalizer.setEnabled(true);
-        } catch (Exception ignored) {}
+        // Khong tao Equalizer de tranh xung dot voi RootlessJamesDSP
+        // DSP se tu quan ly audio effect tren session nay
         mediaPlayer.setEventListener(event -> {
             switch (event.type) {
                 case MediaPlayer.Event.Playing:
