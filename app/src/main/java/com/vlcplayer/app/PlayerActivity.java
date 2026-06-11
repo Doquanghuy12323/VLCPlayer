@@ -718,19 +718,74 @@ public class PlayerActivity extends AppCompatActivity {
         return -1;
     }
 
+    // Overlay hien thi volume/brightness
+    private android.widget.TextView overlayText;
+    private android.widget.ProgressBar overlayBar;
+    private android.widget.LinearLayout overlayLayout;
+    private Runnable hideOverlay = () -> {
+        if (overlayLayout != null)
+            overlayLayout.setVisibility(android.view.View.GONE);
+    };
+
+    private void ensureOverlay() {
+        if (overlayLayout != null) return;
+        // Tao overlay layout
+        overlayLayout = new android.widget.LinearLayout(this);
+        overlayLayout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        overlayLayout.setGravity(android.view.Gravity.CENTER);
+        overlayLayout.setBackgroundColor(0xCC000000);
+        overlayLayout.setPadding(40, 24, 40, 24);
+        // Text hien thi phan tram
+        overlayText = new android.widget.TextView(this);
+        overlayText.setTextColor(0xFFFFFFFF);
+        overlayText.setTextSize(18);
+        overlayText.setGravity(android.view.Gravity.CENTER);
+        // Progress bar
+        overlayBar = new android.widget.ProgressBar(this,
+            null, android.R.attr.progressBarStyleHorizontal);
+        overlayBar.setMax(100);
+        android.widget.LinearLayout.LayoutParams barParams =
+            new android.widget.LinearLayout.LayoutParams(300, 16);
+        barParams.topMargin = 8;
+        overlayLayout.addView(overlayText);
+        overlayLayout.addView(overlayBar, barParams);
+        // Them vao root view
+        android.widget.FrameLayout.LayoutParams params =
+            new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+        params.gravity = android.view.Gravity.CENTER;
+        android.view.ViewGroup root =
+            (android.view.ViewGroup) getWindow().getDecorView()
+                .findViewById(android.R.id.content);
+        root.addView(overlayLayout, params);
+    }
+
+    private void showOverlay(String label, int percent) {
+        ensureOverlay();
+        overlayLayout.setVisibility(android.view.View.VISIBLE);
+        overlayText.setText(label + ": " + percent + "%");
+        overlayBar.setProgress(percent);
+        handler.removeCallbacks(hideOverlay);
+        handler.postDelayed(hideOverlay, 1500);
+    }
+
     private void adjustBrightness(float delta) {
         WindowManager.LayoutParams p = getWindow().getAttributes();
         if (p.screenBrightness < 0) p.screenBrightness = 0.5f;
         p.screenBrightness = Math.max(0.01f, Math.min(1.0f, p.screenBrightness + delta));
         getWindow().setAttributes(p);
-        Toast.makeText(this, "Sang: " + (int)(p.screenBrightness*100) + "%", Toast.LENGTH_SHORT).show();
+        showOverlay("☀ Sáng", (int)(p.screenBrightness * 100));
     }
 
     private void adjustVolume(float delta) {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
         int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
         int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-        am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, Math.min(max, (int)(cur + delta * max))), AudioManager.FLAG_SHOW_UI);
+        int next = Math.max(0, Math.min(max, (int)(cur + delta * max)));
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0);
+        showOverlay("🔊 Âm lượng", (int)((float)next / max * 100));
     }
 
     private void togglePlayPause() {
