@@ -718,64 +718,108 @@ public class PlayerActivity extends AppCompatActivity {
         return -1;
     }
 
-    // Overlay hien thi volume/brightness
-    private android.widget.TextView overlayText;
-    private android.widget.ProgressBar overlayBar;
-    private android.widget.LinearLayout overlayLayout;
-    private Runnable hideOverlay = () -> {
-        if (overlayLayout != null)
-            overlayLayout.setVisibility(android.view.View.GONE);
-    };
+    // Overlay trai (do sang) va phai (am luong)
+    private android.widget.LinearLayout overlayBrightness;
+    private android.widget.LinearLayout overlayVolume;
+    private android.widget.TextView tvBrightnessVal;
+    private android.widget.TextView tvVolumeVal;
+    private android.widget.ProgressBar barBrightness;
+    private android.widget.ProgressBar barVolume;
 
-    private void ensureOverlay() {
-        if (overlayLayout != null) return;
-        // Tao overlay layout
-        overlayLayout = new android.widget.LinearLayout(this);
-        overlayLayout.setOrientation(android.widget.LinearLayout.VERTICAL);
-        overlayLayout.setGravity(android.view.Gravity.CENTER);
-        overlayLayout.setBackgroundColor(0xCC000000);
-        overlayLayout.setPadding(40, 24, 40, 24);
-        // Text hien thi phan tram
-        overlayText = new android.widget.TextView(this);
-        overlayText.setTextColor(0xFFFFFFFF);
-        overlayText.setTextSize(18);
-        overlayText.setGravity(android.view.Gravity.CENTER);
-        // Progress bar
-        overlayBar = new android.widget.ProgressBar(this,
+    private android.widget.LinearLayout makeOverlay(boolean isLeft) {
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        layout.setGravity(android.view.Gravity.CENTER);
+        layout.setBackgroundColor(0xBB000000);
+        layout.setPadding(24, 20, 24, 20);
+        // Icon + percent
+        android.widget.TextView tv = new android.widget.TextView(this);
+        tv.setTextColor(0xFFFFFFFF);
+        tv.setTextSize(15);
+        tv.setGravity(android.view.Gravity.CENTER);
+        tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        // Vertical progress bar (dung ProgressBar xoay 270 do)
+        android.widget.ProgressBar pb = new android.widget.ProgressBar(this,
             null, android.R.attr.progressBarStyleHorizontal);
-        overlayBar.setMax(100);
-        android.widget.LinearLayout.LayoutParams barParams =
-            new android.widget.LinearLayout.LayoutParams(300, 16);
-        barParams.topMargin = 8;
-        overlayLayout.addView(overlayText);
-        overlayLayout.addView(overlayBar, barParams);
-        // Them vao root view
-        android.widget.FrameLayout.LayoutParams params =
+        pb.setMax(100);
+        pb.setProgressTintList(android.content.res.ColorStateList.valueOf(
+            isLeft ? 0xFFFFD700 : 0xFF4FC3F7));
+        android.widget.LinearLayout.LayoutParams pbp =
+            new android.widget.LinearLayout.LayoutParams(16, 180);
+        pbp.topMargin = 10;
+        pbp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        // Xoay thanh progress thanh doc
+        pb.setRotation(270f);
+        layout.addView(tv);
+        layout.addView(pb, pbp);
+        layout.setVisibility(android.view.View.GONE);
+        layout.setTag(tv);
+        layout.setTag(R.id.btn_filter, pb);
+        // Vi tri: trai hoac phai, giua chieu doc
+        android.widget.FrameLayout.LayoutParams fp =
             new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
-        params.gravity = android.view.Gravity.CENTER;
-        android.view.ViewGroup root =
-            (android.view.ViewGroup) getWindow().getDecorView()
-                .findViewById(android.R.id.content);
-        root.addView(overlayLayout, params);
+        fp.gravity = android.view.Gravity.CENTER_VERTICAL |
+            (isLeft ? android.view.Gravity.START : android.view.Gravity.END);
+        fp.setMarginStart(isLeft ? 32 : 0);
+        fp.setMarginEnd(isLeft ? 0 : 32);
+        android.view.ViewGroup root = (android.view.ViewGroup)
+            getWindow().getDecorView().findViewById(android.R.id.content);
+        root.addView(layout, fp);
+        return layout;
     }
 
-    private void showOverlay(String label, int percent) {
-        ensureOverlay();
-        overlayLayout.setVisibility(android.view.View.VISIBLE);
-        overlayText.setText(label + ": " + percent + "%");
-        overlayBar.setProgress(percent);
-        handler.removeCallbacks(hideOverlay);
-        handler.postDelayed(hideOverlay, 1500);
+    private void ensureOverlays() {
+        if (overlayBrightness == null) {
+            overlayBrightness = makeOverlay(true);
+            tvBrightnessVal = (android.widget.TextView) overlayBrightness.getTag();
+            barBrightness = (android.widget.ProgressBar)
+                overlayBrightness.getTag(R.id.btn_filter);
+        }
+        if (overlayVolume == null) {
+            overlayVolume = makeOverlay(false);
+            tvVolumeVal = (android.widget.TextView) overlayVolume.getTag();
+            barVolume = (android.widget.ProgressBar)
+                overlayVolume.getTag(R.id.btn_filter);
+        }
     }
+
+    private void showBrightnessOverlay(int percent) {
+        ensureOverlays();
+        tvBrightnessVal.setText("☀
+" + percent + "%");
+        barBrightness.setProgress(percent);
+        overlayBrightness.setVisibility(android.view.View.VISIBLE);
+        handler.removeCallbacks(hideBrightness);
+        handler.postDelayed(hideBrightness, 1500);
+    }
+
+    private void showVolumeOverlay(int percent) {
+        ensureOverlays();
+        tvVolumeVal.setText("🔊
+" + percent + "%");
+        barVolume.setProgress(percent);
+        overlayVolume.setVisibility(android.view.View.VISIBLE);
+        handler.removeCallbacks(hideVolume);
+        handler.postDelayed(hideVolume, 1500);
+    }
+
+    private Runnable hideBrightness = () -> {
+        if (overlayBrightness != null)
+            overlayBrightness.setVisibility(android.view.View.GONE);
+    };
+    private Runnable hideVolume = () -> {
+        if (overlayVolume != null)
+            overlayVolume.setVisibility(android.view.View.GONE);
+    };
 
     private void adjustBrightness(float delta) {
         WindowManager.LayoutParams p = getWindow().getAttributes();
         if (p.screenBrightness < 0) p.screenBrightness = 0.5f;
         p.screenBrightness = Math.max(0.01f, Math.min(1.0f, p.screenBrightness + delta));
         getWindow().setAttributes(p);
-        showOverlay("☀ Sáng", (int)(p.screenBrightness * 100));
+        showBrightnessOverlay((int)(p.screenBrightness * 100));
     }
 
     private void adjustVolume(float delta) {
@@ -785,7 +829,7 @@ public class PlayerActivity extends AppCompatActivity {
         int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
         int next = Math.max(0, Math.min(max, (int)(cur + delta * max)));
         am.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0);
-        showOverlay("🔊 Âm lượng", (int)((float)next / max * 100));
+        showVolumeOverlay((int)((float) next / max * 100));
     }
 
     private void togglePlayPause() {
