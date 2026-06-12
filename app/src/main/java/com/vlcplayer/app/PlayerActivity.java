@@ -797,7 +797,6 @@ public class PlayerActivity extends AppCompatActivity {
     private void showVolumeOverlay(int percent) {
         ensureOverlays();
         tvVolumeVal.setText("VOL\n" + percent + "%");
-" + percent + "%");
         barVolume.setProgress(percent);
         overlayVolume.setVisibility(android.view.View.VISIBLE);
         handler.removeCallbacks(hideVolume);
