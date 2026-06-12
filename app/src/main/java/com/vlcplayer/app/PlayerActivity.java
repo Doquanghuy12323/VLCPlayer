@@ -787,8 +787,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showBrightnessOverlay(int percent) {
         ensureOverlays();
-        tvBrightnessVal.setText("☀
-" + percent + "%");
+        tvBrightnessVal.setText("SANG\n" + percent + "%");
         barBrightness.setProgress(percent);
         overlayBrightness.setVisibility(android.view.View.VISIBLE);
         handler.removeCallbacks(hideBrightness);
@@ -797,7 +796,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showVolumeOverlay(int percent) {
         ensureOverlays();
-        tvVolumeVal.setText("🔊
+        tvVolumeVal.setText("VOL\n" + percent + "%");
 " + percent + "%");
         barVolume.setProgress(percent);
         overlayVolume.setVisibility(android.view.View.VISIBLE);
