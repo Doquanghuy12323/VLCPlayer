@@ -721,6 +721,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     // Overlay trai (do sang) va phai (am luong)
+    private float volumeLevel = -1f; // Track float giong brightness
     private android.widget.LinearLayout overlayBrightness;
     private android.widget.LinearLayout overlayVolume;
     private android.widget.TextView tvBrightnessVal;
@@ -832,11 +833,15 @@ public class PlayerActivity extends AppCompatActivity {
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         if (am == null) return;
         int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-        int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-        // Math.round tranh floor asymmetry (luon giam)
-        int next = Math.max(0, Math.min(max, Math.round(cur + delta * max)));
+        // Khoi tao volumeLevel lan dau giong brightness
+        if (volumeLevel < 0) {
+            volumeLevel = (float) am.getStreamVolume(AudioManager.STREAM_MUSIC) / max;
+        }
+        // Cong don float lien tuc giong brightness
+        volumeLevel = Math.max(0f, Math.min(1f, volumeLevel + delta));
+        int next = Math.round(volumeLevel * max);
         am.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0);
-        showVolumeOverlay((int)((float) next / max * 100));
+        showVolumeOverlay((int)(volumeLevel * 100));
     }
 
     private void togglePlayPause() {
