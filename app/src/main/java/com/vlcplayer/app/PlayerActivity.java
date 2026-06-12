@@ -257,7 +257,8 @@ public class PlayerActivity extends AppCompatActivity {
         gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onScroll(MotionEvent e1, MotionEvent e2, float dX, float dY) {
                 if (isLocked || e1 == null) return false;
-                float delta = Math.max(-0.015f, Math.min(0.015f, dY * 0.003f));
+                // Up = tang, down = giam - khong clamp
+                float delta = dY * 0.003f;
                 if (e1.getX() < screenW / 2f) adjustBrightness(delta);
                 else adjustVolume(delta);
                 return true;
@@ -832,7 +833,8 @@ public class PlayerActivity extends AppCompatActivity {
         if (am == null) return;
         int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
         int cur = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-        int next = Math.max(0, Math.min(max, (int)(cur + delta * max)));
+        // Math.round tranh floor asymmetry (luon giam)
+        int next = Math.max(0, Math.min(max, Math.round(cur + delta * max)));
         am.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0);
         showVolumeOverlay((int)((float) next / max * 100));
     }
