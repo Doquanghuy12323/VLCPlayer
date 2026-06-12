@@ -257,8 +257,9 @@ public class PlayerActivity extends AppCompatActivity {
         gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onScroll(MotionEvent e1, MotionEvent e2, float dX, float dY) {
                 if (isLocked || e1 == null) return false;
-                if (e1.getX() < screenW / 2f) adjustBrightness(dY * 0.005f);
-                else adjustVolume(dY * 0.005f);
+                float delta = Math.max(-0.015f, Math.min(0.015f, dY * 0.003f));
+                if (e1.getX() < screenW / 2f) adjustBrightness(delta);
+                else adjustVolume(delta);
                 return true;
             }
             @Override public boolean onDoubleTap(MotionEvent e) {
@@ -730,40 +731,46 @@ public class PlayerActivity extends AppCompatActivity {
         android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
         layout.setOrientation(android.widget.LinearLayout.VERTICAL);
         layout.setGravity(android.view.Gravity.CENTER);
-        layout.setBackgroundColor(0xBB000000);
-        layout.setPadding(24, 20, 24, 20);
-        // Icon + percent
+        layout.setBackgroundColor(0xCC000000);
+        layout.setPadding(28, 18, 28, 18);
+
+        // Label text
         android.widget.TextView tv = new android.widget.TextView(this);
         tv.setTextColor(0xFFFFFFFF);
-        tv.setTextSize(15);
+        tv.setTextSize(13);
         tv.setGravity(android.view.Gravity.CENTER);
         tv.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        // Vertical progress bar (dung ProgressBar xoay 270 do)
+
+        // Horizontal progress bar - khong xoay, khong bi clip
         android.widget.ProgressBar pb = new android.widget.ProgressBar(this,
             null, android.R.attr.progressBarStyleHorizontal);
         pb.setMax(100);
         pb.setProgressTintList(android.content.res.ColorStateList.valueOf(
             isLeft ? 0xFFFFD700 : 0xFF4FC3F7));
+        pb.setProgressBackgroundTintList(
+            android.content.res.ColorStateList.valueOf(0x44FFFFFF));
         android.widget.LinearLayout.LayoutParams pbp =
-            new android.widget.LinearLayout.LayoutParams(16, 180);
+            new android.widget.LinearLayout.LayoutParams(180, 10);
         pbp.topMargin = 10;
         pbp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
-        // Xoay thanh progress thanh doc
-        pb.setRotation(270f);
+
         layout.addView(tv);
         layout.addView(pb, pbp);
         layout.setVisibility(android.view.View.GONE);
         layout.setTag(tv);
         layout.setTag(R.id.btn_filter, pb);
-        // Vi tri: trai hoac phai, giua chieu doc
+
+        // Vi tri cach man hinh 60dp de khong bi che
         android.widget.FrameLayout.LayoutParams fp =
             new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
         fp.gravity = android.view.Gravity.CENTER_VERTICAL |
             (isLeft ? android.view.Gravity.START : android.view.Gravity.END);
-        fp.setMarginStart(isLeft ? 32 : 0);
-        fp.setMarginEnd(isLeft ? 0 : 32);
+        int margin = (int)(60 * getResources().getDisplayMetrics().density);
+        fp.setMarginStart(isLeft ? margin : 0);
+        fp.setMarginEnd(isLeft ? 0 : margin);
+
         android.view.ViewGroup root = (android.view.ViewGroup)
             getWindow().getDecorView().findViewById(android.R.id.content);
         root.addView(layout, fp);
@@ -787,7 +794,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showBrightnessOverlay(int percent) {
         ensureOverlays();
-        tvBrightnessVal.setText("SANG\n" + percent + "%");
+        tvBrightnessVal.setText("Bright\n" + percent + "%");
         barBrightness.setProgress(percent);
         overlayBrightness.setVisibility(android.view.View.VISIBLE);
         handler.removeCallbacks(hideBrightness);
@@ -796,7 +803,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showVolumeOverlay(int percent) {
         ensureOverlays();
-        tvVolumeVal.setText("VOL\n" + percent + "%");
+        tvVolumeVal.setText("Volume\n" + percent + "%");
         barVolume.setProgress(percent);
         overlayVolume.setVisibility(android.view.View.VISIBLE);
         handler.removeCallbacks(hideVolume);
