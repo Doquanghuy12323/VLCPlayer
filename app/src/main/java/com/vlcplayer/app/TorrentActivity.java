@@ -91,7 +91,8 @@ public class TorrentActivity extends AppCompatActivity {
                 fos.close();
                 is.close();
                 // Dung file:// path
-                etMagnet.setText("file://" + tmp.getAbsolutePath());
+                // Pass duong dan tuyet doi - TorrentStream tu xu ly
+                etMagnet.setText(tmp.getAbsolutePath());
                 Toast.makeText(this, "Da chon: " + tmp.getName(),
                     Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
@@ -109,8 +110,11 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        if (!url.startsWith("magnet:") && !url.startsWith("http")
-                && !url.startsWith("file://")) {
+        boolean isValid = url.startsWith("magnet:")
+            || url.startsWith("http")
+            || url.startsWith("file://")
+            || url.startsWith("/"); // duong dan tuyet doi
+        if (!isValid) {
             Toast.makeText(this, "Link khong hop le", Toast.LENGTH_SHORT).show();
             return;
         }
