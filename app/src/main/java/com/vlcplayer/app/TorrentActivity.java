@@ -16,7 +16,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -25,14 +24,15 @@ import java.util.List;
 
 public class TorrentActivity extends AppCompatActivity {
 
+    private static final int REQ_PICK_TORRENT = 2001;
+
     private EditText etMagnet;
-    private ImageButton btnPickFile;
     private Button btnStream, btnStop;
+    private ImageButton btnPickFile;
     private ProgressBar progressBar;
     private TextView tvStatus, tvSpeed;
     private RecyclerView rvDownloaded;
     private TorrentManager torrentManager;
-    private DownloadedAdapter adapter;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -44,92 +44,74 @@ public class TorrentActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_torrent);
 
-        etMagnet   = findViewById(R.id.et_magnet);
+        etMagnet    = findViewById(R.id.et_magnet);
+        btnStream   = findViewById(R.id.btn_stream);
+        btnStop     = findViewById(R.id.btn_stop);
         btnPickFile = findViewById(R.id.btn_pick_file);
-        btnStream  = findViewById(R.id.btn_stream);
-        btnStop    = findViewById(R.id.btn_stop);
         progressBar = findViewById(R.id.progress_bar);
-        tvStatus   = findViewById(R.id.tv_status);
-        tvSpeed    = findViewById(R.id.tv_speed);
+        tvStatus    = findViewById(R.id.tv_status);
+        tvSpeed     = findViewById(R.id.tv_speed);
         rvDownloaded = findViewById(R.id.rv_downloaded);
 
-        findViewById(R.id.btn_back).setOnClickListener(v -> finish());
-
         torrentManager = new TorrentManager(this);
-
         rvDownloaded.setLayoutManager(new LinearLayoutManager(this));
         loadDownloadedFiles();
 
-        btnPickFile.setOnClickListener(v -> pickTorrentFile());
-        btnStream.setOnClickListener(v -> startLiveStream());
+        findViewById(R.id.btn_back).setOnClickListener(v -> finish());
+        btnStream.setOnClickListener(v -> startStream());
         btnStop.setOnClickListener(v -> stopStream());
+        btnPickFile.setOnClickListener(v -> pickTorrentFile());
 
-        processExternalIntent(getIntent());
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        processExternalIntent(intent);
-    }
-
-    private void processExternalIntent(Intent intent) {
-        if (intent == null) return;
-        if (Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
-            Uri data = intent.getData();
-            if ("magnet".equals(data.getScheme())) {
-                etMagnet.setText(data.toString());
-                startLiveStream();
-            } else {
-                handleTorrentUri(data);
-            }
-        } else {
-            String magnet = intent.getStringExtra("magnet");
-            if (magnet != null) etMagnet.setText(magnet);
-        }
+        // Nhan magnet tu intent khac
+        String magnet = getIntent().getStringExtra("magnet");
+        if (magnet != null) etMagnet.setText(magnet);
     }
 
     private void pickTorrentFile() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("*/*");
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, 1001);
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("*/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(i, REQ_PICK_TORRENT);
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 1001 && resultCode == RESULT_OK && data != null) {
-            handleTorrentUri(data.getData());
-        }
-    }
-
-    private void handleTorrentUri(Uri uri) {
-        if (uri == null) return;
-        try {
-            InputStream is = getContentResolver().openInputStream(uri);
-            File tempFile = new File(getCacheDir(), "local_stream.torrent");
-            FileOutputStream fos = new FileOutputStream(tempFile);
-            byte[] buffer = new byte[1024];
-            int length;
-            while ((length = is.read(buffer)) > 0) {
-                fos.write(buffer, 0, length);
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == REQ_PICK_TORRENT && res == RESULT_OK && data != null) {
+            Uri uri = data.getData();
+            if (uri == null) return;
+            try {
+                // Copy file .torrent vao cache roi stream
+                InputStream is = getContentResolver().openInputStream(uri);
+                File tmp = new File(getCacheDir(), "stream.torrent");
+                FileOutputStream fos = new FileOutputStream(tmp);
+                byte[] buf = new byte[4096];
+                int len;
+                while ((len = is.read(buf)) > 0) fos.write(buf, 0, len);
+                fos.close();
+                is.close();
+                // Dung file:// path
+                etMagnet.setText("file://" + tmp.getAbsolutePath());
+                Toast.makeText(this, "Da chon: " + tmp.getName(),
+                    Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Loi: " + e.getMessage(),
+                    Toast.LENGTH_SHORT).show();
             }
-            fos.close();
-            is.close();
-
-            etMagnet.setText(tempFile.getAbsolutePath());
-            startLiveStream();
-        } catch (Exception e) {
-            Toast.makeText(this, "Lỗi đọc file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void startLiveStream() {
+    private void startStream() {
         String url = etMagnet.getText().toString().trim();
         if (url.isEmpty()) {
-            Toast.makeText(this, "Nhập magnet link hoặc chọn file", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Nhap magnet link hoac chon file .torrent",
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (!url.startsWith("magnet:") && !url.startsWith("http")
+                && !url.startsWith("file://")) {
+            Toast.makeText(this, "Link khong hop le", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -137,7 +119,7 @@ public class TorrentActivity extends AppCompatActivity {
         btnStop.setEnabled(true);
         progressBar.setProgress(0);
         progressBar.setVisibility(View.VISIBLE);
-        tvStatus.setText("Đang kết nối...");
+        tvStatus.setText("Dang ket noi...");
         tvSpeed.setText("");
 
         torrentManager.startStream(url, new TorrentManager.Callback() {
@@ -147,41 +129,44 @@ public class TorrentActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onProgress(int progress, float dlSpeed, float ulSpeed) {
+            public void onProgress(int progress, float dlSpeed) {
                 progressBar.setProgress(progress);
-                tvStatus.setText("Đang tải đệm: " + progress + "%");
-                tvSpeed.setText(String.format("↓ %.1f KB/s", dlSpeed));
+                tvSpeed.setText(String.format("%.1f KB/s", dlSpeed));
             }
 
             @Override
-            public void onReady(String localHttpUrl) {
-                tvStatus.setText("Sẵn sàng xem!");
+            public void onReady(String videoPath) {
+                tvStatus.setText("San sang xem!");
                 progressBar.setVisibility(View.GONE);
-
-                // Gửi cổng local HTTP Stream bảo mật sang cho màn hình phát LibVLC chạy mượt mà
+                // Mo video bang VLC
                 Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
-                intent.putExtra(PlayerActivity.EXTRA_URI, localHttpUrl);
-                intent.putExtra(PlayerActivity.EXTRA_TITLE, "Torrent Live Stream");
+                intent.putExtra(PlayerActivity.EXTRA_URI, "file://" + videoPath);
+                intent.putExtra(PlayerActivity.EXTRA_TITLE,
+                    new File(videoPath).getName());
                 startActivity(intent);
-
                 loadDownloadedFiles();
             }
 
             @Override
             public void onError(String error) {
-                tvStatus.setText("Lỗi: " + error);
-                progressBar.setVisibility(View.GONE);
-                btnStream.setEnabled(true);
-                btnStop.setEnabled(false);
-                Toast.makeText(TorrentActivity.this, "Lỗi: " + error, Toast.LENGTH_LONG).show();
+                runOnUiThread(() -> {
+                    tvStatus.setText("Loi: " + error);
+                    progressBar.setVisibility(View.GONE);
+                    btnStream.setEnabled(true);
+                    btnStop.setEnabled(false);
+                    Toast.makeText(TorrentActivity.this,
+                        "Loi: " + error, Toast.LENGTH_LONG).show();
+                });
             }
 
             @Override
             public void onStopped() {
-                tvStatus.setText("Đã dừng");
-                progressBar.setVisibility(View.GONE);
-                btnStream.setEnabled(true);
-                btnStop.setEnabled(false);
+                runOnUiThread(() -> {
+                    tvStatus.setText("Da dung");
+                    progressBar.setVisibility(View.GONE);
+                    btnStream.setEnabled(true);
+                    btnStop.setEnabled(false);
+                });
             }
         });
     }
@@ -191,59 +176,60 @@ public class TorrentActivity extends AppCompatActivity {
         btnStream.setEnabled(true);
         btnStop.setEnabled(false);
         progressBar.setVisibility(View.GONE);
-        tvStatus.setText("Đã dừng");
-        tvSpeed.setText("");
+        tvStatus.setText("Da dung");
     }
 
     private void loadDownloadedFiles() {
-        File dir = getExternalFilesDir("torrents");
+        File dir = new File(getExternalFilesDir(null), "torrents");
         List<File> files = new ArrayList<>();
-        if (dir != null && dir.exists()) {
+        if (dir.exists()) {
             File[] all = dir.listFiles();
             if (all != null) {
                 for (File f : all) {
-                    String name = f.getName().toLowerCase();
-                    if (name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".avi")) {
+                    String n = f.getName().toLowerCase();
+                    if (n.endsWith(".mp4") || n.endsWith(".mkv")
+                            || n.endsWith(".avi") || n.endsWith(".mov")
+                            || n.endsWith(".webm")) {
                         files.add(f);
                     }
                 }
             }
         }
-        adapter = new DownloadedAdapter(files);
-        rvDownloaded.setAdapter(adapter);
+        rvDownloaded.setAdapter(new DownloadedAdapter(files));
     }
 
     class DownloadedAdapter extends RecyclerView.Adapter<DownloadedAdapter.VH> {
-        private List<File> files;
-        DownloadedAdapter(List<File> files) { this.files = files; }
+        private List<File> data;
+        DownloadedAdapter(List<File> d) { data = d; }
 
         @Override public VH onCreateViewHolder(ViewGroup p, int t) {
-            View v = LayoutInflater.from(p.getContext()).inflate(R.layout.item_torrent_file, p, false);
+            View v = LayoutInflater.from(p.getContext())
+                .inflate(R.layout.item_torrent_file, p, false);
             return new VH(v);
         }
 
         @Override public void onBindViewHolder(VH h, int pos) {
-            File f = files.get(pos);
+            File f = data.get(pos);
             h.tvName.setText(f.getName());
             h.tvSize.setText(formatSize(f.length()));
             h.itemView.setOnClickListener(v -> {
-                Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
-                intent.putExtra(PlayerActivity.EXTRA_URI, "file://" + f.getAbsolutePath());
-                intent.putExtra(PlayerActivity.EXTRA_TITLE, f.getName());
-                startActivity(intent);
+                Intent i = new Intent(TorrentActivity.this, PlayerActivity.class);
+                i.putExtra(PlayerActivity.EXTRA_URI, "file://" + f.getAbsolutePath());
+                i.putExtra(PlayerActivity.EXTRA_TITLE, f.getName());
+                startActivity(i);
             });
             h.btnDelete.setOnClickListener(v -> {
                 f.delete();
-                files.remove(pos);
+                data.remove(pos);
                 notifyItemRemoved(pos);
             });
         }
 
-        @Override public int getItemCount() { return files.size(); }
+        @Override public int getItemCount() { return data.size(); }
 
         class VH extends RecyclerView.ViewHolder {
             TextView tvName, tvSize;
-            ImageButton btnDelete;
+            android.widget.ImageButton btnDelete;
             VH(View v) {
                 super(v);
                 tvName = v.findViewById(R.id.tv_name);
@@ -253,10 +239,15 @@ public class TorrentActivity extends AppCompatActivity {
         }
     }
 
-    private String formatSize(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024*1024) return String.format("%.1f KB", bytes/1024f);
-        if (bytes < 1024*1024*1024) return String.format("%.1f MB", bytes/(1024f*1024));
-        return String.format("%.2f GB", bytes/(1024f*1024*1024));
+    private String formatSize(long b) {
+        if (b < 1024) return b + " B";
+        if (b < 1024*1024) return String.format("%.1f KB", b/1024f);
+        if (b < 1024*1024*1024) return String.format("%.1f MB", b/(1024f*1024));
+        return String.format("%.2f GB", b/(1024f*1024*1024));
+    }
+
+    @Override protected void onDestroy() {
+        super.onDestroy();
+        // Khong stop khi thoat - tiep tuc tai nen
     }
 }
