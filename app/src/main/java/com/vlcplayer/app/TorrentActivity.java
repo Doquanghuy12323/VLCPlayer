@@ -92,7 +92,7 @@ public class TorrentActivity extends AppCompatActivity {
                 is.close();
                 // Dung file:// path
                 // Pass duong dan tuyet doi - TorrentStream tu xu ly
-                etMagnet.setText(tmp.getAbsolutePath());
+                etMagnet.setText("file://" + tmp.getAbsolutePath());
                 Toast.makeText(this, "Da chon: " + tmp.getName(),
                     Toast.LENGTH_SHORT).show();
             } catch (Exception e) {

@@ -61,32 +61,36 @@ public class TorrentManager {
 
         String url = torrentUrl.trim();
 
-        // Magnet: them tracker neu chua co
         if (url.startsWith("magnet:")) {
-            if (!url.contains("tr=")) {
+            // Magnet: them tracker co URL encode dung
+            if (!url.contains("&tr=")) {
                 StringBuilder sb = new StringBuilder(url);
                 for (String tr : TRACKERS) {
-                    sb.append("&tr=").append(tr);
+                    try {
+                        sb.append("&tr=")
+                          .append(java.net.URLEncoder.encode(tr, "UTF-8"));
+                    } catch (Exception ignored) {
+                        sb.append("&tr=").append(tr);
+                    }
                 }
                 url = sb.toString();
             }
-        }
-        // File: strip file:// va kiem tra ton tai
-        else if (url.startsWith("file://")) {
-            url = url.substring(7);
-            File f = new File(url);
+        } else {
+            // File .torrent: chuan hoa ve duong dan tuyet doi
+            String path = url;
+            if (path.startsWith("file:///")) {
+                path = path.substring(7); // giu 1 slash: /storage/...
+            } else if (path.startsWith("file://")) {
+                path = path.substring(7);
+            }
+            // path bay gio la /storage/... hoac /data/...
+            File f = new File(path);
             if (!f.exists() || f.length() == 0) {
-                cb.onError("File torrent khong hop le: " + url);
+                cb.onError("Khong doc duoc file: " + path);
                 return;
             }
-        }
-        // Duong dan tuyet doi khong co prefix
-        else if (url.startsWith("/")) {
-            File f = new File(url);
-            if (!f.exists() || f.length() == 0) {
-                cb.onError("File khong tim thay: " + url);
-                return;
-            }
+            // TorrentStream can file:// + absolute path
+            url = "file://" + f.getAbsolutePath();
         }
 
         final String finalUrl = url;
@@ -110,9 +114,12 @@ public class TorrentManager {
                     msg = e.getMessage();
                     // Giai thich loi ro hon
                     if (msg.contains("No torrent info")) {
-                        msg = "Khong doc duoc torrent. Kiem tra magnet link hoac file .torrent";
-                    } else if (msg.contains("Connection refused")) {
-                        msg = "Khong ket noi duoc tracker. Kiem tra mang";
+                        msg = "Khong doc duoc noi dung torrent.\n"
+                            + "- Magnet: kiem tra ket noi mang\n"
+                            + "- File .torrent: file co the bi hong";
+                    } else if (msg.contains("Connection refused")
+                            || msg.contains("timed out")) {
+                        msg = "Khong ket noi duoc. Kiem tra mang hoac doi thu";
                     }
                 }
                 final String finalMsg = msg;
