@@ -67,7 +67,8 @@ public class TorrentManager {
                     // File .torrent - dung TorrentInfo
                     File f = new File(finalUrl);
                     if (!f.exists()) {
-                        handler.post(() -> cb.onError("File khong tim thay: " + finalUrl));
+                        final String errPath = finalUrl;
+                        handler.post(() -> cb.onError("File khong tim thay: " + errPath));
                         return;
                     }
                     TorrentInfo ti = new TorrentInfo(f);
