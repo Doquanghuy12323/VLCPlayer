@@ -63,32 +63,58 @@ public class TorrentManager {
                     finalUrl = finalUrl.substring(7);
                 }
 
-                if (finalUrl.startsWith("/") || finalUrl.startsWith("file")) {
-                    // File .torrent
-                    File f = new File(finalUrl.replace("file://", ""));
+                if (finalUrl.startsWith("/")) {
+                    // File .torrent - dung TorrentInfo
+                    File f = new File(finalUrl);
                     if (!f.exists()) {
-                        handler.post(() -> cb.onError("File khong tim thay"));
+                        handler.post(() -> cb.onError("File khong tim thay: " + finalUrl));
                         return;
                     }
                     TorrentInfo ti = new TorrentInfo(f);
-                    handle = session.download(ti, saveDir);
-                } else if (finalUrl.startsWith("magnet:")) {
-                    // Them tracker
-                    if (!finalUrl.contains("&tr=")) {
-                        finalUrl += "&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce"
-                            + "&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce"
-                            + "&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce";
+                    // download() tra ve void - lay handle qua find()
+                    session.download(ti, saveDir);
+                    // Doi session nhan torrent
+                    long t = System.currentTimeMillis();
+                    while (handle == null && System.currentTimeMillis() - t < 10000) {
+                        handle = session.find(ti.infoHash());
+                        if (handle == null) Thread.sleep(200);
                     }
-                    session.fetchMagnet(finalUrl, 30, saveDir);
-                    handle = session.find(org.libtorrent4j.Sha1Hash.parseHex(
-                        extractInfoHash(finalUrl)));
+                } else if (finalUrl.startsWith("magnet:")) {
+                    // Lay info hash tu magnet
+                    String infoHash = extractInfoHash(finalUrl);
+                    if (infoHash.isEmpty()) {
+                        handler.post(() -> cb.onError("Magnet link khong hop le"));
+                        return;
+                    }
+                    // Them trackers
+                    String magnetUrl = finalUrl;
+                    if (!magnetUrl.contains("&tr=")) {
+                        magnetUrl += "&tr=udp://tracker.opentrackr.org:1337/announce"
+                            + "&tr=udp://open.stealth.si:80/announce"
+                            + "&tr=udp://tracker.torrent.eu.org:451/announce"
+                            + "&tr=udp://9.rarbg.to:2920/announce";
+                    }
+                    // fetchMagnet block cho den khi co metadata
+                    handler.post(() -> cb.onStatusUpdate("Dang tim kiem metadata..."));
+                    byte[] data = session.fetchMagnet(magnetUrl, 30, saveDir);
+                    if (data == null) {
+                        handler.post(() -> cb.onError("Khong tim duoc metadata. Kiem tra mang hoac magnet link"));
+                        return;
+                    }
+                    org.libtorrent4j.Sha1Hash sha1 =
+                        org.libtorrent4j.Sha1Hash.parseHex(infoHash);
+                    long t = System.currentTimeMillis();
+                    while (handle == null && System.currentTimeMillis() - t < 5000) {
+                        handle = session.find(sha1);
+                        if (handle == null) Thread.sleep(200);
+                    }
                 } else {
                     handler.post(() -> cb.onError("Link khong hop le"));
                     return;
                 }
 
                 if (handle == null) {
-                    handler.post(() -> cb.onError("Khong the bat dau download"));
+                    handler.post(() -> cb.onError("Khong khoi tao duoc torrent handle"));
                     return;
                 }
 
