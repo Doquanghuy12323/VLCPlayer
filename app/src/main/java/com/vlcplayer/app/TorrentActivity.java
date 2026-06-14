@@ -33,6 +33,7 @@ public class TorrentActivity extends AppCompatActivity {
     private TextView tvStatus, tvSpeed;
     private RecyclerView rvDownloaded;
     private TorrentManager torrentManager;
+    private android.widget.Switch swStreamOnly;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -54,6 +55,7 @@ public class TorrentActivity extends AppCompatActivity {
         rvDownloaded = findViewById(R.id.rv_downloaded);
 
         torrentManager = new TorrentManager(this);
+        swStreamOnly = findViewById(R.id.sw_stream_only);
         rvDownloaded.setLayoutManager(new LinearLayoutManager(this));
         loadDownloadedFiles();
 
@@ -126,6 +128,9 @@ public class TorrentActivity extends AppCompatActivity {
         tvStatus.setText("Dang ket noi...");
         tvSpeed.setText("");
 
+        // Set stream only mode truoc khi bat dau
+        torrentManager.setStreamOnly(
+            swStreamOnly != null && swStreamOnly.isChecked());
         torrentManager.startStream(url, new TorrentManager.Callback() {
             @Override
             public void onStatusUpdate(String status) {

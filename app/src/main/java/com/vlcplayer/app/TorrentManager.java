@@ -36,6 +36,7 @@ public class TorrentManager {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final File saveDir;
     private boolean readyCalled = false;
+    private boolean streamOnly = false; // Xoa sau khi xem
 
     public TorrentManager(Context ctx) {
         saveDir = new File(ctx.getExternalFilesDir(null), "torrents");
@@ -49,6 +50,10 @@ public class TorrentManager {
                 } catch (Exception e) {}
             }).start();
         }
+    }
+
+    public void setStreamOnly(boolean streamOnly) {
+        this.streamOnly = streamOnly;
     }
 
     public void startStream(String url, Callback cb) {
@@ -175,7 +180,14 @@ public class TorrentManager {
                             if (video.exists() && video.length() >= 5L*1024*1024) {
                                 readyCalled = true;
                                 final String vpath = video.getAbsolutePath();
+                                final boolean doDelete = streamOnly;
                                 handler.post(() -> cb.onReady(vpath));
+                                // Neu stream mode: xoa file sau 1 gio
+                                if (doDelete) {
+                                    handler.postDelayed(() -> {
+                                        try { new File(vpath).delete(); } catch (Exception ignored) {}
+                                    }, 60 * 60 * 1000L);
+                                }
                             }
                         }
                     }
