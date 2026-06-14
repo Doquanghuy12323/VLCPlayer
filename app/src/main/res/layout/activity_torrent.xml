@@ -112,7 +112,7 @@
 
                 </LinearLayout>
 
-                <Button
+            <Button
                     android:id="@+id/btn_stream"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
