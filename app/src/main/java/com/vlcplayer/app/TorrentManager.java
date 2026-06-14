@@ -3,12 +3,22 @@ package com.vlcplayer.app;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import com.github.se_bastiaan.torrentstream.StreamStatus;
-import com.github.se_bastiaan.torrentstream.Torrent;
-import com.github.se_bastiaan.torrentstream.TorrentOptions;
-import com.github.se_bastiaan.torrentstream.TorrentStream;
-import com.github.se_bastiaan.torrentstream.listeners.TorrentListener;
+import org.libtorrent4j.AlertListener;
+import org.libtorrent4j.SessionManager;
+import org.libtorrent4j.SessionParams;
+import org.libtorrent4j.TorrentHandle;
+import org.libtorrent4j.TorrentInfo;
+import org.libtorrent4j.TorrentStatus;
+import org.libtorrent4j.alerts.Alert;
+import org.libtorrent4j.alerts.AlertType;
+import org.libtorrent4j.alerts.TorrentFinishedAlert;
+import org.libtorrent4j.alerts.TorrentErrorAlert;
+import org.libtorrent4j.alerts.MetadataReceivedAlert;
+import org.libtorrent4j.alerts.BlockFinishedAlert;
+import org.libtorrent4j.swig.settings_pack;
 import java.io.File;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class TorrentManager {
 
@@ -20,154 +30,154 @@ public class TorrentManager {
         default void onStatusUpdate(String status) {}
     }
 
-    private static final String[] TRACKERS = {
-        "udp://tracker.opentrackr.org:1337/announce",
-        "udp://open.stealth.si:80/announce",
-        "udp://tracker.torrent.eu.org:451/announce",
-        "udp://tracker.leechers-paradise.org:6969/announce",
-        "udp://tracker.coppersurfer.tk:6969/announce",
-        "udp://9.rarbg.to:2920/announce",
-        "udp://exodus.desync.com:6969/announce"
-    };
-
-    private static TorrentStream torrentStream;
-    private TorrentListener currentListener;
+    private static SessionManager session;
+    private TorrentHandle handle;
+    private Timer monitorTimer;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final File saveDir;
+    private boolean readyCalled = false;
 
     public TorrentManager(Context ctx) {
-        if (torrentStream == null) {
-            File saveDir = new File(ctx.getExternalFilesDir(null), "torrents");
-            if (!saveDir.exists()) saveDir.mkdirs();
-            TorrentOptions options = new TorrentOptions.Builder()
-                .saveLocation(saveDir)
-                .removeFilesAfterStop(false)
-                .maxConnections(200)
-                .build();
-            torrentStream = TorrentStream.init(options);
+        saveDir = new File(ctx.getExternalFilesDir(null), "torrents");
+        if (!saveDir.exists()) saveDir.mkdirs();
+
+        if (session == null) {
+            session = new SessionManager();
+            new Thread(() -> {
+                try {
+                    session.start();
+                } catch (Exception e) {}
+            }).start();
         }
     }
 
-    public void startStream(String torrentUrl, Callback cb) {
-        // Xoa listener cu
-        if (currentListener != null) {
-            torrentStream.removeListener(currentListener);
-            currentListener = null;
-        }
-        // Stop stream cu
-        if (torrentStream.isStreaming()) {
-            torrentStream.stopStream();
-            try { Thread.sleep(300); } catch (Exception ignored) {}
-        }
-
-        String url = torrentUrl.trim();
-
-        if (url.startsWith("magnet:")) {
-            // Magnet: them tracker co URL encode dung
-            if (!url.contains("&tr=")) {
-                StringBuilder sb = new StringBuilder(url);
-                for (String tr : TRACKERS) {
-                    try {
-                        sb.append("&tr=")
-                          .append(java.net.URLEncoder.encode(tr, "UTF-8"));
-                    } catch (Exception ignored) {
-                        sb.append("&tr=").append(tr);
-                    }
-                }
-                url = sb.toString();
-            }
-        } else {
-            // File .torrent: chuan hoa ve duong dan tuyet doi
-            String path = url;
-            if (path.startsWith("file:///")) {
-                path = path.substring(7); // giu 1 slash: /storage/...
-            } else if (path.startsWith("file://")) {
-                path = path.substring(7);
-            }
-            // path bay gio la /storage/... hoac /data/...
-            File f = new File(path);
-            if (!f.exists() || f.length() == 0) {
-                cb.onError("Khong doc duoc file: " + path);
-                return;
-            }
-            // TorrentStream can file:// + absolute path
-            url = "file://" + f.getAbsolutePath();
-        }
-
-        final String finalUrl = url;
+    public void startStream(String url, Callback cb) {
+        stop();
+        readyCalled = false;
         handler.post(() -> cb.onStatusUpdate("Dang khoi dong..."));
 
-        currentListener = new TorrentListener() {
-            @Override
-            public void onStreamPrepared(Torrent torrent) {
-                handler.post(() -> cb.onStatusUpdate("Dang chuan bi torrent..."));
-            }
-
-            @Override
-            public void onStreamStarted(Torrent torrent) {
-                handler.post(() -> cb.onStatusUpdate("Dang tim peers..."));
-            }
-
-            @Override
-            public void onStreamError(Torrent torrent, Exception e) {
-                String msg = "Loi stream";
-                if (e != null && e.getMessage() != null) {
-                    msg = e.getMessage();
-                    // Giai thich loi ro hon
-                    if (msg.contains("No torrent info")) {
-                        msg = "Khong doc duoc noi dung torrent.\n"
-                            + "- Magnet: kiem tra ket noi mang\n"
-                            + "- File .torrent: file co the bi hong";
-                    } else if (msg.contains("Connection refused")
-                            || msg.contains("timed out")) {
-                        msg = "Khong ket noi duoc. Kiem tra mang hoac doi thu";
-                    }
+        new Thread(() -> {
+            try {
+                String finalUrl = url.trim();
+                if (finalUrl.startsWith("file://")) {
+                    finalUrl = finalUrl.substring(7);
                 }
-                final String finalMsg = msg;
-                handler.post(() -> cb.onError(finalMsg));
-            }
 
-            @Override
-            public void onStreamReady(Torrent torrent) {
-                if (torrent == null || torrent.getVideoFile() == null) {
-                    handler.post(() -> cb.onError("Khong tim thay file video trong torrent"));
+                if (finalUrl.startsWith("/") || finalUrl.startsWith("file")) {
+                    // File .torrent
+                    File f = new File(finalUrl.replace("file://", ""));
+                    if (!f.exists()) {
+                        handler.post(() -> cb.onError("File khong tim thay"));
+                        return;
+                    }
+                    TorrentInfo ti = new TorrentInfo(f);
+                    handle = session.download(ti, saveDir);
+                } else if (finalUrl.startsWith("magnet:")) {
+                    // Them tracker
+                    if (!finalUrl.contains("&tr=")) {
+                        finalUrl += "&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce"
+                            + "&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce"
+                            + "&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce";
+                    }
+                    session.fetchMagnet(finalUrl, 30, saveDir);
+                    handle = session.find(org.libtorrent4j.Sha1Hash.parseHex(
+                        extractInfoHash(finalUrl)));
+                } else {
+                    handler.post(() -> cb.onError("Link khong hop le"));
                     return;
                 }
-                File video = torrent.getVideoFile();
-                handler.post(() -> cb.onReady(video.getAbsolutePath()));
-            }
 
-            @Override
-            public void onStreamProgress(Torrent torrent, StreamStatus status) {
-                int pct = (int)(status.progress * 100);
-                float dlKb = status.downloadSpeed / 1024f;
-                handler.post(() -> {
-                    cb.onProgress(pct, dlKb);
-                    cb.onStatusUpdate("Tai: " + pct + "% | "
-                        + (int)dlKb + " KB/s | Seeds: " + status.seeds);
-                });
-            }
+                if (handle == null) {
+                    handler.post(() -> cb.onError("Khong the bat dau download"));
+                    return;
+                }
 
-            @Override
-            public void onStreamStopped() {
-                handler.post(() -> cb.onStopped());
-            }
-        };
+                startMonitor(cb);
 
-        torrentStream.addListener(currentListener);
-        torrentStream.startStream(finalUrl);
+            } catch (Exception e) {
+                handler.post(() -> cb.onError(
+                    e.getMessage() != null ? e.getMessage() : "Loi khong xac dinh"));
+            }
+        }).start();
+    }
+
+    private String extractInfoHash(String magnet) {
+        try {
+            int start = magnet.indexOf("btih:") + 5;
+            int end = magnet.indexOf("&", start);
+            return end == -1 ? magnet.substring(start) : magnet.substring(start, end);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void startMonitor(Callback cb) {
+        monitorTimer = new Timer();
+        monitorTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override public void run() {
+                if (handle == null || !handle.isValid()) return;
+                try {
+                    TorrentStatus st = handle.status();
+                    int pct = (int)(st.progress() * 100);
+                    float dlKb = st.downloadRate() / 1024f;
+                    int peers = st.numPeers();
+                    String state = st.state().toString();
+
+                    handler.post(() -> {
+                        cb.onProgress(pct, dlKb);
+                        cb.onStatusUpdate(state + " | " + pct + "% | "
+                            + (int)dlKb + " KB/s | Peers:" + peers);
+                    });
+
+                    // Bat dau xem khi da tai duoc 2MB
+                    if (!readyCalled && pct > 0) {
+                        TorrentInfo ti = handle.torrentFile();
+                        if (ti != null) {
+                            File video = findVideoFile(ti);
+                            if (video != null && video.length() > 2 * 1024 * 1024) {
+                                readyCalled = true;
+                                handler.post(() -> cb.onReady(video.getAbsolutePath()));
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }, 1000, 1000);
+    }
+
+    private File findVideoFile(TorrentInfo ti) {
+        try {
+            org.libtorrent4j.FileStorage fs = ti.files();
+            int best = 0;
+            long max = 0;
+            for (int i = 0; i < fs.numFiles(); i++) {
+                String name = fs.fileName(i).toLowerCase();
+                if ((name.endsWith(".mp4") || name.endsWith(".mkv")
+                        || name.endsWith(".avi") || name.endsWith(".webm"))
+                        && fs.fileSize(i) > max) {
+                    max = fs.fileSize(i);
+                    best = i;
+                }
+            }
+            if (max == 0) return null;
+            return new File(saveDir, fs.filePath(best));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public void stop() {
-        if (currentListener != null) {
-            torrentStream.removeListener(currentListener);
-            currentListener = null;
+        if (monitorTimer != null) {
+            monitorTimer.cancel();
+            monitorTimer = null;
         }
-        if (torrentStream != null && torrentStream.isStreaming()) {
-            torrentStream.stopStream();
+        if (handle != null && handle.isValid()) {
+            try { session.remove(handle); } catch (Exception ignored) {}
+            handle = null;
         }
     }
 
     public boolean isStreaming() {
-        return torrentStream != null && torrentStream.isStreaming();
+        return handle != null && handle.isValid();
     }
 }
