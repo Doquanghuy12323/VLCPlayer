@@ -259,6 +259,6 @@ public class TorrentActivity extends AppCompatActivity {
 
     @Override protected void onDestroy() {
         super.onDestroy();
-        // Khong stop khi thoat - tiep tuc tai nen
+        // Giu download trong nen
     }
 }

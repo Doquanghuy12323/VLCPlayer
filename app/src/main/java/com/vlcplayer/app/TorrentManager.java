@@ -119,6 +119,13 @@ public class TorrentManager {
                     return;
                 }
 
+                // Bat sequential download: uu tien tai tu dau file
+                // Dam bao VLC co the play ngay khi co du buffer
+                try {
+                    handle.setFlags(
+                        org.libtorrent4j.TorrentFlags.SEQUENTIAL_DOWNLOAD);
+                } catch (Exception ignored) {}
+
                 startMonitor(cb);
 
             } catch (Exception e) {
@@ -156,14 +163,19 @@ public class TorrentManager {
                             + (int)dlKb + " KB/s | Peers:" + peers);
                     });
 
-                    // Bat dau xem khi da tai duoc 2MB
                     if (!readyCalled && pct > 0) {
                         TorrentInfo ti = handle.torrentFile();
                         if (ti != null) {
                             File video = findVideoFile(ti);
-                            if (video != null && video.length() > 2 * 1024 * 1024) {
+                            // Fix null check truoc
+                            if (video == null) return;
+                            // Chi can 5MB la VLC co the bat dau phat
+                            // Sequential download dam bao phan dau file
+                            // duoc tai truoc nen VLC play duoc ngay
+                            if (video.exists() && video.length() >= 5L*1024*1024) {
                                 readyCalled = true;
-                                handler.post(() -> cb.onReady(video.getAbsolutePath()));
+                                final String vpath = video.getAbsolutePath();
+                                handler.post(() -> cb.onReady(vpath));
                             }
                         }
                     }
@@ -194,10 +206,19 @@ public class TorrentManager {
     }
 
     public void stop() {
+        // Chi dung monitor, KHONG xoa torrent
+        // De file nang tiep tuc tai trong nen va luu duoc
         if (monitorTimer != null) {
             monitorTimer.cancel();
             monitorTimer = null;
         }
+        // Khong remove handle - giu download tiep tuc
+        readyCalled = false;
+    }
+
+    // Goi khi thoat app hoan toan
+    public void destroy() {
+        stop();
         if (handle != null && handle.isValid()) {
             try { session.remove(handle); } catch (Exception ignored) {}
             handle = null;
