@@ -39,7 +39,7 @@ public class TorrentManager {
     private boolean streamOnly = false; // Xoa sau khi xem
 
     public TorrentManager(Context ctx) {
-        saveDir = new File(ctx.getExternalFilesDir(null), "torrents");
+        saveDir = new File(ctx.getCacheDir(), "torrent_stream");
         if (!saveDir.exists()) saveDir.mkdirs();
 
         if (session == null) {

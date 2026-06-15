@@ -264,6 +264,25 @@ public class TorrentActivity extends AppCompatActivity {
 
     @Override protected void onDestroy() {
         super.onDestroy();
-        // Giu download trong nen
+        torrentManager.stop();
+        // Xoa het file torrent khi thoat
+        new Thread(() -> {
+            try {
+                File cacheDir = new File(getCacheDir(), "torrent_stream");
+                deleteDir(cacheDir);
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    private void deleteDir(File dir) {
+        if (dir == null || !dir.exists()) return;
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isDirectory()) deleteDir(f);
+                else f.delete();
+            }
+        }
+        dir.delete();
     }
 }
