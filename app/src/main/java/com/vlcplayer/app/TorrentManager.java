@@ -196,6 +196,23 @@ public class TorrentManager {
         }, 1000, 1000);
     }
 
+    // Uu tien tai 10 piece dau + cuoi (header + index)
+    private void prioritizeFirstPieces(TorrentInfo ti) {
+        if (handle == null || !handle.isValid()) return;
+        try {
+            int numPieces = ti.numPieces();
+            // Uu tien 10 piece dau
+            int first = Math.min(10, numPieces);
+            for (int i = 0; i < first; i++) {
+                handle.piecePriority(i, org.libtorrent4j.Priority.TOP_PRIORITY);
+            }
+            // Uu tien 3 piece cuoi (mkv/mp4 index)
+            for (int i = Math.max(0, numPieces - 3); i < numPieces; i++) {
+                handle.piecePriority(i, org.libtorrent4j.Priority.TOP_PRIORITY);
+            }
+        } catch (Exception ignored) {}
+    }
+
     private File findVideoFile(TorrentInfo ti) {
         try {
             org.libtorrent4j.FileStorage fs = ti.files();
