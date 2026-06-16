@@ -128,9 +128,6 @@ public class TorrentActivity extends AppCompatActivity {
         tvStatus.setText("Dang ket noi...");
         tvSpeed.setText("");
 
-        // Set stream only mode truoc khi bat dau
-        torrentManager.setStreamOnly(
-            swStreamOnly != null && swStreamOnly.isChecked());
         torrentManager.startStream(url, new TorrentManager.Callback() {
             @Override
             public void onStatusUpdate(String status) {
