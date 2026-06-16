@@ -3,20 +3,14 @@ package com.vlcplayer.app;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import org.libtorrent4j.AlertListener;
 import org.libtorrent4j.SessionManager;
-import org.libtorrent4j.SessionParams;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
 import org.libtorrent4j.TorrentStatus;
-import org.libtorrent4j.alerts.Alert;
-import org.libtorrent4j.alerts.AlertType;
-import org.libtorrent4j.alerts.TorrentFinishedAlert;
-import org.libtorrent4j.alerts.TorrentErrorAlert;
-import org.libtorrent4j.alerts.MetadataReceivedAlert;
-import org.libtorrent4j.alerts.BlockFinishedAlert;
-import org.libtorrent4j.swig.settings_pack;
-import java.io.File;
+import org.libtorrent4j.TorrentFlags;
+import org.libtorrent4j.Priority;
+import java.io.*;
+import java.net.*;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -24,7 +18,7 @@ public class TorrentManager {
 
     public interface Callback {
         void onProgress(int progress, float downloadSpeed);
-        void onReady(String videoPath);
+        void onReady(String url); // HTTP URL cho VLC
         void onError(String error);
         void onStopped();
         default void onStatusUpdate(String status) {}
@@ -33,27 +27,21 @@ public class TorrentManager {
     private static SessionManager session;
     private TorrentHandle handle;
     private Timer monitorTimer;
+    private ServerSocket proxyServer;
+    private Thread proxyThread;
+    private boolean proxyRunning = false;
+    private int proxyPort = 0;
+    private boolean readyCalled = false;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final File saveDir;
-    private boolean readyCalled = false;
-    private boolean streamOnly = false; // Xoa sau khi xem
 
     public TorrentManager(Context ctx) {
         saveDir = new File(ctx.getCacheDir(), "torrent_stream");
         if (!saveDir.exists()) saveDir.mkdirs();
-
         if (session == null) {
             session = new SessionManager();
-            new Thread(() -> {
-                try {
-                    session.start();
-                } catch (Exception e) {}
-            }).start();
+            new Thread(() -> { try { session.start(); } catch (Exception e) {} }).start();
         }
-    }
-
-    public void setStreamOnly(boolean streamOnly) {
-        this.streamOnly = streamOnly;
     }
 
     public void startStream(String url, Callback cb) {
@@ -64,35 +52,19 @@ public class TorrentManager {
         new Thread(() -> {
             try {
                 String finalUrl = url.trim();
-                if (finalUrl.startsWith("file://")) {
-                    finalUrl = finalUrl.substring(7);
-                }
+                if (finalUrl.startsWith("file://")) finalUrl = finalUrl.substring(7);
 
                 if (finalUrl.startsWith("/")) {
-                    // File .torrent - dung TorrentInfo
                     File f = new File(finalUrl);
-                    if (!f.exists()) {
-                        final String errPath = finalUrl;
-                        handler.post(() -> cb.onError("File khong tim thay: " + errPath));
-                        return;
-                    }
+                    if (!f.exists()) { handler.post(() -> cb.onError("File khong tim thay")); return; }
                     TorrentInfo ti = new TorrentInfo(f);
-                    // download() tra ve void - lay handle qua find()
                     session.download(ti, saveDir);
-                    // Doi session nhan torrent
                     long t = System.currentTimeMillis();
                     while (handle == null && System.currentTimeMillis() - t < 10000) {
                         handle = session.find(ti.infoHash());
                         if (handle == null) Thread.sleep(200);
                     }
                 } else if (finalUrl.startsWith("magnet:")) {
-                    // Lay info hash tu magnet
-                    String infoHash = extractInfoHash(finalUrl);
-                    if (infoHash.isEmpty()) {
-                        handler.post(() -> cb.onError("Magnet link khong hop le"));
-                        return;
-                    }
-                    // Them trackers
                     String magnetUrl = finalUrl;
                     if (!magnetUrl.contains("&tr=")) {
                         magnetUrl += "&tr=udp://tracker.opentrackr.org:1337/announce"
@@ -100,54 +72,144 @@ public class TorrentManager {
                             + "&tr=udp://tracker.torrent.eu.org:451/announce"
                             + "&tr=udp://9.rarbg.to:2920/announce";
                     }
-                    // fetchMagnet block cho den khi co metadata
-                    handler.post(() -> cb.onStatusUpdate("Dang tim kiem metadata..."));
+                    String infoHash = extractInfoHash(finalUrl);
+                    handler.post(() -> cb.onStatusUpdate("Dang tim metadata..."));
                     byte[] data = session.fetchMagnet(magnetUrl, 30, saveDir);
-                    if (data == null) {
-                        handler.post(() -> cb.onError("Khong tim duoc metadata. Kiem tra mang hoac magnet link"));
-                        return;
-                    }
-                    org.libtorrent4j.Sha1Hash sha1 =
-                        org.libtorrent4j.Sha1Hash.parseHex(infoHash);
-                    long t = System.currentTimeMillis();
-                    while (handle == null && System.currentTimeMillis() - t < 5000) {
-                        handle = session.find(sha1);
-                        if (handle == null) Thread.sleep(200);
+                    if (data == null) { handler.post(() -> cb.onError("Khong tim duoc metadata")); return; }
+                    if (!infoHash.isEmpty()) {
+                        long t = System.currentTimeMillis();
+                        while (handle == null && System.currentTimeMillis() - t < 5000) {
+                            try { handle = session.find(org.libtorrent4j.Sha1Hash.parseHex(infoHash)); } catch (Exception e) {}
+                            if (handle == null) Thread.sleep(200);
+                        }
                     }
                 } else {
-                    handler.post(() -> cb.onError("Link khong hop le"));
-                    return;
+                    handler.post(() -> cb.onError("Link khong hop le")); return;
                 }
 
-                if (handle == null) {
-                    handler.post(() -> cb.onError("Khong khoi tao duoc torrent handle"));
-                    return;
-                }
+                if (handle == null) { handler.post(() -> cb.onError("Khong bat duoc torrent handle")); return; }
 
-                // Bat sequential download: uu tien tai tu dau file
-                // Dam bao VLC co the play ngay khi co du buffer
+                // Sequential download - tai tu dau den cuoi
+                try { handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD); } catch (Exception ignored) {}
+
+                // Uu tien piece dau va cuoi
                 try {
-                    handle.setFlags(
-                        org.libtorrent4j.TorrentFlags.SEQUENTIAL_DOWNLOAD);
+                    TorrentInfo ti = handle.torrentFile();
+                    if (ti != null) {
+                        int n = ti.numPieces();
+                        for (int i = 0; i < Math.min(15, n); i++)
+                            handle.piecePriority(i, Priority.TOP_PRIORITY);
+                        for (int i = Math.max(0, n-5); i < n; i++)
+                            handle.piecePriority(i, Priority.TOP_PRIORITY);
+                    }
                 } catch (Exception ignored) {}
 
-                startMonitor(cb);
+                // Bat HTTP proxy server
+                startProxy(cb);
 
             } catch (Exception e) {
-                handler.post(() -> cb.onError(
-                    e.getMessage() != null ? e.getMessage() : "Loi khong xac dinh"));
+                handler.post(() -> cb.onError(e.getMessage() != null ? e.getMessage() : "Loi"));
             }
         }).start();
     }
 
-    private String extractInfoHash(String magnet) {
-        try {
-            int start = magnet.indexOf("btih:") + 5;
-            int end = magnet.indexOf("&", start);
-            return end == -1 ? magnet.substring(start) : magnet.substring(start, end);
-        } catch (Exception e) {
-            return "";
-        }
+    private void startProxy(Callback cb) throws Exception {
+        proxyServer = new ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"));
+        proxyPort = proxyServer.getLocalPort();
+        proxyRunning = true;
+
+        proxyThread = new Thread(() -> {
+            while (proxyRunning) {
+                try {
+                    Socket client = proxyServer.accept();
+                    new Thread(() -> handleClient(client)).start();
+                } catch (Exception e) {
+                    if (!proxyRunning) break;
+                }
+            }
+        });
+        proxyThread.start();
+
+        startMonitor(cb);
+    }
+
+    private void handleClient(Socket socket) {
+        try (Socket s = socket;
+             BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()));
+             OutputStream out = s.getOutputStream()) {
+
+            String line = in.readLine();
+            if (line == null) return;
+
+            long rangeStart = 0, rangeEnd = -1;
+            while ((line = in.readLine()) != null && !line.isEmpty()) {
+                if (line.toLowerCase().startsWith("range: bytes=")) {
+                    String r = line.substring(13).trim();
+                    int dash = r.indexOf("-");
+                    if (dash != -1) {
+                        try { rangeStart = Long.parseLong(r.substring(0, dash)); } catch (Exception e) {}
+                        try { rangeEnd = dash + 1 < r.length() ? Long.parseLong(r.substring(dash + 1)) : -1; } catch (Exception e) {}
+                    }
+                }
+            }
+
+            if (handle == null || !handle.isValid()) {
+                out.write("HTTP/1.1 503 Not Ready\r\n\r\n".getBytes());
+                return;
+            }
+
+            TorrentInfo ti = handle.torrentFile();
+            if (ti == null) { out.write("HTTP/1.1 503 No Info\r\n\r\n".getBytes()); return; }
+
+            File video = findVideoFile(ti);
+            if (video == null) { out.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes()); return; }
+
+            // Uu tien piece can thiet cho seek
+            int pieceSize = ti.pieceLength();
+            if (pieceSize > 0) {
+                int startPiece = (int)(rangeStart / pieceSize);
+                int endPiece = (int)(Math.min(rangeStart + 512*1024, ti.totalSize()) / pieceSize);
+                for (int i = startPiece; i <= Math.min(endPiece, startPiece + 8); i++) {
+                    try { handle.piecePriority(i, Priority.TOP_PRIORITY); } catch (Exception ignored) {}
+                }
+
+                // Doi piece bat dau san sang (toi da 30 giay)
+                long deadline = System.currentTimeMillis() + 30000;
+                while (System.currentTimeMillis() < deadline && proxyRunning) {
+                    if (handle.havePiece(startPiece)) break;
+                    Thread.sleep(100);
+                }
+            }
+
+            long fileLen = video.length();
+            if (rangeEnd == -1 || rangeEnd >= fileLen) rangeEnd = fileLen - 1;
+            long contentLen = rangeEnd - rangeStart + 1;
+
+            String ext = video.getName().toLowerCase();
+            String mime = ext.endsWith(".mkv") ? "video/x-matroska" :
+                          ext.endsWith(".mp4") ? "video/mp4" : "video/octet-stream";
+
+            String header = "HTTP/1.1 206 Partial Content\r\n"
+                + "Content-Type: " + mime + "\r\n"
+                + "Content-Range: bytes " + rangeStart + "-" + rangeEnd + "/" + fileLen + "\r\n"
+                + "Content-Length: " + contentLen + "\r\n"
+                + "Accept-Ranges: bytes\r\n"
+                + "Connection: close\r\n\r\n";
+            out.write(header.getBytes());
+
+            try (RandomAccessFile raf = new RandomAccessFile(video, "r")) {
+                raf.seek(rangeStart);
+                byte[] buf = new byte[65536];
+                long left = contentLen;
+                while (proxyRunning && left > 0) {
+                    int toRead = (int) Math.min(buf.length, left);
+                    int read = raf.read(buf, 0, toRead);
+                    if (read == -1) { Thread.sleep(200); continue; }
+                    out.write(buf, 0, read);
+                    left -= read;
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private void startMonitor(Callback cb) {
@@ -160,34 +222,24 @@ public class TorrentManager {
                     int pct = (int)(st.progress() * 100);
                     float dlKb = st.downloadRate() / 1024f;
                     int peers = st.numPeers();
-                    String state = st.state().toString();
 
                     handler.post(() -> {
                         cb.onProgress(pct, dlKb);
-                        cb.onStatusUpdate(state + " | " + pct + "% | "
-                            + (int)dlKb + " KB/s | Peers:" + peers);
+                        cb.onStatusUpdate("Tai: " + pct + "% | " + (int)dlKb + " KB/s | Peers: " + peers);
                     });
 
-                    if (!readyCalled && pct > 0) {
+                    // Phat khi piece dau tien da co
+                    if (!readyCalled) {
                         TorrentInfo ti = handle.torrentFile();
                         if (ti != null) {
                             File video = findVideoFile(ti);
-                            // Fix null check truoc
-                            if (video == null) return;
-                            // Chi can 5MB la VLC co the bat dau phat
-                            // Sequential download dam bao phan dau file
-                            // duoc tai truoc nen VLC play duoc ngay
-                            if (video.exists() && video.length() >= 5L*1024*1024) {
+                            // Co 2MB va piece 0 da tai
+                            if (video != null && video.exists()
+                                    && video.length() >= 2L*1024*1024
+                                    && handle.havePiece(0)) {
                                 readyCalled = true;
-                                final String vpath = video.getAbsolutePath();
-                                final boolean doDelete = streamOnly;
-                                handler.post(() -> cb.onReady(vpath));
-                                // Neu stream mode: xoa file sau 1 gio
-                                if (doDelete) {
-                                    handler.postDelayed(() -> {
-                                        try { new File(vpath).delete(); } catch (Exception ignored) {}
-                                    }, 60 * 60 * 1000L);
-                                }
+                                String streamUrl = "http://127.0.0.1:" + proxyPort + "/stream";
+                                handler.post(() -> cb.onReady(streamUrl));
                             }
                         }
                     }
@@ -196,65 +248,53 @@ public class TorrentManager {
         }, 1000, 1000);
     }
 
-    // Uu tien tai 10 piece dau + cuoi (header + index)
-    private void prioritizeFirstPieces(TorrentInfo ti) {
-        if (handle == null || !handle.isValid()) return;
-        try {
-            int numPieces = ti.numPieces();
-            // Uu tien 10 piece dau
-            int first = Math.min(10, numPieces);
-            for (int i = 0; i < first; i++) {
-                handle.piecePriority(i, org.libtorrent4j.Priority.TOP_PRIORITY);
-            }
-            // Uu tien 3 piece cuoi (mkv/mp4 index)
-            for (int i = Math.max(0, numPieces - 3); i < numPieces; i++) {
-                handle.piecePriority(i, org.libtorrent4j.Priority.TOP_PRIORITY);
-            }
-        } catch (Exception ignored) {}
-    }
-
     private File findVideoFile(TorrentInfo ti) {
         try {
             org.libtorrent4j.FileStorage fs = ti.files();
-            int best = 0;
-            long max = 0;
+            int best = 0; long max = 0;
             for (int i = 0; i < fs.numFiles(); i++) {
                 String name = fs.fileName(i).toLowerCase();
                 if ((name.endsWith(".mp4") || name.endsWith(".mkv")
                         || name.endsWith(".avi") || name.endsWith(".webm"))
                         && fs.fileSize(i) > max) {
-                    max = fs.fileSize(i);
-                    best = i;
+                    max = fs.fileSize(i); best = i;
                 }
             }
             if (max == 0) return null;
             return new File(saveDir, fs.filePath(best));
-        } catch (Exception e) {
-            return null;
-        }
+        } catch (Exception e) { return null; }
+    }
+
+    private String extractInfoHash(String magnet) {
+        try {
+            int s = magnet.indexOf("btih:") + 5;
+            int e = magnet.indexOf("&", s);
+            return e == -1 ? magnet.substring(s) : magnet.substring(s, e);
+        } catch (Exception e) { return ""; }
     }
 
     public void stop() {
-        // Chi dung monitor, KHONG xoa torrent
-        // De file nang tiep tuc tai trong nen va luu duoc
-        if (monitorTimer != null) {
-            monitorTimer.cancel();
-            monitorTimer = null;
-        }
-        // Khong remove handle - giu download tiep tuc
+        proxyRunning = false;
+        if (monitorTimer != null) { monitorTimer.cancel(); monitorTimer = null; }
+        try { if (proxyServer != null) proxyServer.close(); } catch (Exception ignored) {}
         readyCalled = false;
     }
 
-    // Goi khi thoat app hoan toan
     public void destroy() {
         stop();
         if (handle != null && handle.isValid()) {
             try { session.remove(handle); } catch (Exception ignored) {}
             handle = null;
         }
+        deleteDir(saveDir);
     }
 
-    public boolean isStreaming() {
-        return handle != null && handle.isValid();
+    private void deleteDir(File dir) {
+        if (dir == null || !dir.exists()) return;
+        File[] files = dir.listFiles();
+        if (files != null) for (File f : files) { if (f.isDirectory()) deleteDir(f); else f.delete(); }
+        dir.delete();
     }
+
+    public boolean isStreaming() { return handle != null && handle.isValid(); }
 }

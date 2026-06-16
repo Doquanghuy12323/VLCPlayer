@@ -144,22 +144,15 @@ public class TorrentActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onReady(String videoPath) {
+            public void onReady(String streamUrl) {
                 runOnUiThread(() -> {
                     tvStatus.setText("San sang xem!");
                     progressBar.setVisibility(View.GONE);
-                    loadDownloadedFiles();
-                    // Delay 1 giay de dam bao file on dinh truoc khi mo
-                    new android.os.Handler(android.os.Looper.getMainLooper())
-                        .postDelayed(() -> {
-                            Intent intent = new Intent(
-                                TorrentActivity.this, PlayerActivity.class);
-                            intent.putExtra(PlayerActivity.EXTRA_URI,
-                                "file://" + videoPath);
-                            intent.putExtra(PlayerActivity.EXTRA_TITLE,
-                                new File(videoPath).getName());
-                            startActivity(intent);
-                        }, 1000);
+                    // Mo VLC voi HTTP URL - stream truc tiep
+                    Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
+                    intent.putExtra(PlayerActivity.EXTRA_URI, streamUrl);
+                    intent.putExtra(PlayerActivity.EXTRA_TITLE, "Torrent Stream");
+                    startActivity(intent);
                 });
             }
 
