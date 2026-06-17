@@ -145,7 +145,7 @@ public class TorrentManager {
             }
             // Uu tien cao cho 5 piece cuoi (index/moov atom)
             for (int i = Math.max(0, n - 5); i < n; i++) {
-                handle.piecePriority(i, Priority.HIGH);
+                handle.piecePriority(i, Priority.TOP_PRIORITY);
             }
         } catch (Exception ignored) {}
     }
