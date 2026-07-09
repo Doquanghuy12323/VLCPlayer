@@ -13,6 +13,7 @@ import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -33,7 +34,7 @@ public class TorrentActivity extends AppCompatActivity {
     private TextView tvStatus, tvSpeed;
     private RecyclerView rvDownloaded;
     private TorrentManager torrentManager;
-    private android.widget.Switch swStreamOnly;
+    private TorrentManager.Callback torrentCallback;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -55,7 +56,6 @@ public class TorrentActivity extends AppCompatActivity {
         rvDownloaded = findViewById(R.id.rv_downloaded);
 
         torrentManager = new TorrentManager(this);
-        swStreamOnly = findViewById(R.id.sw_stream_only);
         rvDownloaded.setLayoutManager(new LinearLayoutManager(this));
         loadDownloadedFiles();
 
@@ -64,7 +64,6 @@ public class TorrentActivity extends AppCompatActivity {
         btnStop.setOnClickListener(v -> stopStream());
         btnPickFile.setOnClickListener(v -> pickTorrentFile());
 
-        // Nhan magnet tu intent khac
         String magnet = getIntent().getStringExtra("magnet");
         if (magnet != null) etMagnet.setText(magnet);
     }
@@ -83,7 +82,6 @@ public class TorrentActivity extends AppCompatActivity {
             Uri uri = data.getData();
             if (uri == null) return;
             try {
-                // Copy file .torrent vao cache roi stream
                 InputStream is = getContentResolver().openInputStream(uri);
                 File tmp = new File(getCacheDir(), "stream.torrent");
                 FileOutputStream fos = new FileOutputStream(tmp);
@@ -92,14 +90,10 @@ public class TorrentActivity extends AppCompatActivity {
                 while ((len = is.read(buf)) > 0) fos.write(buf, 0, len);
                 fos.close();
                 is.close();
-                // Dung file:// path
-                // Pass duong dan tuyet doi - TorrentStream tu xu ly
                 etMagnet.setText("file://" + tmp.getAbsolutePath());
-                Toast.makeText(this, "Da chon: " + tmp.getName(),
-                    Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Da chon: " + tmp.getName(), Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
-                Toast.makeText(this, "Loi: " + e.getMessage(),
-                    Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -107,15 +101,14 @@ public class TorrentActivity extends AppCompatActivity {
     private void startStream() {
         String url = etMagnet.getText().toString().trim();
         if (url.isEmpty()) {
-            Toast.makeText(this, "Nhap magnet link hoac chon file .torrent",
-                Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Nhap magnet link hoac chon file .torrent", Toast.LENGTH_SHORT).show();
             return;
         }
 
         boolean isValid = url.startsWith("magnet:")
             || url.startsWith("http")
             || url.startsWith("file://")
-            || url.startsWith("/"); // duong dan tuyet doi
+            || url.startsWith("/");
         if (!isValid) {
             Toast.makeText(this, "Link khong hop le", Toast.LENGTH_SHORT).show();
             return;
@@ -128,16 +121,23 @@ public class TorrentActivity extends AppCompatActivity {
         tvStatus.setText("Dang ket noi...");
         tvSpeed.setText("");
 
-        torrentManager.startStream(url, new TorrentManager.Callback() {
+        torrentCallback = new TorrentManager.Callback() {
             @Override
             public void onStatusUpdate(String status) {
-                tvStatus.setText(status);
+                runOnUiThread(() -> tvStatus.setText(status));
             }
 
             @Override
             public void onProgress(int progress, float dlSpeed) {
-                progressBar.setProgress(progress);
-                tvSpeed.setText(String.format("%.1f KB/s", dlSpeed));
+                runOnUiThread(() -> {
+                    progressBar.setProgress(progress);
+                    tvSpeed.setText(String.format("%.1f KB/s", dlSpeed));
+                });
+            }
+
+            @Override
+            public void onFilesFound(List<TorrentManager.VideoFileEntry> files) {
+                runOnUiThread(() -> showFilePicker(files));
             }
 
             @Override
@@ -145,7 +145,6 @@ public class TorrentActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     tvStatus.setText("San sang xem!");
                     progressBar.setVisibility(View.GONE);
-                    // Mo VLC voi HTTP URL - stream truc tiep
                     Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
                     intent.putExtra(PlayerActivity.EXTRA_URI, streamUrl);
                     intent.putExtra(PlayerActivity.EXTRA_TITLE, "Torrent Stream");
@@ -160,8 +159,7 @@ public class TorrentActivity extends AppCompatActivity {
                     progressBar.setVisibility(View.GONE);
                     btnStream.setEnabled(true);
                     btnStop.setEnabled(false);
-                    Toast.makeText(TorrentActivity.this,
-                        "Loi: " + error, Toast.LENGTH_LONG).show();
+                    Toast.makeText(TorrentActivity.this, "Loi: " + error, Toast.LENGTH_LONG).show();
                 });
             }
 
@@ -174,7 +172,34 @@ public class TorrentActivity extends AppCompatActivity {
                     btnStop.setEnabled(false);
                 });
             }
-        });
+        };
+
+        torrentManager.startStream(url, torrentCallback);
+    }
+
+    private void showFilePicker(List<TorrentManager.VideoFileEntry> files) {
+        tvStatus.setText("Torrent co " + files.size() + " video - chon file de xem");
+
+        String[] labels = new String[files.size()];
+        for (int i = 0; i < files.size(); i++) {
+            TorrentManager.VideoFileEntry f = files.get(i);
+            String shortName = f.name;
+            int slash = shortName.lastIndexOf('/');
+            if (slash >= 0) shortName = shortName.substring(slash + 1);
+            labels[i] = shortName + "  (" + formatSize(f.size) + ")";
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Chon video de xem")
+            .setItems(labels, (d, which) -> {
+                TorrentManager.VideoFileEntry chosen = files.get(which);
+                tvStatus.setText("Dang tai: " + chosen.name);
+                progressBar.setVisibility(View.VISIBLE);
+                torrentManager.selectFile(chosen.index, torrentCallback);
+            })
+            .setCancelable(false)
+            .setNegativeButton("Huy", (d, w) -> stopStream())
+            .show();
     }
 
     private void stopStream() {
@@ -186,22 +211,26 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     private void loadDownloadedFiles() {
-        File dir = new File(getExternalFilesDir(null), "torrents");
+        File dir = new File(getCacheDir(), "torrent_stream");
         List<File> files = new ArrayList<>();
-        if (dir.exists()) {
-            File[] all = dir.listFiles();
-            if (all != null) {
-                for (File f : all) {
-                    String n = f.getName().toLowerCase();
-                    if (n.endsWith(".mp4") || n.endsWith(".mkv")
-                            || n.endsWith(".avi") || n.endsWith(".mov")
-                            || n.endsWith(".webm")) {
-                        files.add(f);
-                    }
+        if (dir.exists()) collectVideoFiles(dir, files);
+        rvDownloaded.setAdapter(new DownloadedAdapter(files));
+    }
+
+    private void collectVideoFiles(File dir, List<File> out) {
+        File[] all = dir.listFiles();
+        if (all == null) return;
+        for (File f : all) {
+            if (f.isDirectory()) {
+                collectVideoFiles(f, out);
+            } else {
+                String n = f.getName().toLowerCase();
+                if (n.endsWith(".mp4") || n.endsWith(".mkv")
+                        || n.endsWith(".avi") || n.endsWith(".webm")) {
+                    out.add(f);
                 }
             }
         }
-        rvDownloaded.setAdapter(new DownloadedAdapter(files));
     }
 
     class DownloadedAdapter extends RecyclerView.Adapter<DownloadedAdapter.VH> {
@@ -235,7 +264,7 @@ public class TorrentActivity extends AppCompatActivity {
 
         class VH extends RecyclerView.ViewHolder {
             TextView tvName, tvSize;
-            android.widget.ImageButton btnDelete;
+            ImageButton btnDelete;
             VH(View v) {
                 super(v);
                 tvName = v.findViewById(R.id.tv_name);
@@ -254,25 +283,6 @@ public class TorrentActivity extends AppCompatActivity {
 
     @Override protected void onDestroy() {
         super.onDestroy();
-        torrentManager.stop();
-        // Xoa het file torrent khi thoat
-        new Thread(() -> {
-            try {
-                File cacheDir = new File(getCacheDir(), "torrent_stream");
-                deleteDir(cacheDir);
-            } catch (Exception ignored) {}
-        }).start();
-    }
-
-    private void deleteDir(File dir) {
-        if (dir == null || !dir.exists()) return;
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File f : files) {
-                if (f.isDirectory()) deleteDir(f);
-                else f.delete();
-            }
-        }
-        dir.delete();
+        torrentManager.destroy();
     }
 }
