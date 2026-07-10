@@ -62,15 +62,17 @@ public class TorrentManager {
     }
 
     public void startStream(String url, Callback cb) {
-        stop();
+        stop(); // xoa het torrent handle/state cu
         readyCalled = false;
-        cachedInfo = null;
-        selectedFileIndex = -1;
-        selectedVideoFile = null;
         handler.post(() -> cb.onStatusUpdate("Khoi dong..."));
 
         new Thread(() -> {
             try {
+                // Xoa file cache cu truoc khi tai torrent moi
+                // Tranh nham lan du lieu giua cac torrent khac nhau
+                deleteDir(saveDir);
+                saveDir.mkdirs();
+
                 String path = url.trim();
                 if (path.startsWith("file://")) path = path.substring(7);
 
@@ -406,17 +408,26 @@ public class TorrentManager {
         try { if (proxyServer != null && !proxyServer.isClosed()) proxyServer.close(); }
         catch (Exception ignored) {}
         readyCalled = false;
+
+        // Fix: PHAI xoa handle cu, neu khong startStream() se tuong
+        // da co handle va bo qua vong lap tim handle torrent moi
+        final TorrentHandle oldHandle = handle;
+        handle = null;
+        cachedInfo = null;
+        selectedFileIndex = -1;
+        selectedVideoFile = null;
+
+        if (oldHandle != null) {
+            new Thread(() -> {
+                try {
+                    if (oldHandle.isValid()) session.remove(oldHandle);
+                } catch (Exception ignored) {}
+            }).start();
+        }
     }
 
     public void destroy() {
-        stop();
-        if (handle != null && handle.isValid()) {
-            try { session.remove(handle); } catch (Exception ignored) {}
-        }
-        handle = null;
-        cachedInfo = null;
-        selectedVideoFile = null;
-        selectedFileIndex = -1;
+        stop(); // da xoa handle/cachedInfo o day roi
         deleteDir(saveDir);
     }
 
