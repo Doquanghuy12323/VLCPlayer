@@ -171,7 +171,11 @@ public class TorrentManager {
             int numFiles = fs.numFiles();
             Priority[] priorities = new Priority[numFiles];
             for (int i = 0; i < numFiles; i++) {
-                priorities[i] = (i == fileIndex) ? Priority.TOP_PRIORITY : Priority.IGNORE;
+                // DEFAULT (khong phai TOP_PRIORITY) cho file duoc chon
+                // De libtorrent khong dua tai het ca file ngay lap tuc
+                // Cac doan can gap (dau/cuoi/vi tri dang xem) se duoc
+                // boost rieng len TOP_PRIORITY o cho khac
+                priorities[i] = (i == fileIndex) ? Priority.DEFAULT : Priority.IGNORE;
             }
             handle.prioritizeFiles(priorities);
 
