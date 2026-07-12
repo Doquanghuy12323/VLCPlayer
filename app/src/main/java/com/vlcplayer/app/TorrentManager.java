@@ -47,6 +47,7 @@ public class TorrentManager {
     private volatile TorrentInfo cachedInfo = null;
     private volatile int selectedFileIndex = -1;
     private volatile File selectedVideoFile = null;
+    private volatile String lastTorrentId = null; // nhan biet torrent cu/moi
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final File saveDir;
 
@@ -62,16 +63,36 @@ public class TorrentManager {
     }
 
     public void startStream(String url, Callback cb) {
+        // Xac dinh torrent ID TRUOC khi xoa cache, de biet co phai
+        // dang mo lai CHINH torrent vua xem hay khong
+        String preCheck = url.trim();
+        if (preCheck.startsWith("file://")) preCheck = preCheck.substring(7);
+        String torrentId = null;
+        if (preCheck.startsWith("magnet:")) {
+            torrentId = extractHash(preCheck);
+        } else if (preCheck.startsWith("/")) {
+            try { torrentId = new TorrentInfo(new File(preCheck)).infoHash().toString(); }
+            catch (Exception ignored) {}
+        }
+        final boolean sameTorrent = torrentId != null && !torrentId.isEmpty()
+            && torrentId.equalsIgnoreCase(lastTorrentId);
+        final String finalTorrentId = torrentId;
+
         stop(); // xoa het torrent handle/state cu
         readyCalled = false;
         handler.post(() -> cb.onStatusUpdate("Khoi dong..."));
 
         new Thread(() -> {
             try {
-                // Xoa file cache cu truoc khi tai torrent moi
-                // Tranh nham lan du lieu giua cac torrent khac nhau
-                deleteDir(saveDir);
-                saveDir.mkdirs();
+                if (sameTorrent) {
+                    // Cung torrent nhu lan truoc - GIU file da tai
+                    // de xem tiep ngay, khong phai tai lai tu dau
+                    handler.post(() -> cb.onStatusUpdate("Tiep tuc torrent da tai..."));
+                } else {
+                    deleteDir(saveDir);
+                    saveDir.mkdirs();
+                }
+                lastTorrentId = finalTorrentId;
 
                 String path = url.trim();
                 if (path.startsWith("file://")) path = path.substring(7);
@@ -283,10 +304,13 @@ public class TorrentManager {
                 for (int i = startPiece; i <= reqEndPiece; i++) {
                     try { handle.piecePriority(i, Priority.TOP_PRIORITY); } catch (Exception ignored) {}
                 }
-                long deadline = System.currentTimeMillis() + 15000;
+                // Tang thoi gian cho len 3 phut - tranh ngat giua video
+                // khi mang cham gay VLC hieu nham la het video
+                long deadline = System.currentTimeMillis() + 180000;
                 while (System.currentTimeMillis() < deadline && proxyRunning) {
+                    if (handle == null || !handle.isValid()) break;
                     try { if (handle.havePiece(startPiece)) break; } catch (Exception ignored) { break; }
-                    Thread.sleep(50);
+                    Thread.sleep(80);
                 }
             }
 
@@ -327,12 +351,15 @@ public class TorrentManager {
                 byte[] buf = new byte[65536];
                 long left = finalContentLen;
                 int emptyRetry = 0;
+                // Tang len ~2 phut moi lan bi thieu du lieu thay vi 15s
+                int maxEmptyRetry = 2400;
                 while (proxyRunning && left > 0) {
+                    if (handle == null || !handle.isValid()) break;
                     int toRead = (int) Math.min(buf.length, left);
                     int read = raf.read(buf, 0, toRead);
                     if (read == -1 || read == 0) {
                         emptyRetry++;
-                        if (emptyRetry > 300) break;
+                        if (emptyRetry > maxEmptyRetry) break;
                         Thread.sleep(50);
                         continue;
                     }
