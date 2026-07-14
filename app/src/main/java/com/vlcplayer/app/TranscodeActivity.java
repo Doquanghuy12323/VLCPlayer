@@ -17,12 +17,6 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 public class TranscodeActivity extends AppCompatActivity {
 
     private static final int REQ_VIDEO = 2002;
@@ -31,8 +25,10 @@ public class TranscodeActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private TextView tvStatus, tvDetails;
     private TranscodeManager transcodeManager;
-    private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
     private String generatedLanUrl = "";
+    private Uri selectedVideoUri;
+    private String selectedVideoName = "";
+    private long selectedVideoSize = -1;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -51,12 +47,24 @@ public class TranscodeActivity extends AppCompatActivity {
         tvStatus = findViewById(R.id.tv_status);
         tvDetails = findViewById(R.id.tv_details);
         transcodeManager = new TranscodeManager(this);
+        TranscodeManager.cleanupLegacyCache(this);
 
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
         findViewById(R.id.btn_pick_video).setOnClickListener(v -> openVideoPicker());
         btnStartCast.setOnClickListener(v -> startBroadcasting());
         btnStopCast.setOnClickListener(v -> stopBroadcasting());
         tvStatus.setOnClickListener(v -> copyLanUrl());
+
+        if (savedInstanceState != null) {
+            String uri = savedInstanceState.getString("video_uri", "");
+            if (!uri.isEmpty()) {
+                selectedVideoUri = Uri.parse(uri);
+                selectedVideoName = savedInstanceState.getString("video_name", "video");
+                selectedVideoSize = savedInstanceState.getLong("video_size", -1);
+                etVideoPath.setText(selectedVideoName);
+                startBroadcasting();
+            }
+        }
     }
 
     private void openVideoPicker() {
@@ -71,38 +79,22 @@ public class TranscodeActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_VIDEO || resultCode != RESULT_OK || data == null) return;
         Uri uri = data.getData();
-        if (uri != null) copyVideoToCache(uri);
+        if (uri != null) prepareVideo(uri, data.getFlags());
     }
 
-    private void copyVideoToCache(Uri uri) {
-        progressBar.setVisibility(View.VISIBLE);
-        tvStatus.setText("Dang chuan bi video...");
-        btnStartCast.setEnabled(false);
-        fileExecutor.execute(() -> {
-            try {
-                String displayName = getDisplayName(uri);
-                File file = new File(getCacheDir(), "cast_" + sanitize(displayName));
-                try (InputStream input = getContentResolver().openInputStream(uri);
-                     FileOutputStream output = new FileOutputStream(file)) {
-                    if (input == null) throw new java.io.IOException("Khong mo duoc video");
-                    byte[] buffer = new byte[64 * 1024];
-                    int read;
-                    while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
-                }
-                runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    etVideoPath.setText(file.getAbsolutePath());
-                    btnStartCast.setEnabled(true);
-                    startBroadcasting();
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    btnStartCast.setEnabled(true);
-                    tvStatus.setText("Loi doc video: " + e.getMessage());
-                });
-            }
-        });
+    private void prepareVideo(Uri uri, int intentFlags) {
+        try {
+            int takeFlags = intentFlags
+                & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            getContentResolver().takePersistableUriPermission(uri, takeFlags);
+        } catch (Exception ignored) {}
+
+        selectedVideoUri = uri;
+        selectedVideoName = getDisplayName(uri);
+        selectedVideoSize = getDisplaySize(uri);
+        etVideoPath.setText(selectedVideoName);
+        btnStartCast.setEnabled(true);
+        startBroadcasting();
     }
 
     private String getDisplayName(Uri uri) {
@@ -113,14 +105,18 @@ public class TranscodeActivity extends AppCompatActivity {
         return "video.mp4";
     }
 
-    private String sanitize(String name) {
-        String safe = name == null ? "video.mp4" : name.replaceAll("[^a-zA-Z0-9._-]", "_");
-        return safe.isEmpty() ? "video.mp4" : safe;
+    private long getDisplaySize(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) {
+                return cursor.getLong(0);
+            }
+        } catch (Exception ignored) {}
+        return -1;
     }
 
     private void startBroadcasting() {
-        String path = etVideoPath.getText().toString().trim();
-        if (path.isEmpty()) {
+        if (selectedVideoUri == null) {
             Toast.makeText(this, "Hay chon video", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -129,7 +125,8 @@ public class TranscodeActivity extends AppCompatActivity {
         progressBar.setVisibility(View.VISIBLE);
         tvStatus.setText("Dang khoi dong may chu LAN...");
 
-        transcodeManager.startServer(path, new TranscodeManager.Callback() {
+        transcodeManager.startServer(selectedVideoUri, selectedVideoName,
+            selectedVideoSize, new TranscodeManager.Callback() {
             @Override public void onServerStarted(String lanUrl) {
                 generatedLanUrl = lanUrl;
                 progressBar.setVisibility(View.GONE);
@@ -162,16 +159,25 @@ public class TranscodeActivity extends AppCompatActivity {
     }
 
     private void resetButtons() {
-        btnStartCast.setEnabled(!etVideoPath.getText().toString().trim().isEmpty());
+        btnStartCast.setEnabled(selectedVideoUri != null);
         btnStopCast.setEnabled(false);
         progressBar.setVisibility(View.GONE);
         generatedLanUrl = "";
     }
 
     @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (selectedVideoUri != null) {
+            outState.putString("video_uri", selectedVideoUri.toString());
+            outState.putString("video_name", selectedVideoName);
+            outState.putLong("video_size", selectedVideoSize);
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         transcodeManager.destroy();
-        fileExecutor.shutdownNow();
     }
 }

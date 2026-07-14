@@ -57,6 +57,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     public static final String EXTRA_URI   = "extra_uri";
     public static final String EXTRA_TITLE = "extra_title";
+    public static final String EXTRA_AUTO_CLEANUP_TORRENT = "auto_cleanup_torrent";
 
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
@@ -1213,6 +1214,9 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     @Override protected void onDestroy() {
+        if (getIntent().getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)) {
+            TorrentManager.stopActiveAndCleanup(this);
+        }
         super.onDestroy();
         broadcastAudioSessionClose();
         if (equalizer != null) equalizer.release();
@@ -1359,6 +1363,10 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
+        if (getIntent().getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)
+                && !intent.getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)) {
+            TorrentManager.stopActiveAndCleanup(this);
+        }
         setIntent(intent);
         String newUri = intent.getStringExtra(EXTRA_URI);
         if (newUri == null && intent.getData() != null) {

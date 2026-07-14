@@ -35,6 +35,7 @@ public class TorrentActivity extends AppCompatActivity {
     private RecyclerView rvDownloaded;
     private TorrentManager torrentManager;
     private TorrentManager.Callback torrentCallback;
+    private boolean playerLaunched;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -73,7 +74,10 @@ public class TorrentActivity extends AppCompatActivity {
         if ((source == null || source.isEmpty()) && intent.getData() != null) {
             source = intent.getData().toString();
         }
-        if (source != null && !source.isEmpty()) etMagnet.setText(source);
+        if (source != null && !source.isEmpty()) {
+            etMagnet.setText(source);
+            etMagnet.post(this::startStream);
+        }
     }
 
     @Override
@@ -106,7 +110,7 @@ public class TorrentActivity extends AppCompatActivity {
                     while ((len = is.read(buf)) != -1) fos.write(buf, 0, len);
                 }
                 etMagnet.setText("file://" + tmp.getAbsolutePath());
-                Toast.makeText(this, "Da chon: " + tmp.getName(), Toast.LENGTH_SHORT).show();
+                startStream();
             } catch (Exception e) {
                 Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             }
@@ -164,6 +168,8 @@ public class TorrentActivity extends AppCompatActivity {
                     Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
                     intent.putExtra(PlayerActivity.EXTRA_URI, streamUrl);
                     intent.putExtra(PlayerActivity.EXTRA_TITLE, "Torrent Stream");
+                    intent.putExtra(PlayerActivity.EXTRA_AUTO_CLEANUP_TORRENT, true);
+                    playerLaunched = true;
                     startActivity(intent);
                 });
             }
@@ -175,6 +181,7 @@ public class TorrentActivity extends AppCompatActivity {
                     progressBar.setVisibility(View.GONE);
                     btnStream.setEnabled(true);
                     btnStop.setEnabled(false);
+                    torrentManager.stopAndClearCache();
                     Toast.makeText(TorrentActivity.this, "Loi: " + error, Toast.LENGTH_LONG).show();
                 });
             }
@@ -219,7 +226,7 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     private void stopStream() {
-        torrentManager.stop();
+        torrentManager.stopAndClearCache();
         btnStream.setEnabled(true);
         btnStop.setEnabled(false);
         progressBar.setVisibility(View.GONE);
@@ -227,7 +234,7 @@ public class TorrentActivity extends AppCompatActivity {
     }
 
     private void loadDownloadedFiles() {
-        File dir = new File(getCacheDir(), "torrent_stream");
+        File dir = TorrentManager.getCacheDirectory(this);
         List<File> files = new ArrayList<>();
         if (dir.exists()) collectVideoFiles(dir, files);
         rvDownloaded.setAdapter(new DownloadedAdapter(files));
@@ -267,6 +274,8 @@ public class TorrentActivity extends AppCompatActivity {
                 Intent i = new Intent(TorrentActivity.this, PlayerActivity.class);
                 i.putExtra(PlayerActivity.EXTRA_URI, "file://" + f.getAbsolutePath());
                 i.putExtra(PlayerActivity.EXTRA_TITLE, f.getName());
+                i.putExtra(PlayerActivity.EXTRA_AUTO_CLEANUP_TORRENT, true);
+                playerLaunched = true;
                 startActivity(i);
             });
             h.btnDelete.setOnClickListener(v -> {
@@ -297,8 +306,22 @@ public class TorrentActivity extends AppCompatActivity {
         return String.format("%.2f GB", b/(1024f*1024*1024));
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (playerLaunched && !torrentManager.isStreaming()) {
+            playerLaunched = false;
+            btnStream.setEnabled(true);
+            btnStop.setEnabled(false);
+            progressBar.setVisibility(View.GONE);
+            tvSpeed.setText("");
+            tvStatus.setText("Da tu dong don cache torrent");
+            loadDownloadedFiles();
+        }
+    }
+
     @Override protected void onDestroy() {
         super.onDestroy();
-        torrentManager.destroy();
+        if (!playerLaunched || !torrentManager.isStreaming()) torrentManager.destroy();
     }
 }

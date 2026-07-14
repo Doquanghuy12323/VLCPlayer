@@ -1,25 +1,28 @@
 package com.vlcplayer.app;
 
 import android.content.Context;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.channels.FileChannel;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Streams an existing video file to devices on the same LAN with HTTP ranges. */
+/** Streams a Storage Access Framework URI directly over LAN without copying it. */
 public class TranscodeManager {
 
     public interface Callback {
@@ -32,11 +35,36 @@ public class TranscodeManager {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService clients = Executors.newCachedThreadPool();
+    private final Context appContext;
     private volatile boolean running;
     private ServerSocket serverSocket;
     private Callback callback;
 
-    public TranscodeManager(Context context) {}
+    public TranscodeManager(Context context) {
+        appContext = context.getApplicationContext();
+    }
+
+    public static void cleanupLegacyCache(Context context) {
+        new Thread(() -> {
+            cleanupLegacyCacheDirectory(context.getCacheDir());
+            File[] externalRoots = context.getExternalCacheDirs();
+            if (externalRoots != null) {
+                for (File external : externalRoots) {
+                    if (external != null) cleanupLegacyCacheDirectory(external);
+                }
+            }
+        }).start();
+    }
+
+    private static void cleanupLegacyCacheDirectory(File cacheDir) {
+        File[] files = cacheDir.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            if (file.isFile() && file.getName().startsWith("cast_")) {
+                try { file.delete(); } catch (Exception ignored) {}
+            }
+        }
+    }
 
     public String getLocalIpAddress() {
         try {
@@ -54,13 +82,22 @@ public class TranscodeManager {
         return "127.0.0.1";
     }
 
-    public synchronized void startServer(String videoPath, Callback cb) {
+    public synchronized void startServer(Uri videoUri, String displayName,
+                                         long knownSize, Callback cb) {
         stopServer();
-        File file = new File(videoPath.replace("file://", ""));
-        if (!file.isFile() || !file.canRead()) {
-            cb.onError("Tep video khong ton tai hoac khong doc duoc");
+        if (videoUri == null) {
+            cb.onError("Chua chon video");
             return;
         }
+
+        long sourceSize = probeSize(videoUri, knownSize);
+        if (sourceSize <= 0) {
+            cb.onError("Khong xac dinh duoc dung luong video");
+            return;
+        }
+        String sourceName = displayName == null || displayName.trim().isEmpty()
+            ? "video" : displayName.trim();
+
         callback = cb;
         running = true;
 
@@ -72,13 +109,14 @@ public class TranscodeManager {
                     return;
                 }
                 String lanUrl = "http://" + getLocalIpAddress() + ":"
-                    + serverSocket.getLocalPort() + "/" + file.getName();
+                    + serverSocket.getLocalPort() + "/" + Uri.encode(sourceName);
                 handler.post(() -> cb.onServerStarted(lanUrl));
 
                 while (running) {
                     try {
                         Socket socket = serverSocket.accept();
-                        clients.execute(() -> serveClient(socket, file, cb));
+                        clients.execute(() -> serveClient(
+                            socket, videoUri, sourceName, sourceSize, cb));
                     } catch (Exception e) {
                         if (running) handler.post(() -> cb.onError("Loi may chu LAN: " + e.getMessage()));
                     }
@@ -90,7 +128,18 @@ public class TranscodeManager {
         });
     }
 
-    private void serveClient(Socket socket, File file, Callback cb) {
+    private long probeSize(Uri uri, long knownSize) {
+        if (knownSize > 0) return knownSize;
+        try (ParcelFileDescriptor descriptor =
+                 appContext.getContentResolver().openFileDescriptor(uri, "r")) {
+            return descriptor == null ? -1 : descriptor.getStatSize();
+        } catch (Exception ignored) {
+            return -1;
+        }
+    }
+
+    private void serveClient(Socket socket, Uri videoUri, String displayName,
+                             long fileLength, Callback cb) {
         handler.post(() -> cb.onClientConnected(socket.getInetAddress().getHostAddress()));
         try (Socket client = socket;
              BufferedReader input = new BufferedReader(
@@ -102,7 +151,7 @@ public class TranscodeManager {
             boolean head = request.startsWith("HEAD ");
 
             long start = 0;
-            long end = file.length() - 1;
+            long end = fileLength - 1;
             boolean partial = false;
             String line;
             while ((line = input.readLine()) != null && !line.isEmpty()) {
@@ -117,7 +166,6 @@ public class TranscodeManager {
                 }
             }
 
-            long fileLength = file.length();
             if (start < 0 || start >= fileLength || end < start) {
                 output.write(("HTTP/1.1 416 Range Not Satisfiable\r\n"
                     + "Content-Range: bytes */" + fileLength + "\r\n"
@@ -126,7 +174,7 @@ public class TranscodeManager {
             }
             end = Math.min(end, fileLength - 1);
             long length = end - start + 1;
-            String mime = guessMime(file.getName());
+            String mime = guessMime(displayName);
             StringBuilder header = new StringBuilder(partial
                 ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
             header.append("Content-Type: ").append(mime).append("\r\n")
@@ -138,19 +186,43 @@ public class TranscodeManager {
             output.write(header.toString().getBytes("UTF-8"));
             if (head) return;
 
-            try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
-                raf.seek(start);
-                byte[] buffer = new byte[64 * 1024];
-                long remaining = length;
-                while (running && remaining > 0) {
-                    int read = raf.read(buffer, 0, (int) Math.min(buffer.length, remaining));
-                    if (read < 0) break;
-                    output.write(buffer, 0, read);
-                    remaining -= read;
+            try (ParcelFileDescriptor descriptor =
+                     appContext.getContentResolver().openFileDescriptor(videoUri, "r")) {
+                if (descriptor == null) throw new java.io.IOException("Khong mo duoc video");
+                try (FileInputStream stream = new FileInputStream(descriptor.getFileDescriptor())) {
+                    FileChannel channel = stream.getChannel();
+                    try {
+                        channel.position(start);
+                    } catch (Exception notSeekable) {
+                        skipFully(stream, start);
+                    }
+                    byte[] buffer = new byte[64 * 1024];
+                    long remaining = length;
+                    while (running && remaining > 0) {
+                        int read = stream.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+                        if (read < 0) break;
+                        output.write(buffer, 0, read);
+                        remaining -= read;
+                    }
                 }
             }
         } catch (Exception e) {
             handler.post(() -> cb.onTranscodeLog("Thiet bi khach da ngat ket noi"));
+        }
+    }
+
+    private void skipFully(FileInputStream stream, long bytes) throws java.io.IOException {
+        long remaining = bytes;
+        byte[] discard = new byte[64 * 1024];
+        while (remaining > 0) {
+            long skipped = stream.skip(remaining);
+            if (skipped > 0) {
+                remaining -= skipped;
+                continue;
+            }
+            int read = stream.read(discard, 0, (int) Math.min(discard.length, remaining));
+            if (read < 0) throw new java.io.IOException("Khong the tua video nguon");
+            remaining -= read;
         }
     }
 

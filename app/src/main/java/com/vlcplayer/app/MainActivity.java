@@ -57,6 +57,8 @@ public class MainActivity extends AppCompatActivity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        TorrentManager.cleanupOrphanedCache(this);
+        TranscodeManager.cleanupLegacyCache(this);
         new PrivacyManager(this).applyWindowSecurity(this);
         setContentView(R.layout.activity_main);
 
