@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -20,7 +21,7 @@
             android:layout_height="36dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_previous"
-            android:tint="#FFFFFF"/>
+            app:tint="#FFFFFF"/>
 
         <ImageButton
             android:id="@+id/btn_nav_back"
@@ -28,7 +29,7 @@
             android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_rew"
-            android:tint="#B5BAC1"/>
+            app:tint="#B5BAC1"/>
 
         <ImageButton
             android:id="@+id/btn_nav_fwd"
@@ -36,7 +37,7 @@
             android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_ff"
-            android:tint="#B5BAC1"/>
+            app:tint="#B5BAC1"/>
 
         <EditText
             android:id="@+id/et_url"
@@ -60,7 +61,7 @@
             android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_play"
-            android:tint="#5865F2"/>
+            app:tint="#5865F2"/>
 
         <ImageButton
             android:id="@+id/btn_refresh"
@@ -68,7 +69,7 @@
             android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_rotate"
-            android:tint="#B5BAC1"/>
+            app:tint="#B5BAC1"/>
 
         <ImageButton
             android:id="@+id/btn_bookmark"
@@ -76,7 +77,7 @@
             android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/btn_star_big_off"
-            android:tint="#FFD700"/>
+            app:tint="#FFD700"/>
 
         <ImageButton
             android:id="@+id/btn_bookmark_list"
@@ -84,7 +85,7 @@
             android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_agenda"
-            android:tint="#B5BAC1"/>
+            app:tint="#B5BAC1"/>
 
         <ImageButton
             android:id="@+id/btn_fullscreen"
@@ -92,7 +93,7 @@
             android:layout_height="32dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_zoom"
-            android:tint="#5865F2"/>
+            app:tint="#5865F2"/>
 
     </LinearLayout>
 

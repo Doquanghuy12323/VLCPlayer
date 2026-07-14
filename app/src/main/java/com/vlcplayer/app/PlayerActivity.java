@@ -119,8 +119,14 @@ public class PlayerActivity extends AppCompatActivity {
     };
 
     @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(AppLanguageManager.applyLanguage(base));
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        new PrivacyManager(this).applyWindowSecurity(this);
         getWindow().addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             | WindowManager.LayoutParams.FLAG_FULLSCREEN
@@ -307,9 +313,13 @@ public class PlayerActivity extends AppCompatActivity {
                         // Delay de VLC khoi dong audiotrack truoc
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 300);
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 1000);
+                        if (funscriptManager.isLoaded()) {
+                            funscriptManager.resume(mediaPlayer.getTime());
+                        }
                     });
                     break;
                 case MediaPlayer.Event.Paused:
+                    funscriptManager.pause();
                     runOnUiThread(() -> btnPlayPause.setImageResource(android.R.drawable.ic_media_play));
                     break;
                 case MediaPlayer.Event.EndReached:
@@ -1198,6 +1208,7 @@ public class PlayerActivity extends AppCompatActivity {
         super.onStop();
         isInBackground = true;
         saveHistory();
+        funscriptManager.pause();
         if (mediaPlayer != null) { lastPosition = mediaPlayer.getTime(); mediaPlayer.pause(); }
     }
 
@@ -1208,6 +1219,8 @@ public class PlayerActivity extends AppCompatActivity {
         handler.removeCallbacksAndMessages(null);
         if (mediaPlayer != null) mediaPlayer.release();
         if (libVLC != null) libVLC.release();
+        funscriptManager.unload();
+        dbExecutor.shutdownNow();
         closePfd();
     }
     // Tu dong upload funscript len transfer.sh va lay public URL
@@ -1217,7 +1230,7 @@ public class PlayerActivity extends AppCompatActivity {
             try {
                 // Doc file thanh bytes truoc
                 java.io.FileInputStream fis = new java.io.FileInputStream(file);
-                byte[] fileBytes = fis.readAllBytes();
+                byte[] fileBytes = IoUtils.readAllBytes(fis);
                 fis.close();
 
                 java.net.URL url = new java.net.URL("https://transfer.sh/" + file.getName());
@@ -1236,7 +1249,7 @@ public class PlayerActivity extends AppCompatActivity {
 
                 int code = conn.getResponseCode();
                 if (code == 200) {
-                    byte[] resp = conn.getInputStream().readAllBytes();
+                    byte[] resp = IoUtils.readAllBytes(conn.getInputStream());
                     String publicUrl = new String(resp).trim();
                     runOnUiThread(() -> {
                         Toast.makeText(this, "Upload xong! Dang setup Handy...", android.widget.Toast.LENGTH_SHORT).show();
@@ -1347,5 +1360,22 @@ public class PlayerActivity extends AppCompatActivity {
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        String newUri = intent.getStringExtra(EXTRA_URI);
+        if (newUri == null && intent.getData() != null) {
+            newUri = intent.getData().toString();
+        }
+        if (newUri == null || newUri.trim().isEmpty()) return;
+
+        saveHistory();
+        uriString = newUri;
+        videoTitle = intent.getStringExtra(EXTRA_TITLE);
+        if (videoTitle == null || videoTitle.trim().isEmpty()) {
+            videoTitle = Uri.parse(newUri).getLastPathSegment();
+        }
+        if (videoTitle == null || videoTitle.trim().isEmpty()) videoTitle = "Video";
+        tvTitle.setText(videoTitle);
+        lastPosition = 0;
+        playMedia(uriString);
+        autoDetectAndApplyEQ(videoTitle);
     }
 }

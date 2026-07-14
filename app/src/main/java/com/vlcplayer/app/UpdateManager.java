@@ -13,10 +13,12 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.content.FileProvider;
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -41,6 +43,8 @@ public class UpdateManager {
     private final Activity activity;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private BroadcastReceiver downloadReceiver;
+    private boolean receiverRegistered;
 
     public UpdateManager(Activity activity) {
         this.activity = activity;
@@ -90,8 +94,10 @@ public class UpdateManager {
                 try {
                     long latest  = Long.parseLong(latestVersion);
                     // Lay versionCode hien tai
-                    long current = activity.getPackageManager()
-                        .getPackageInfo(activity.getPackageName(), 0).getLongVersionCode();
+                    android.content.pm.PackageInfo packageInfo = activity.getPackageManager()
+                        .getPackageInfo(activity.getPackageName(), 0);
+                    long current = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                        ? packageInfo.getLongVersionCode() : packageInfo.versionCode;
                     hasUpdate = latest > current;
 
                     if (!silent) {
@@ -164,16 +170,24 @@ public class UpdateManager {
             .setDestinationUri(Uri.fromFile(outFile));
         long downloadId = dm.enqueue(req);
 
-        BroadcastReceiver receiver = new BroadcastReceiver() {
+        if (receiverRegistered && downloadReceiver != null) {
+            try { activity.unregisterReceiver(downloadReceiver); } catch (Exception ignored) {}
+            receiverRegistered = false;
+        }
+        downloadReceiver = new BroadcastReceiver() {
             @Override public void onReceive(Context ctx, Intent intent) {
                 long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
                 if (id == downloadId) {
-                    activity.unregisterReceiver(this);
+                    try { activity.unregisterReceiver(this); } catch (Exception ignored) {}
+                    receiverRegistered = false;
                     checkAndInstall(dm, downloadId, outFile);
                 }
             }
         };
-        activity.registerReceiver(receiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+        ContextCompat.registerReceiver(activity, downloadReceiver,
+            new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+            ContextCompat.RECEIVER_EXPORTED);
+        receiverRegistered = true;
     }
 
     private void checkAndInstall(DownloadManager dm, long downloadId, File file) {
@@ -188,6 +202,14 @@ public class UpdateManager {
 
     private void installApk(File apkFile) {
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    && !activity.getPackageManager().canRequestPackageInstalls()) {
+                Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + activity.getPackageName()));
+                activity.startActivity(settings);
+                showToast("Hay cho phep cai ung dung, sau do bam Kiem tra cap nhat lai");
+                return;
+            }
             Intent intent = new Intent(Intent.ACTION_VIEW);
             Uri apkUri;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -203,5 +225,15 @@ public class UpdateManager {
         } catch (Exception e) {
             showToast("Loi cai dat: " + e.getMessage());
         }
+    }
+
+    public void destroy() {
+        if (receiverRegistered && downloadReceiver != null) {
+            try { activity.unregisterReceiver(downloadReceiver); } catch (Exception ignored) {}
+        }
+        receiverRegistered = false;
+        downloadReceiver = null;
+        executor.shutdownNow();
+        mainHandler.removeCallbacksAndMessages(null);
     }
 }

@@ -82,7 +82,7 @@ public class FunscriptManager {
                 actions.add(new FunscriptAction(a.getLong("at"), a.getInt("pos")));
             }
             // Sap xep theo thoi gian
-            actions.sort((a, b) -> Long.compare(a.at, b.at));
+            java.util.Collections.sort(actions, (a, b) -> Long.compare(a.at, b.at));
             Log.d(TAG, "Loaded " + actions.size() + " actions");
             return !actions.isEmpty();
         } catch (Exception e) {
@@ -94,34 +94,25 @@ public class FunscriptManager {
     // Bat dau sync voi video - goi khi video play
     public void start(long videoTimeMs, FunscriptCallback cb) {
         if (actions.isEmpty()) return;
-        stop();
+        cancelSchedule();
         this.callback = cb;
-        this.videoOffsetMs = videoTimeMs;
         this.startTimeMs = System.currentTimeMillis() - videoTimeMs;
         this.isRunning = true;
-
-        // Tim action dau tien phu hop
-        currentIndex = 0;
-        for (int i = 0; i < actions.size(); i++) {
-            if (actions.get(i).at >= videoTimeMs) { currentIndex = i; break; }
-        }
+        currentIndex = findActionIndex(videoTimeMs);
         scheduleNext();
     }
 
     // Dong bo lai khi seek video
     public void seekTo(long videoTimeMs) {
         if (!isRunning) return;
-        handler.removeCallbacksAndMessages(null);
+        cancelSchedule();
         startTimeMs = System.currentTimeMillis() - videoTimeMs;
-        currentIndex = 0;
-        for (int i = 0; i < actions.size(); i++) {
-            if (actions.get(i).at >= videoTimeMs) { currentIndex = i; break; }
-        }
+        currentIndex = findActionIndex(videoTimeMs);
         scheduleNext();
     }
 
     public void pause() {
-        handler.removeCallbacksAndMessages(null);
+        cancelSchedule();
     }
 
     public void resume(long videoTimeMs) {
@@ -132,9 +123,14 @@ public class FunscriptManager {
 
     public void stop() {
         isRunning = false;
-        handler.removeCallbacksAndMessages(null);
-        actions.clear();
+        cancelSchedule();
         currentIndex = 0;
+    }
+
+    public void unload() {
+        stop();
+        actions.clear();
+        callback = null;
     }
 
     public boolean isLoaded() { return !actions.isEmpty(); }
@@ -159,8 +155,11 @@ public class FunscriptManager {
         final int pos = action.pos;
 
         if (delay < 0) delay = 0;
-        // Cap delay toi da 100ms de tranh drift
-        if (delay > 5000) { currentIndex++; scheduleNext(); return; }
+        // Hen lai gan moc action thay vi bo qua cac action o xa hon 5 giay.
+        if (delay > 5000) {
+            handler.postDelayed(this::scheduleNext, 5000);
+            return;
+        }
 
         handler.postDelayed(() -> {
             if (!isRunning) return;
@@ -168,5 +167,20 @@ public class FunscriptManager {
             currentIndex++;
             scheduleNext();
         }, Math.max(0, delay));
+    }
+
+    private int findActionIndex(long videoTimeMs) {
+        int low = 0;
+        int high = actions.size();
+        while (low < high) {
+            int mid = (low + high) >>> 1;
+            if (actions.get(mid).at < videoTimeMs) low = mid + 1;
+            else high = mid;
+        }
+        return low;
+    }
+
+    private void cancelSchedule() {
+        handler.removeCallbacksAndMessages(null);
     }
 }

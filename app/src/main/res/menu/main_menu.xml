@@ -13,23 +13,23 @@
     <item
         android:id="@+id/action_manga_local"
         android:title="Đọc truyện (Local)"
-        android:showAsAction="never"/>
+        app:showAsAction="never"/>
 
     <item
         android:id="@+id/action_manga_online"
         android:title="Đọc truyện (Online)"
-        android:showAsAction="never"/>
+        app:showAsAction="never"/>
 
     <item
         android:id="@+id/action_ai"
         android:title="Tro ly AI (Gemini)"
-        android:showAsAction="never"/>
+        app:showAsAction="never"/>
     <item
         android:id="@+id/action_torrent"
         android:title="Torrent Stream"
-        android:showAsAction="never"/>
+        app:showAsAction="never"/>
     <item
-        android:id="@+id/action_schedule"
-        android:title="Lịch phát video"
-        android:showAsAction="never"/>
+        android:id="@+id/action_lan_cast"
+        android:title="Phát video qua LAN"
+        app:showAsAction="never"/>
 </menu>

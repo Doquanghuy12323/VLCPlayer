@@ -76,6 +76,14 @@ public class MangaBrowserActivity extends AppCompatActivity {
         ws.setUseWideViewPort(true);
         ws.setBuiltInZoomControls(true);
         ws.setDisplayZoomControls(false);
+        ws.setAllowFileAccess(false);
+        ws.setAllowContentAccess(false);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+            ws.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            ws.setSafeBrowsingEnabled(true);
+        }
         ws.setUserAgentString("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
 
         webView.setWebViewClient(new WebViewClient() {
@@ -84,7 +92,7 @@ public class MangaBrowserActivity extends AppCompatActivity {
                 String host = request.getUrl().getHost();
                 if (host != null) {
                     for (String ad : AD_DOMAINS) {
-                        if (host.contains(ad)) {
+                        if (host.equals(ad) || host.endsWith("." + ad)) {
                             return new WebResourceResponse("text/plain", "utf-8",
                                 new ByteArrayInputStream("".getBytes()));
                         }
@@ -209,5 +217,16 @@ public class MangaBrowserActivity extends AppCompatActivity {
     public void onBackPressed() {
         if (webView.canGoBack()) webView.goBack();
         else super.onBackPressed();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (webView != null) {
+            webView.stopLoading();
+            webView.setWebChromeClient(null);
+            webView.setWebViewClient(null);
+            webView.destroy();
+        }
+        super.onDestroy();
     }
 }

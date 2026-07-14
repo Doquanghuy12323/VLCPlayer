@@ -110,6 +110,35 @@ public class TorrentManager {
                         try { handle = session.find(ti.infoHash()); } catch (Exception ignored) {}
                         if (handle == null) Thread.sleep(300);
                     }
+                } else if (path.startsWith("http://") || path.startsWith("https://")) {
+                    handler.post(() -> cb.onStatusUpdate("Dang tai file .torrent..."));
+                    File torrentFile = new File(saveDir, "remote.torrent");
+                    HttpURLConnection conn = (HttpURLConnection) new URL(path).openConnection();
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(30000);
+                    conn.setInstanceFollowRedirects(true);
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode < 200 || responseCode >= 300) {
+                        throw new IOException("HTTP " + responseCode + " khi tai torrent");
+                    }
+                    try (InputStream input = conn.getInputStream();
+                         OutputStream output = new FileOutputStream(torrentFile)) {
+                        byte[] buffer = new byte[8192];
+                        int read;
+                        while ((read = input.read(buffer)) != -1) {
+                            output.write(buffer, 0, read);
+                        }
+                    } finally {
+                        conn.disconnect();
+                    }
+                    TorrentInfo ti = new TorrentInfo(torrentFile);
+                    lastTorrentId = ti.infoHash().toString();
+                    session.download(ti, saveDir);
+                    long t = System.currentTimeMillis();
+                    while (handle == null && System.currentTimeMillis() - t < 10000) {
+                        try { handle = session.find(ti.infoHash()); } catch (Exception ignored) {}
+                        if (handle == null) Thread.sleep(300);
+                    }
                 } else if (path.startsWith("magnet:")) {
                     String magnet = path;
                     if (!magnet.contains("&tr=")) {
@@ -266,6 +295,7 @@ public class TorrentManager {
 
             String requestLine = in.readLine();
             if (requestLine == null) return;
+            boolean headOnly = requestLine.startsWith("HEAD ");
 
             long rangeStart = 0;
             long rangeEnd = -1;
@@ -296,6 +326,10 @@ public class TorrentManager {
 
             FileStorage fs = ti.files();
             int pieceLen = ti.pieceLength();
+            if (pieceLen <= 0) {
+                out.write("HTTP/1.1 503 Not Ready\r\nContent-Length: 0\r\n\r\n".getBytes("UTF-8"));
+                return;
+            }
             if (pieceLen > 0 && handle != null && handle.isValid()) {
                 long fileOffset = fs.fileOffset(fIdx);
                 int startPiece = (int) ((fileOffset + rangeStart) / pieceLen);
@@ -314,8 +348,15 @@ public class TorrentManager {
                 }
             }
 
-            long fileLen = video.exists() ? video.length() : fs.fileSize(fIdx);
-            if (fileLen <= 0) fileLen = fs.fileSize(fIdx);
+            long fileLen = fs.fileSize(fIdx);
+
+            if (rangeStart < 0 || rangeStart >= fileLen || rangeEnd < -1) {
+                String invalid = "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                    + "Content-Range: bytes */" + fileLen + "\r\n"
+                    + "Content-Length: 0\r\n\r\n";
+                out.write(invalid.getBytes("UTF-8"));
+                return;
+            }
 
             if (rangeEnd < 0 || rangeEnd >= fileLen) rangeEnd = fileLen - 1;
             long contentLen = rangeEnd - rangeStart + 1;
@@ -343,6 +384,7 @@ public class TorrentManager {
                     + "Connection: close\r\n\r\n";
             }
             out.write(respHeader.getBytes("UTF-8"));
+            if (headOnly) return;
 
             final long finalRangeStart = rangeStart;
             final long finalContentLen = contentLen;
@@ -350,25 +392,46 @@ public class TorrentManager {
                 raf.seek(finalRangeStart);
                 byte[] buf = new byte[65536];
                 long left = finalContentLen;
-                int emptyRetry = 0;
-                // Tang len ~2 phut moi lan bi thieu du lieu thay vi 15s
-                int maxEmptyRetry = 2400;
                 while (proxyRunning && left > 0) {
                     if (handle == null || !handle.isValid()) break;
-                    int toRead = (int) Math.min(buf.length, left);
+
+                    long positionInFile = finalContentLen - left + finalRangeStart;
+                    long absoluteOffset = fs.fileOffset(fIdx) + positionInFile;
+                    int piece = (int) (absoluteOffset / pieceLen);
+                    if (!waitForPiece(piece, 180000)) break;
+
+                    long bytesToPieceEnd = pieceLen - (absoluteOffset % pieceLen);
+                    int toRead = (int) Math.min(Math.min(buf.length, left), bytesToPieceEnd);
                     int read = raf.read(buf, 0, toRead);
                     if (read == -1 || read == 0) {
-                        emptyRetry++;
-                        if (emptyRetry > maxEmptyRetry) break;
                         Thread.sleep(50);
                         continue;
                     }
-                    emptyRetry = 0;
                     out.write(buf, 0, read);
                     left -= read;
                 }
             }
         } catch (Exception ignored) {}
+    }
+
+    private boolean waitForPiece(int piece, long timeoutMs) throws InterruptedException {
+        TorrentHandle activeHandle = handle;
+        if (activeHandle == null || !activeHandle.isValid()) return false;
+        try { activeHandle.piecePriority(piece, Priority.TOP_PRIORITY); }
+        catch (Exception ignored) {}
+
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (proxyRunning && System.currentTimeMillis() < deadline) {
+            activeHandle = handle;
+            if (activeHandle == null || !activeHandle.isValid()) return false;
+            try {
+                if (activeHandle.havePiece(piece)) return true;
+            } catch (Exception e) {
+                return false;
+            }
+            Thread.sleep(80);
+        }
+        return false;
     }
 
     private void startMonitor(Callback cb) {

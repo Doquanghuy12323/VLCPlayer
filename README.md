@@ -8,6 +8,11 @@
 - ⏩ Tua nhanh / lùi 10 giây
 - 🔆 Ẩn/hiện controls khi chạm màn hình
 - 📁 Chọn file video thủ công qua file picker
+- 🧲 Stream torrent với chọn file và HTTP Range
+- 📚 Đọc truyện CBZ/ZIP và duyệt truyện online
+- 🤖 Trợ lý Gemini bằng API key lưu riêng trên thiết bị
+- 📡 Phát file video qua mạng LAN cho VLC trên máy tính
+- 🔐 Chế độ riêng tư chống chụp/quay màn hình
 - 🌙 Giao diện dark theme
 
 ## 🚀 Build từ Termux
@@ -25,7 +30,14 @@ pkg install openjdk-17
 ```
 
 ## ⚙️ GitHub Actions
-Push code lên GitHub → Actions tự động build APK → Download từ tab **Artifacts**.
+Push code lên GitHub → Actions tự động build APK → tải từ mục **Releases**.
+
+Workflow sẽ chạy Android Lint, tạo `versionCode` tự động, ký APK bằng GitHub
+Secrets và tạo GitHub Release. Các secret cần có: `KEYSTORE_BASE64`, `KEY_ALIAS`,
+`KEY_PASSWORD`, `STORE_PASSWORD`.
+
+Gemini API key không còn được nhúng trong APK. Mở mục Trợ lý AI trong ứng dụng
+và nhập key của bạn khi được hỏi.
 
 ## 📦 Dependencies
 - `org.videolan.android:libvlc-all:3.6.0`

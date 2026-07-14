@@ -9,6 +9,8 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.text.InputType;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -43,7 +45,7 @@ public class GeminiChatActivity extends AppCompatActivity {
 
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
 
-        gemini = new GeminiHelper();
+        gemini = new GeminiHelper(this);
         adapter = new ChatAdapter(messages);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(adapter);
@@ -51,6 +53,8 @@ public class GeminiChatActivity extends AppCompatActivity {
         // Nhan video title tu intent
         String videoTitle = getIntent().getStringExtra("video_title");
         if (videoTitle != null && !videoTitle.isEmpty()) {
+            history.append("Ngu canh: nguoi dung dang xem video: ")
+                .append(videoTitle).append("\n");
             addMessage("system", "Nguoi dung dang xem video: " + videoTitle);
             addMessage("bot", "Xin chao! Toi co the giup gi cho ban ve video \"" + videoTitle + "\"?");
         } else {
@@ -59,9 +63,14 @@ public class GeminiChatActivity extends AppCompatActivity {
 
         btnSend.setOnClickListener(v -> sendMessage());
         etInput.setOnEditorActionListener((v, a, e) -> { sendMessage(); return true; });
+        if (GeminiHelper.getApiKey(this).isEmpty()) showApiKeyDialog();
     }
 
     private void sendMessage() {
+        if (GeminiHelper.getApiKey(this).isEmpty()) {
+            showApiKeyDialog();
+            return;
+        }
         String text = etInput.getText().toString().trim();
         if (text.isEmpty()) return;
 
@@ -90,6 +99,32 @@ public class GeminiChatActivity extends AppCompatActivity {
                 addMessage("bot", "Loi: " + error);
             }
         });
+    }
+
+    private void showApiKeyDialog() {
+        EditText input = new EditText(this);
+        input.setHint("AIza...");
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT
+            | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setText(GeminiHelper.getApiKey(this));
+        new AlertDialog.Builder(this)
+            .setTitle("Gemini API key")
+            .setMessage("Key chi duoc luu trong bo nho rieng cua ung dung.")
+            .setView(input)
+            .setPositiveButton("Luu", (d, w) -> {
+                String key = input.getText().toString().trim();
+                GeminiHelper.saveApiKey(this, key);
+                if (key.isEmpty()) addMessage("bot", "Can API key de dung tro ly AI.");
+            })
+            .setNegativeButton("De sau", null)
+            .show();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (gemini != null) gemini.destroy();
     }
 
     private void addMessage(String role, String text) {

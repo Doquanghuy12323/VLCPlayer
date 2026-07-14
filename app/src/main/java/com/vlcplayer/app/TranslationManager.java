@@ -110,7 +110,8 @@ public class TranslationManager {
             ProgressCallback progressCallback, TranslateCallback doneCallback) {
         executor.execute(() -> {
             try {
-                String[] blocks = srtContent.split("\n\n");
+                String normalized = srtContent.replace("\r\n", "\n").replace('\r', '\n');
+                String[] blocks = normalized.split("\n\\s*\n");
                 StringBuilder result = new StringBuilder();
                 int total = blocks.length;
                 for (int i = 0; i < blocks.length; i++) {

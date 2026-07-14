@@ -3,6 +3,8 @@ package com.vlcplayer.app;
 import android.content.Context;
 import android.media.MediaScannerConnection;
 import android.os.Environment;
+import android.app.Activity;
+import android.view.WindowManager;
 import java.io.File;
 
 public class PrivacyManager {
@@ -17,19 +19,35 @@ public class PrivacyManager {
             .getBoolean(KEY_ENABLED, false);
     }
 
-    public void setEnabled(boolean enabled, java.util.List<String> paths) {
+    public void applyWindowSecurity(Activity activity) {
+        if (isEnabled()) {
+            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        } else {
+            activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
+    }
+
+    public int setEnabled(boolean enabled, java.util.List<String> paths) {
         ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_ENABLED, enabled).apply();
         // Them/xoa .nomedia trong thu muc
+        int changed = 0;
+        java.util.Set<String> visited = new java.util.HashSet<>();
         for (String path : paths) {
             File dir = new File(path).getParentFile();
-            if (dir == null) continue;
+            if (dir == null || !visited.add(dir.getAbsolutePath())) continue;
             File nomedia = new File(dir, ".nomedia");
             try {
-                if (enabled) { if (!nomedia.exists()) nomedia.createNewFile(); }
-                else { if (nomedia.exists()) { nomedia.delete(); MediaScannerConnection.scanFile(ctx, new String[]{dir.getAbsolutePath()}, null, null); } }
+                if (enabled) {
+                    if (nomedia.exists() || nomedia.createNewFile()) changed++;
+                } else if (!nomedia.exists() || nomedia.delete()) {
+                    changed++;
+                    MediaScannerConnection.scanFile(ctx,
+                        new String[]{dir.getAbsolutePath()}, null, null);
+                }
             } catch (Exception ignored) {}
         }
+        return changed;
     }
 
     public void hideFolder(String folderPath) {

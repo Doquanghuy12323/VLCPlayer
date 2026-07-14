@@ -208,7 +208,7 @@ public class HandyManager {
 
             int code = conn.getResponseCode();
             if (code == 200) {
-                byte[] bytes = conn.getInputStream().readAllBytes();
+                byte[] bytes = IoUtils.readAllBytes(conn.getInputStream());
                 return new JSONObject(new String(bytes, StandardCharsets.UTF_8));
             }
             Log.e(TAG, "GET " + endpoint + " -> " + code);
@@ -237,9 +237,10 @@ public class HandyManager {
             int code = conn.getResponseCode();
             byte[] bytes;
             if (code >= 200 && code < 300) {
-                bytes = conn.getInputStream().readAllBytes();
+                bytes = IoUtils.readAllBytes(conn.getInputStream());
             } else {
-                bytes = conn.getErrorStream() != null ? conn.getErrorStream().readAllBytes() : new byte[0];
+                bytes = conn.getErrorStream() != null
+                    ? IoUtils.readAllBytes(conn.getErrorStream()) : new byte[0];
             }
             if (bytes.length > 0) return new JSONObject(new String(bytes, StandardCharsets.UTF_8));
         } catch (Exception e) {

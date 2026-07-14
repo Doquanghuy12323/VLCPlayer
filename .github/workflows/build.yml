@@ -17,36 +17,31 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*') }}
-          restore-keys: gradle-
+      - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
-      - name: Download Gradle Wrapper
-        run: |
-          mkdir -p gradle/wrapper
-          curl -L -o gradle/wrapper/gradle-wrapper.jar https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | tr -d '\n' | base64 -d > vlcplayer.keystore
-      - name: Get timestamp
-        id: ts
-        run: echo "code=$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
+      - name: Generate app version
+        id: version
+        run: |
+          echo "code=$(date +%s)" >> $GITHUB_OUTPUT
+          echo "name=$(date +%Y.%m.%d.%H%M)" >> $GITHUB_OUTPUT
+      - name: Run lint
+        run: ./gradlew lintDebug --stacktrace
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
         env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
           KEYSTORE_PATH: ${{ github.workspace }}/vlcplayer.keystore
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ts.outputs.code }}
-          name: "VLC Player v${{ steps.ts.outputs.code }}"
+          tag_name: v${{ steps.version.outputs.code }}
+          name: "VLC Player ${{ steps.version.outputs.name }}"
           body: "Auto build tu commit ${{ github.sha }}"
           files: app/build/outputs/apk/release/app-release.apk
         env:

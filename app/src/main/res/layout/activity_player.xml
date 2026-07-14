@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000"
@@ -39,7 +40,7 @@
                 android:layout_width="40dp" android:layout_height="40dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_media_previous"
-                android:tint="#FFFFFF" android:contentDescription="back"/>
+                app:tint="#FFFFFF" android:contentDescription="back"/>
 
             <TextView android:id="@+id/tv_title"
                 android:layout_width="0dp" android:layout_height="wrap_content"
@@ -55,61 +56,61 @@
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_recent_history"
-                android:tint="#FFFFFF" android:contentDescription="speed"/>
+                app:tint="#FFFFFF" android:contentDescription="speed"/>
 
             <ImageButton android:id="@+id/btn_eq"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_manage"
-                android:tint="#FFFFFF" android:contentDescription="eq"/>
+                app:tint="#FFFFFF" android:contentDescription="eq"/>
 
             <ImageButton android:id="@+id/btn_filter"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_camera"
-                android:tint="#E94560" android:contentDescription="filter"/>
+                app:tint="#E94560" android:contentDescription="filter"/>
 
             <ImageButton android:id="@+id/btn_night"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_day"
-                android:tint="#FFD700" android:contentDescription="night"/>
+                app:tint="#FFD700" android:contentDescription="night"/>
 
             <ImageButton android:id="@+id/btn_bookmark"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/btn_star_big_off"
-                android:tint="#FFFFFF" android:contentDescription="bookmark"/>
+                app:tint="#FFFFFF" android:contentDescription="bookmark"/>
 
             <ImageButton android:id="@+id/btn_pip"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_slideshow"
-                android:tint="#FFFFFF" android:contentDescription="pip"/>
+                app:tint="#FFFFFF" android:contentDescription="pip"/>
 
             <ImageButton android:id="@+id/btn_aspect"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_zoom"
-                android:tint="#FFFFFF" android:contentDescription="aspect"/>
+                app:tint="#FFFFFF" android:contentDescription="aspect"/>
 
             <ImageButton android:id="@+id/btn_lock"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_lock_lock"
-                android:tint="#FFFFFF" android:contentDescription="lock"/>
+                app:tint="#FFFFFF" android:contentDescription="lock"/>
 
             <ImageButton android:id="@+id/btn_translate"
                 android:layout_width="32dp" android:layout_height="32dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_edit"
-                android:tint="#5865F2" android:contentDescription="translate"/>
+                app:tint="#5865F2" android:contentDescription="translate"/>
 
             <ImageButton android:id="@+id/btn_funscript"
                 android:layout_width="36dp" android:layout_height="36dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_media_play"
-                android:tint="#44FFAA" android:padding="4dp"
+                app:tint="#44FFAA" android:padding="4dp"
                 android:contentDescription="Funscript"/>
 
         </LinearLayout>
@@ -126,34 +127,34 @@
                 android:layout_width="44dp" android:layout_height="44dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_media_previous"
-                android:tint="#CCFFFFFF" android:contentDescription="prev"/>
+                app:tint="#CCFFFFFF" android:contentDescription="prev"/>
 
             <ImageButton android:id="@+id/btn_rewind"
                 android:layout_width="50dp" android:layout_height="50dp"
                 android:layout_marginHorizontal="8dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_media_rew"
-                android:tint="#FFFFFF" android:contentDescription="rewind"/>
+                app:tint="#FFFFFF" android:contentDescription="rewind"/>
 
             <ImageButton android:id="@+id/btn_play_pause"
                 android:layout_width="72dp" android:layout_height="72dp"
                 android:layout_marginHorizontal="12dp"
                 android:background="@drawable/circle_button_bg"
                 android:src="@android:drawable/ic_media_pause"
-                android:tint="#FFFFFF" android:contentDescription="play"/>
+                app:tint="#FFFFFF" android:contentDescription="play"/>
 
             <ImageButton android:id="@+id/btn_forward"
                 android:layout_width="50dp" android:layout_height="50dp"
                 android:layout_marginHorizontal="8dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_media_ff"
-                android:tint="#FFFFFF" android:contentDescription="forward"/>
+                app:tint="#FFFFFF" android:contentDescription="forward"/>
 
             <ImageButton android:id="@+id/btn_next"
                 android:layout_width="44dp" android:layout_height="44dp"
                 android:background="?selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_media_next"
-                android:tint="#CCFFFFFF" android:contentDescription="next"/>
+                app:tint="#CCFFFFFF" android:contentDescription="next"/>
 
         </LinearLayout>
 
@@ -178,7 +179,7 @@
                     android:layout_width="32dp" android:layout_height="32dp"
                     android:background="?selectableItemBackgroundBorderless"
                     android:src="@android:drawable/ic_menu_sort_by_size"
-                    android:tint="#AAFFFFFF" android:alpha="0.5"
+                    app:tint="#AAFFFFFF" android:alpha="0.5"
                     android:contentDescription="shuffle"/>
 
                 <ImageButton android:id="@+id/btn_repeat"
@@ -186,7 +187,7 @@
                     android:layout_marginStart="8dp"
                     android:background="?selectableItemBackgroundBorderless"
                     android:src="@android:drawable/ic_menu_rotate"
-                    android:tint="#AAFFFFFF" android:alpha="0.4"
+                    app:tint="#AAFFFFFF" android:alpha="0.4"
                     android:contentDescription="repeat"/>
 
                 <ImageButton android:id="@+id/btn_audio"
@@ -194,7 +195,7 @@
                     android:layout_marginStart="8dp"
                     android:background="?selectableItemBackgroundBorderless"
                     android:src="@android:drawable/ic_lock_silent_mode_off"
-                    android:tint="#FFFFFF" android:padding="4dp"
+                    app:tint="#FFFFFF" android:padding="4dp"
                     android:contentDescription="Audio Track"/>
 
                 <View android:layout_width="0dp" android:layout_height="0dp"
@@ -204,7 +205,7 @@
                     android:layout_width="32dp" android:layout_height="32dp"
                     android:background="?selectableItemBackgroundBorderless"
                     android:src="@android:drawable/ic_menu_share"
-                    android:tint="#FF6B35"
+                    app:tint="#FF6B35"
                     android:contentDescription="The Handy"/>
 
                 <ImageButton android:id="@+id/btn_queue"
@@ -212,7 +213,7 @@
                     android:layout_marginStart="8dp"
                     android:background="?selectableItemBackgroundBorderless"
                     android:src="@android:drawable/ic_menu_agenda"
-                    android:tint="#AAFFFFFF" android:contentDescription="queue"/>
+                    app:tint="#AAFFFFFF" android:contentDescription="queue"/>
 
             </LinearLayout>
 
@@ -262,7 +263,7 @@
                 android:layout_width="48dp" android:layout_height="48dp"
                 android:background="@drawable/circle_button_bg"
                 android:src="@android:drawable/ic_lock_lock"
-                android:tint="#FFFFFF" android:contentDescription="unlock"/>
+                app:tint="#FFFFFF" android:contentDescription="unlock"/>
 
             <TextView android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

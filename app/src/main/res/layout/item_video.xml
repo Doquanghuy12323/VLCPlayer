@@ -74,6 +74,6 @@
             android:layout_width="24dp"
             android:layout_height="24dp"
             android:src="@android:drawable/ic_media_play"
-            android:tint="@color/text_secondary" />
+            app:tint="@color/text_secondary" />
     </LinearLayout>
 </androidx.cardview.widget.CardView>

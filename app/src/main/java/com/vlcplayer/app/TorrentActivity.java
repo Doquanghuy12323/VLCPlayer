@@ -64,8 +64,23 @@ public class TorrentActivity extends AppCompatActivity {
         btnStop.setOnClickListener(v -> stopStream());
         btnPickFile.setOnClickListener(v -> pickTorrentFile());
 
-        String magnet = getIntent().getStringExtra("magnet");
-        if (magnet != null) etMagnet.setText(magnet);
+        handleIntent(getIntent());
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent == null) return;
+        String source = intent.getStringExtra("magnet");
+        if ((source == null || source.isEmpty()) && intent.getData() != null) {
+            source = intent.getData().toString();
+        }
+        if (source != null && !source.isEmpty()) etMagnet.setText(source);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
     }
 
     private void pickTorrentFile() {
@@ -82,14 +97,14 @@ public class TorrentActivity extends AppCompatActivity {
             Uri uri = data.getData();
             if (uri == null) return;
             try {
-                InputStream is = getContentResolver().openInputStream(uri);
                 File tmp = new File(getCacheDir(), "stream.torrent");
-                FileOutputStream fos = new FileOutputStream(tmp);
-                byte[] buf = new byte[4096];
-                int len;
-                while ((len = is.read(buf)) > 0) fos.write(buf, 0, len);
-                fos.close();
-                is.close();
+                try (InputStream is = getContentResolver().openInputStream(uri);
+                     FileOutputStream fos = new FileOutputStream(tmp)) {
+                    if (is == null) throw new java.io.IOException("Khong mo duoc file torrent");
+                    byte[] buf = new byte[8192];
+                    int len;
+                    while ((len = is.read(buf)) != -1) fos.write(buf, 0, len);
+                }
                 etMagnet.setText("file://" + tmp.getAbsolutePath());
                 Toast.makeText(this, "Da chon: " + tmp.getName(), Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
@@ -106,7 +121,8 @@ public class TorrentActivity extends AppCompatActivity {
         }
 
         boolean isValid = url.startsWith("magnet:")
-            || url.startsWith("http")
+            || url.startsWith("http://")
+            || url.startsWith("https://")
             || url.startsWith("file://")
             || url.startsWith("/");
         if (!isValid) {

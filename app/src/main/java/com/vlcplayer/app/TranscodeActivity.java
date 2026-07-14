@@ -1,34 +1,37 @@
 package com.vlcplayer.app;
 
-import com.vlcplayer.app.TranscodeManager;
-
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class TranscodeActivity extends AppCompatActivity {
 
+    private static final int REQ_VIDEO = 2002;
     private EditText etVideoPath;
-    private ImageButton btnPickVideo;
     private Button btnStartCast, btnStopCast;
     private ProgressBar progressBar;
     private TextView tvStatus, tvDetails;
     private TranscodeManager transcodeManager;
+    private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
     private String generatedLanUrl = "";
 
     @Override
@@ -39,136 +42,136 @@ public class TranscodeActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_torrent); // Tận dụng lại file layout có sẵn các ID tương đồng
+        setContentView(R.layout.activity_transcode);
 
-        etVideoPath  = findViewById(R.id.et_magnet); // ID ô nhập liệu
-        btnPickVideo = findViewById(R.id.btn_pick_file); // ID nút chọn file
-        btnStartCast = findViewById(R.id.btn_stream); // ID nút Phát
-        btnStopCast  = findViewById(R.id.btn_stop); // ID nút Dừng
-        progressBar  = findViewById(R.id.progress_bar);
-        tvStatus     = findViewById(R.id.tv_status);
-        tvDetails    = findViewById(R.id.tv_speed);
-
-        // Đổi tên nhãn nút bấm cho đúng tính năng thuần Video Casting
-        btnStartCast.setText("BẮT ĐẦU PHÁT LAN");
-        btnStopCast.setText("DỪNG PHÁT LAN");
-        etVideoPath.setHint("Đường dẫn file video (MP4, MKV, AVI)...");
-
-        findViewById(R.id.btn_back).setOnClickListener(v -> finish());
-
+        etVideoPath = findViewById(R.id.et_video_path);
+        btnStartCast = findViewById(R.id.btn_start_cast);
+        btnStopCast = findViewById(R.id.btn_stop_cast);
+        progressBar = findViewById(R.id.progress_bar);
+        tvStatus = findViewById(R.id.tv_status);
+        tvDetails = findViewById(R.id.tv_details);
         transcodeManager = new TranscodeManager(this);
 
-        btnPickVideo.setOnClickListener(v -> openVideoPicker());
+        findViewById(R.id.btn_back).setOnClickListener(v -> finish());
+        findViewById(R.id.btn_pick_video).setOnClickListener(v -> openVideoPicker());
         btnStartCast.setOnClickListener(v -> startBroadcasting());
         btnStopCast.setOnClickListener(v -> stopBroadcasting());
-
-        // Chạm vào dòng link LAN hiển thị để tự động sao chép sang PC
-        tvStatus.setOnClickListener(v -> {
-            if (!generatedLanUrl.isEmpty()) {
-                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                ClipData clip = ClipData.newPlainText("Transcode URL", generatedLanUrl);
-                clipboard.setPrimaryClip(clip);
-                Toast.makeText(this, "Đã copy link LAN gánh tải hiệu năng!", Toast.LENGTH_SHORT).show();
-            }
-        });
+        tvStatus.setOnClickListener(v -> copyLanUrl());
     }
 
     private void openVideoPicker() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("video/*");
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        startActivityForResult(intent, 2002);
+        startActivityForResult(intent, REQ_VIDEO);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == 2002 && resultCode == RESULT_OK && data != null) {
-            Uri videoUri = data.getData();
-            if (videoUri != null) {
-                copyVideoToCacheAndSetPath(videoUri);
-            }
-        }
+        if (requestCode != REQ_VIDEO || resultCode != RESULT_OK || data == null) return;
+        Uri uri = data.getData();
+        if (uri != null) copyVideoToCache(uri);
     }
 
-    private void copyVideoToCacheAndSetPath(Uri uri) {
-        try {
-            InputStream is = getContentResolver().openInputStream(uri);
-            File tempFile = new File(getCacheDir(), "cast_input_video.mp4");
-            FileOutputStream fos = new FileOutputStream(tempFile);
-            byte[] buffer = new byte[1024];
-            int length;
-            while ((length = is.read(buffer)) > 0) {
-                fos.write(buffer, 0, length);
+    private void copyVideoToCache(Uri uri) {
+        progressBar.setVisibility(View.VISIBLE);
+        tvStatus.setText("Dang chuan bi video...");
+        btnStartCast.setEnabled(false);
+        fileExecutor.execute(() -> {
+            try {
+                String displayName = getDisplayName(uri);
+                File file = new File(getCacheDir(), "cast_" + sanitize(displayName));
+                try (InputStream input = getContentResolver().openInputStream(uri);
+                     FileOutputStream output = new FileOutputStream(file)) {
+                    if (input == null) throw new java.io.IOException("Khong mo duoc video");
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                }
+                runOnUiThread(() -> {
+                    progressBar.setVisibility(View.GONE);
+                    etVideoPath.setText(file.getAbsolutePath());
+                    btnStartCast.setEnabled(true);
+                    startBroadcasting();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    progressBar.setVisibility(View.GONE);
+                    btnStartCast.setEnabled(true);
+                    tvStatus.setText("Loi doc video: " + e.getMessage());
+                });
             }
-            fos.close();
-            is.close();
+        });
+    }
 
-            etVideoPath.setText(tempFile.getAbsolutePath());
-            startBroadcasting();
-        } catch (Exception e) {
-            Toast.makeText(this, "Lỗi nạp file video: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-        }
+    private String getDisplayName(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) return cursor.getString(0);
+        } catch (Exception ignored) {}
+        return "video.mp4";
+    }
+
+    private String sanitize(String name) {
+        String safe = name == null ? "video.mp4" : name.replaceAll("[^a-zA-Z0-9._-]", "_");
+        return safe.isEmpty() ? "video.mp4" : safe;
     }
 
     private void startBroadcasting() {
         String path = etVideoPath.getText().toString().trim();
         if (path.isEmpty()) {
-            Toast.makeText(this, "Vui lòng chọn một file video trong máy!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Hay chon video", Toast.LENGTH_SHORT).show();
             return;
         }
-
         btnStartCast.setEnabled(false);
         btnStopCast.setEnabled(true);
         progressBar.setVisibility(View.VISIBLE);
-        tvStatus.setText("Đang khởi động chip đồ họa nén video...");
+        tvStatus.setText("Dang khoi dong may chu LAN...");
 
         transcodeManager.startServer(path, new TranscodeManager.Callback() {
-            @Override
-            public void onServerStarted(String lanUrl) {
+            @Override public void onServerStarted(String lanUrl) {
                 generatedLanUrl = lanUrl;
                 progressBar.setVisibility(View.GONE);
-                tvStatus.setText("📺 ĐÃ PHÁT SÓNG! Ấn vào đây để Copy link dán vào PC:\n" + lanUrl);
-                tvDetails.setText("Điện thoại đang gánh 100% hiệu năng nén hình ảnh trực tiếp.");
+                tvStatus.setText("Dang phat qua LAN. Cham de copy:\n" + lanUrl);
+                tvDetails.setText("Mo link nay bang VLC tren may tinh cung Wi-Fi.");
             }
-
-            @Override
-            public void onClientConnected(String clientIp) {
-                tvDetails.setText("Thiết bị khách (" + clientIp + ") đang kết nối và xem mượt mà!");
+            @Override public void onClientConnected(String clientIp) {
+                tvDetails.setText("Thiet bi " + clientIp + " dang xem");
             }
-
-            @Override
-            public void onTranscodeLog(String logLine) {
-                tvDetails.setText(logLine);
+            @Override public void onTranscodeLog(String logLine) { tvDetails.setText(logLine); }
+            @Override public void onError(String error) {
+                tvStatus.setText("Loi: " + error);
+                resetButtons();
             }
-
-            @Override
-            public void onError(String error) {
-                tvStatus.setText("Lỗi: " + error);
-                progressBar.setVisibility(View.GONE);
-                stopBroadcasting();
-            }
-
-            @Override
-            public void onServerStopped() {
-                stopBroadcasting();
-            }
+            @Override public void onServerStopped() { resetButtons(); }
         });
+    }
+
+    private void copyLanUrl() {
+        if (generatedLanUrl.isEmpty()) return;
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        clipboard.setPrimaryClip(ClipData.newPlainText("VLC LAN URL", generatedLanUrl));
+        Toast.makeText(this, "Da copy link LAN", Toast.LENGTH_SHORT).show();
     }
 
     private void stopBroadcasting() {
         transcodeManager.stopServer();
-        btnStartCast.setEnabled(true);
+        resetButtons();
+        tvStatus.setText("May chu LAN da dung");
+    }
+
+    private void resetButtons() {
+        btnStartCast.setEnabled(!etVideoPath.getText().toString().trim().isEmpty());
         btnStopCast.setEnabled(false);
         progressBar.setVisibility(View.GONE);
-        tvStatus.setText("Máy chủ phát sóng đã dừng.");
-        tvDetails.setText("");
         generatedLanUrl = "";
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        transcodeManager.stopServer();
+        transcodeManager.destroy();
+        fileExecutor.shutdownNow();
     }
 }

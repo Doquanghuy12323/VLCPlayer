@@ -2,6 +2,7 @@ package com.vlcplayer.app;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -46,10 +47,17 @@ public class MainActivity extends AppCompatActivity
     private final List<VideoItem> videoList = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private UpdateManager updateManager;
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(AppLanguageManager.applyLanguage(base));
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        new PrivacyManager(this).applyWindowSecurity(this);
         setContentView(R.layout.activity_main);
 
         Toolbar toolbar = findViewById(R.id.toolbar);
@@ -73,7 +81,8 @@ public class MainActivity extends AppCompatActivity
         if (fab != null) fab.setOnClickListener(v -> showUrlDialog());
 
         checkPermissionsAndLoad();
-        new UpdateManager(this).checkForUpdate(true);
+        updateManager = new UpdateManager(this);
+        updateManager.checkForUpdate(true);
         handleShareIntent(getIntent());
     }
 
@@ -116,6 +125,7 @@ public class MainActivity extends AppCompatActivity
     protected void onDestroy() {
         super.onDestroy();
         if (adapter != null) adapter.clearCache();
+        if (updateManager != null) updateManager.destroy();
         executor.shutdown();
     }
 
@@ -246,7 +256,8 @@ public class MainActivity extends AppCompatActivity
             cleanApp();
             return true;
         } else if (id == R.id.action_update) {
-            android.widget.Toast.makeText(this, "Dang kiem tra cap nhat...", android.widget.Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Dang kiem tra cap nhat...", Toast.LENGTH_SHORT).show();
+            if (updateManager != null) updateManager.checkForUpdate(false);
             return true;
         } else if (id == R.id.action_ai) {
             startActivity(new android.content.Intent(this, GeminiChatActivity.class));
@@ -259,7 +270,11 @@ public class MainActivity extends AppCompatActivity
             return true;
         } else if (id == R.id.action_torrent) {
             startActivity(new android.content.Intent(this, TorrentActivity.class));
-            } else if (id == R.id.action_language) {
+            return true;
+        } else if (id == R.id.action_lan_cast) {
+            startActivity(new Intent(this, TranscodeActivity.class));
+            return true;
+        } else if (id == R.id.action_language) {
             showLanguageDialog();
             return true;
         } else if (id == R.id.action_handy) {
@@ -267,17 +282,6 @@ public class MainActivity extends AppCompatActivity
             return true;
         }
         return super.onOptionsItemSelected(item);
-    }
-
-    private void togglePrivacy() {
-        boolean current = new PrivacyManager(this).isEnabled();
-        boolean next = !current;
-        java.util.List<String> paths2 = new java.util.ArrayList<>();
-        new PrivacyManager(this).setEnabled(next, paths2);
-        Toast.makeText(this,
-            next ? "Che do bao mat: BAT (Gallery se an video)"
-                 : "Che do bao mat: TAT (Gallery se hien video lai)",
-            Toast.LENGTH_LONG).show();
     }
 
     private void showUrlDialog() {
@@ -435,11 +439,13 @@ public class MainActivity extends AppCompatActivity
             .setTitle("Che do bao mat")
             .setMessage(msg)
             .setPositiveButton("Dong y", (d, w) -> {
-                java.util.List<String> paths2 = new java.util.ArrayList<>();
-                new PrivacyManager(this).setEnabled(next, paths2);
+                java.util.List<String> paths2 = getVideoPaths();
+                int changed = new PrivacyManager(this).setEnabled(next, paths2);
                 android.widget.Toast.makeText(this,
-                    next ? "Da bat bao mat" : "Da tat bao mat",
+                    (next ? "Da bat bao mat" : "Da tat bao mat")
+                        + " cho " + changed + " thu muc",
                     android.widget.Toast.LENGTH_SHORT).show();
+                recreate();
             })
             .setNegativeButton("Huy", null).show();
     }
@@ -448,25 +454,34 @@ public class MainActivity extends AppCompatActivity
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("*/*");
         intent.putExtra(android.content.Intent.EXTRA_MIME_TYPES,
-            new String[]{"application/zip","application/x-cbz","application/x-cbr"});
+            new String[]{"application/zip","application/x-cbz"});
         intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
         startActivityForResult(intent, 2001);
     }
 
-        private void showLanguageDialog() {
-        String[] langs = {"Tieng Viet", "English"};
-        String[] codes = {"vi", "en"};
+    private void showLanguageDialog() {
+        String[][] available = AppLanguageManager.LANGUAGES;
+        String[] langs = new String[available.length];
+        for (int i = 0; i < available.length; i++) langs[i] = available[i][0];
         new androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Ngon ngu / Language")
             .setItems(langs, (d, which) -> {
-                android.content.SharedPreferences prefs =
-                    getSharedPreferences("app_prefs", MODE_PRIVATE);
-                prefs.edit().putString("language", codes[which]).apply();
+                AppLanguageManager.saveLanguage(this, available[which][1]);
                 android.widget.Toast.makeText(this,
                     "Da chon: " + langs[which],
                     android.widget.Toast.LENGTH_SHORT).show();
                 recreate();
             }).show();
+    }
+
+    private java.util.List<String> getVideoPaths() {
+        java.util.List<String> paths = new java.util.ArrayList<>();
+        for (VideoItem item : videoList) {
+            if (item.getPath() != null && !item.getPath().trim().isEmpty()) {
+                paths.add(item.getPath());
+            }
+        }
+        return paths;
     }
 
 
