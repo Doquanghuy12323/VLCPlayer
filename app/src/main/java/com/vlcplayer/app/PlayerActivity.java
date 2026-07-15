@@ -623,7 +623,7 @@ public class PlayerActivity extends AppCompatActivity {
                 final long pos = history.lastPosition;
                 handler.postDelayed(() -> {
                     if (uri.equals(pendingUri)) {
-                        mediaPlayer.setTime(pos);
+                        seekPlaybackTo(pos);
                         Toast.makeText(this, "Tiep tuc tu " + formatTime(pos), Toast.LENGTH_SHORT).show();
                     }
                 }, 1500);
@@ -634,12 +634,18 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void saveHistory() {
         if (uriString == null) return;
-        long pos = mediaPlayer != null ? mediaPlayer.getTime() : 0;
-        long dur = mediaPlayer != null ? mediaPlayer.getLength() : 0;
+        final String historyUri = uriString;
+        final String historyTitle = videoTitle != null ? videoTitle : "Video";
+        final long duration = mediaPlayer != null ? mediaPlayer.getLength() : 0;
+        long currentPosition = mediaPlayer != null ? mediaPlayer.getTime() : 0;
+        if (duration > 0 && currentPosition >= Math.max(0, duration - 5_000)) {
+            currentPosition = 0;
+        }
+        final long savedPosition = currentPosition;
         dbExecutor.execute(() -> {
-            AppDatabase.get(this).dao().deleteHistory(uriString);
+            AppDatabase.get(this).dao().deleteHistory(historyUri);
             AppDatabase.get(this).dao().insertHistory(
-                new HistoryItem(uriString, videoTitle != null ? videoTitle : "Video", pos, dur));
+                new HistoryItem(historyUri, historyTitle, savedPosition, duration));
         });
     }
 
