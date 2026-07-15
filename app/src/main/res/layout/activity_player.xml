@@ -20,6 +20,16 @@
         android:background="#88000000"
         android:visibility="gone"/>
 
+    <!-- Stable gesture target above LibVLC surfaces and below player controls. -->
+    <View
+        android:id="@+id/video_touch_layer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="false"
+        android:importantForAccessibility="no"/>
+
     <LinearLayout
         android:id="@+id/controls_overlay"
         android:layout_width="match_parent"

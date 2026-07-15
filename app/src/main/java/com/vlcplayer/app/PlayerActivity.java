@@ -19,10 +19,7 @@ import android.util.DisplayMetrics;
 import android.util.Rational;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
-import android.view.SurfaceView;
-import android.view.TextureView;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -69,6 +66,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
     private VLCVideoLayout videoLayout;
+    private View videoTouchLayer;
     private boolean isInBackground = false;
     private long lastPosition = 0;
     private volatile String pendingUri = null;
@@ -179,6 +177,7 @@ public class PlayerActivity extends AppCompatActivity {
         videoTitle = getIntent().getStringExtra(EXTRA_TITLE);
 
         videoLayout     = findViewById(R.id.vlc_video_layout);
+        videoTouchLayer = findViewById(R.id.video_touch_layer);
         seekBar         = findViewById(R.id.seekBar);
         tvCurrent       = findViewById(R.id.tv_current);
         tvTotal         = findViewById(R.id.tv_total);
@@ -323,30 +322,11 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
         videoLayout.setOnTouchListener(this::handleVideoTouch);
-        bindVideoSurfaceGestureListener();
+        videoTouchLayer.setOnTouchListener(this::handleVideoTouch);
     }
 
     private boolean handleVideoTouch(View view, MotionEvent event) {
         return gestureDetector != null && gestureDetector.onTouchEvent(event);
-    }
-
-    /** LibVLC inserts/recreates a SurfaceView that otherwise consumes video taps. */
-    private void bindVideoSurfaceGestureListener() {
-        if (videoLayout == null) return;
-        videoLayout.post(() -> bindGestureToVideoSurfaces(videoLayout));
-    }
-
-    private void bindGestureToVideoSurfaces(View view) {
-        if (view instanceof SurfaceView || view instanceof TextureView) {
-            view.setClickable(true);
-            view.setOnTouchListener(this::handleVideoTouch);
-        }
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                bindGestureToVideoSurfaces(group.getChildAt(i));
-            }
-        }
     }
 
     private void seekPlaybackTo(long requestedPositionMs) {
@@ -414,7 +394,6 @@ public class PlayerActivity extends AppCompatActivity {
             }
         });
         mediaPlayer.attachViews(videoLayout, null, false, false);
-        bindVideoSurfaceGestureListener();
     }
 
     private void playNext() {
@@ -608,7 +587,6 @@ public class PlayerActivity extends AppCompatActivity {
                 if (!uri.equals(pendingUri)) return;
                 try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
                 mediaPlayer.attachViews(videoLayout, null, false, false);
-                bindVideoSurfaceGestureListener();
             });
         } catch (Exception e) {
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -1458,7 +1436,6 @@ public class PlayerActivity extends AppCompatActivity {
                     if (isInBackground) {
                         mediaPlayer.attachViews(videoLayout, null, false,
                             filtersEnabled);
-                        bindVideoSurfaceGestureListener();
                     }
                     if (isInBackground) {
                         if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
