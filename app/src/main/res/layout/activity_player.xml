@@ -17,6 +17,7 @@
         android:id="@+id/night_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:elevation="1dp"
         android:background="#88000000"
         android:visibility="gone"/>
 
@@ -25,6 +26,7 @@
         android:id="@+id/video_touch_layer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:elevation="2dp"
         android:background="@android:color/transparent"
         android:clickable="true"
         android:focusable="false"
@@ -34,6 +36,7 @@
         android:id="@+id/controls_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:elevation="4dp"
         android:orientation="vertical"
         android:background="#55000000">
 
@@ -259,6 +262,7 @@
         android:id="@+id/lock_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:elevation="6dp"
         android:visibility="gone">
 
         <LinearLayout
