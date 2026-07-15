@@ -105,9 +105,22 @@ public class PlayerActivity extends AppCompatActivity {
     private String pendingHandyScriptUrl;
     private static final long HANDY_STALL_TIMEOUT_MS = 2_000L;
     private static final long HANDY_PROGRESS_THRESHOLD_MS = 100L;
+    private static final int MAX_PLAYBACK_AUTO_RETRIES = 1;
+    private static final long PLAYBACK_RETRY_DELAY_MS = 2_000L;
+    private static final long PLAYBACK_STABLE_RESET_MS = 15_000L;
     private long handyLastVideoProgressMs = -1L;
     private long handyLastProgressElapsedMs;
     private boolean handyStoppedForVideoStall;
+    private int playbackAutoRetryCount;
+    private boolean handlingPlaybackError;
+    private Runnable playbackRetryRunnable;
+    private Runnable playbackStableResetRunnable;
+    private String pendingRecoveryUri;
+    private long pendingRecoveryPositionMs = -1L;
+    private long lastKnownPlaybackPositionMs;
+    private long lastKnownMediaDurationMs = -1L;
+    private long playbackClockBasePositionMs;
+    private long playbackClockStartedElapsedMs = -1L;
 
     private final ActivityResultLauncher<String[]> funscriptPicker =
         registerForActivityResult(new ActivityResultContracts.OpenDocument(),
@@ -117,13 +130,14 @@ public class PlayerActivity extends AppCompatActivity {
         if (handyManager == null || mediaPlayer == null
                 || !handyManager.isScriptReady() || !mediaPlayer.isPlaying()) return;
         if (Math.abs(playbackSpeed - 1.0f) > 0.01f) return;
-        handyManager.play(mediaPlayer.getTime(), null);
+        handyManager.play(getBestKnownPlaybackPosition(), null);
     };
 
     private final Runnable handyHealthCheck = new Runnable() {
         @Override public void run() {
             if (handyManager != null && mediaPlayer != null) {
-                handyManager.healthCheck(mediaPlayer.getTime(), mediaPlayer.isPlaying());
+                handyManager.healthCheck(
+                    getBestKnownPlaybackPosition(), mediaPlayer.isPlaying());
                 if (handyManager.isConnected()) prepareScriptAfterConnection();
             }
             handler.postDelayed(this, 30_000);
@@ -142,16 +156,17 @@ public class PlayerActivity extends AppCompatActivity {
         @Override public void run() {
             if (mediaPlayer != null) {
                 long pos = mediaPlayer.getTime();
-                if (!userSeeking) {
-                    long len = mediaPlayer.getLength();
-                    if (len > 0) {
-                        seekBar.setMax((int) len);
-                        seekBar.setProgress((int) pos);
-                        tvCurrent.setText(formatTime(pos));
-                        tvTotal.setText(formatTime(len));
-                    }
+                long len = mediaPlayer.getLength();
+                if (pos >= 0) lastKnownPlaybackPositionMs = pos;
+                if (len > 0) lastKnownMediaDurationMs = len;
+                long effectivePosition = getBestKnownPlaybackPosition();
+                if (!userSeeking && len > 0) {
+                    seekBar.setMax((int) len);
+                    seekBar.setProgress((int) effectivePosition);
+                    tvCurrent.setText(formatTime(effectivePosition));
+                    tvTotal.setText(formatTime(len));
                 }
-                monitorHandyPlaybackProgress(pos);
+                monitorHandyPlaybackProgress(effectivePosition);
             }
             handler.postDelayed(this, 500);
         }
@@ -240,10 +255,10 @@ public class PlayerActivity extends AppCompatActivity {
         btnPlayPause.setOnClickListener(v -> togglePlayPause());
         videoLayout.setOnClickListener(v -> { if (!isLocked) toggleControls(); });
         findViewById(R.id.btn_forward).setOnClickListener(v -> {
-            if (mediaPlayer != null) seekPlaybackTo(mediaPlayer.getTime() + 10000);
+            if (mediaPlayer != null) seekPlaybackTo(getBestKnownPlaybackPosition() + 10000);
         });
         findViewById(R.id.btn_rewind).setOnClickListener(v -> {
-            if (mediaPlayer != null) seekPlaybackTo(mediaPlayer.getTime() - 10000);
+            if (mediaPlayer != null) seekPlaybackTo(getBestKnownPlaybackPosition() - 10000);
         });
         btnNext.setOnClickListener(v -> playNext());
         btnPrev.setOnClickListener(v -> playPrev());
@@ -321,10 +336,10 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public boolean onDoubleTap(MotionEvent e) {
                 if (isLocked) return false;
                 if (e.getX() < screenW / 2f) {
-                    if (mediaPlayer != null) seekPlaybackTo(mediaPlayer.getTime() - 10000);
+                    if (mediaPlayer != null) seekPlaybackTo(getBestKnownPlaybackPosition() - 10000);
                     Toast.makeText(PlayerActivity.this, "-10s", Toast.LENGTH_SHORT).show();
                 } else {
-                    if (mediaPlayer != null) seekPlaybackTo(mediaPlayer.getTime() + 10000);
+                    if (mediaPlayer != null) seekPlaybackTo(getBestKnownPlaybackPosition() + 10000);
                     Toast.makeText(PlayerActivity.this, "+10s", Toast.LENGTH_SHORT).show();
                 }
                 return true;
@@ -348,6 +363,11 @@ public class PlayerActivity extends AppCompatActivity {
         long position = Math.max(0, requestedPositionMs);
         if (duration > 0) position = Math.min(position, duration);
         mediaPlayer.setTime(position);
+        lastKnownPlaybackPositionMs = position;
+        seekBar.setProgress((int) position);
+        tvCurrent.setText(formatTime(position));
+        if (mediaPlayer.isPlaying()) startPlaybackClockEstimate(position);
+        else playbackClockStartedElapsedMs = -1L;
         resetHandyPlaybackWatchdog(position);
         handler.removeCallbacks(handyCorrectionSync);
         if (handyManager != null && handyManager.isScriptReady()) {
@@ -430,6 +450,13 @@ public class PlayerActivity extends AppCompatActivity {
             switch (event.type) {
                 case MediaPlayer.Event.Playing:
                     runOnUiThread(() -> {
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.i("VLCRecovery", "MediaPlayer entered Playing state");
+                        }
+                        handlingPlaybackError = false;
+                        cancelPlaybackRetry();
+                        restorePendingRecoveryPosition();
+                        startPlaybackClockEstimate(getBestKnownPlaybackPosition());
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
                         handler.postDelayed(() -> applyScaleMode(), 200);
                         scheduleHideControls();
@@ -437,32 +464,231 @@ public class PlayerActivity extends AppCompatActivity {
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 300);
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 1000);
                         syncHandyWithPlayback();
+                        schedulePlaybackStableReset();
                     });
                     break;
                 case MediaPlayer.Event.Paused:
                     runOnUiThread(() -> {
+                        freezePlaybackClockEstimate();
+                        cancelPlaybackStableReset();
                         handler.removeCallbacks(handyCorrectionSync);
                         if (handyManager != null) handyManager.stopPlayback(null);
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
                     });
                     break;
                 case MediaPlayer.Event.EndReached:
-                    if (handyManager != null) handyManager.stopPlayback(null);
-                    saveHistory();
-                    runOnUiThread(() -> {
-                        PlaylistManager pm = PlaylistManager.get();
-                        if (pm.getRepeatMode() == PlaylistManager.RepeatMode.ONE) {
-                            playMedia(uriString);
-                        } else if (pm.hasNext()) {
-                            playNext();
-                        } else {
-                            finish();
-                        }
-                    });
+                    runOnUiThread(this::handlePlaybackEndReached);
+                    break;
+                case MediaPlayer.Event.EncounteredError:
+                    runOnUiThread(this::handlePlaybackError);
                     break;
             }
         });
         mediaPlayer.attachViews(videoLayout, null, false, false);
+    }
+
+    private void handlePlaybackEndReached() {
+        long position = getBestKnownPlaybackPosition();
+        lastKnownPlaybackPositionMs = position;
+        playbackClockBasePositionMs = position;
+        playbackClockStartedElapsedMs = -1L;
+        long duration = getBestKnownMediaDuration();
+        long remaining = duration > 0 ? Math.max(0L, duration - position) : -1L;
+        long endTolerance = duration > 0
+            ? Math.max(10_000L, Math.min(30_000L, duration / 20L))
+            : 0L;
+        boolean prematureNetworkEnd = isRetryableNetworkStream(uriString)
+            && duration > 0 && remaining > endTolerance;
+
+        if (BuildConfig.DEBUG) {
+            android.util.Log.i("VLCRecovery",
+                "MediaPlayer reached end: position=" + position
+                    + "ms duration=" + duration + "ms remaining=" + remaining + "ms");
+        }
+        if (prematureNetworkEnd) {
+            android.util.Log.w("VLCRecovery",
+                "Network stream ended prematurely; treating it as a recoverable error");
+            handlePlaybackError();
+            return;
+        }
+
+        cancelPlaybackStableReset();
+        if (handyManager != null) handyManager.stopPlayback(null);
+        if (duration > 0) {
+            lastKnownPlaybackPositionMs = duration;
+            playbackClockBasePositionMs = duration;
+        }
+        saveHistory();
+        PlaylistManager pm = PlaylistManager.get();
+        if (pm.getRepeatMode() == PlaylistManager.RepeatMode.ONE) {
+            playMedia(uriString);
+        } else if (pm.hasNext()) {
+            playNext();
+        } else {
+            finish();
+        }
+    }
+
+    private void handlePlaybackError() {
+        if (handlingPlaybackError || isFinishing() || isDestroyed() || isInBackground) return;
+
+        handlingPlaybackError = true;
+        cancelPlaybackStableReset();
+        handler.removeCallbacks(handyCorrectionSync);
+        if (handyManager != null) handyManager.stopPlayback(null);
+        btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
+
+        final String failedUri = uriString;
+        long failedPosition = getBestKnownPlaybackPosition();
+        lastKnownPlaybackPositionMs = failedPosition;
+        playbackClockBasePositionMs = failedPosition;
+        playbackClockStartedElapsedMs = -1L;
+
+        if (isRetryableNetworkStream(failedUri)
+                && playbackAutoRetryCount < MAX_PLAYBACK_AUTO_RETRIES) {
+            playbackAutoRetryCount++;
+            android.util.Log.w("VLCRecovery",
+                "Network playback failed; scheduling automatic retry "
+                    + playbackAutoRetryCount + "/" + MAX_PLAYBACK_AUTO_RETRIES);
+            final long recoveryPosition = failedPosition;
+            Toast.makeText(this,
+                "Stream bị gián đoạn, app đang tự kết nối lại...",
+                Toast.LENGTH_SHORT).show();
+
+            cancelPlaybackRetry();
+            playbackRetryRunnable = () -> {
+                playbackRetryRunnable = null;
+                if (isFinishing() || isInBackground || failedUri == null
+                        || !failedUri.equals(uriString)) {
+                    handlingPlaybackError = false;
+                    return;
+                }
+                pendingRecoveryUri = failedUri;
+                pendingRecoveryPositionMs = recoveryPosition;
+                handlingPlaybackError = false;
+                playMedia(failedUri, false);
+            };
+            handler.postDelayed(playbackRetryRunnable, PLAYBACK_RETRY_DELAY_MS);
+            return;
+        }
+
+        pendingRecoveryUri = null;
+        pendingRecoveryPositionMs = -1L;
+        android.util.Log.e("VLCRecovery",
+            isRetryableNetworkStream(failedUri)
+                ? "Network playback recovery exhausted; stopping safely"
+                : "Non-network playback failed; stopping safely");
+        try { if (mediaPlayer != null) mediaPlayer.stop(); }
+        catch (Exception ignored) {}
+        Toast.makeText(this,
+            isRetryableNetworkStream(failedUri)
+                ? "Không thể khôi phục stream. App đã dừng an toàn."
+                : "VLC không thể phát video này. App đã dừng an toàn.",
+            Toast.LENGTH_LONG).show();
+        finish();
+    }
+
+    private boolean isRetryableNetworkStream(String value) {
+        if (value == null || value.trim().isEmpty()) return false;
+        String scheme = Uri.parse(value).getScheme();
+        return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+    }
+
+    private long getBestKnownPlaybackPosition() {
+        long position = Math.max(0L, lastKnownPlaybackPositionMs);
+        if (mediaPlayer != null) {
+            try { position = Math.max(position, mediaPlayer.getTime()); }
+            catch (Exception ignored) {}
+        }
+        if (seekBar != null) position = Math.max(position, seekBar.getProgress());
+        if (playbackClockStartedElapsedMs >= 0
+                && position <= playbackClockBasePositionMs + 1_000L) {
+            long elapsed = Math.max(0L,
+                android.os.SystemClock.elapsedRealtime() - playbackClockStartedElapsedMs);
+            long estimate = playbackClockBasePositionMs
+                + Math.round(elapsed * Math.max(0.1f, playbackSpeed));
+            long duration = getBestKnownMediaDuration();
+            if (duration > 0) estimate = Math.min(estimate, duration);
+            position = Math.max(position, estimate);
+        }
+        return position;
+    }
+
+    private void startPlaybackClockEstimate(long position) {
+        playbackClockBasePositionMs = Math.max(0L, position);
+        playbackClockStartedElapsedMs = android.os.SystemClock.elapsedRealtime();
+    }
+
+    private void freezePlaybackClockEstimate() {
+        long position = getBestKnownPlaybackPosition();
+        lastKnownPlaybackPositionMs = position;
+        playbackClockBasePositionMs = position;
+        playbackClockStartedElapsedMs = -1L;
+    }
+
+    private long getBestKnownMediaDuration() {
+        long duration = Math.max(0L, lastKnownMediaDurationMs);
+        if (mediaPlayer != null) {
+            try { duration = Math.max(duration, mediaPlayer.getLength()); }
+            catch (Exception ignored) {}
+        }
+        if (seekBar != null) duration = Math.max(duration, seekBar.getMax());
+        return duration;
+    }
+
+    private void restorePendingRecoveryPosition() {
+        if (mediaPlayer == null || pendingRecoveryPositionMs < 0
+                || pendingRecoveryUri == null || !pendingRecoveryUri.equals(uriString)) return;
+        long position = pendingRecoveryPositionMs;
+        pendingRecoveryUri = null;
+        pendingRecoveryPositionMs = -1L;
+        if (position <= 0) return;
+        try {
+            long duration = mediaPlayer.getLength();
+            if (duration > 0) position = Math.min(position, duration);
+            mediaPlayer.setTime(position);
+            lastKnownPlaybackPositionMs = position;
+            resetHandyPlaybackWatchdog(position);
+            android.util.Log.i("VLCRecovery", "Stream resumed at " + position + "ms");
+        } catch (Exception e) {
+            android.util.Log.w("VLCRecovery", "Could not restore stream position", e);
+        }
+    }
+
+    private void schedulePlaybackStableReset() {
+        cancelPlaybackStableReset();
+        final String playingUri = uriString;
+        playbackStableResetRunnable = () -> {
+            playbackStableResetRunnable = null;
+            if (playingUri != null && playingUri.equals(uriString)
+                    && mediaPlayer != null && mediaPlayer.isPlaying()) {
+                playbackAutoRetryCount = 0;
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.i("VLCRecovery",
+                        "Playback remained stable; automatic retry allowance reset");
+                }
+            }
+        };
+        handler.postDelayed(playbackStableResetRunnable, PLAYBACK_STABLE_RESET_MS);
+    }
+
+    private void cancelPlaybackRetry() {
+        if (playbackRetryRunnable != null) {
+            handler.removeCallbacks(playbackRetryRunnable);
+            playbackRetryRunnable = null;
+        }
+    }
+
+    private void cancelPlaybackStableReset() {
+        if (playbackStableResetRunnable != null) {
+            handler.removeCallbacks(playbackStableResetRunnable);
+            playbackStableResetRunnable = null;
+        }
+    }
+
+    private void cancelPlaybackRecoveryCallbacks() {
+        cancelPlaybackRetry();
+        cancelPlaybackStableReset();
     }
 
     private void playNext() {
@@ -621,7 +847,29 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void playMedia(String uri) {
+        playMedia(uri, true);
+    }
+
+    private void playMedia(String uri, boolean restoreSavedHistory) {
         boolean mediaChanged = pendingUri == null || !uri.equals(pendingUri);
+        if (restoreSavedHistory) {
+            lastKnownPlaybackPositionMs = 0L;
+            lastKnownMediaDurationMs = -1L;
+            playbackClockBasePositionMs = 0L;
+            playbackClockStartedElapsedMs = -1L;
+            if (seekBar != null) {
+                seekBar.setProgress(0);
+                seekBar.setMax(0);
+            }
+            if (tvCurrent != null) tvCurrent.setText(formatTime(0));
+        }
+        if (mediaChanged || restoreSavedHistory) {
+            cancelPlaybackRecoveryCallbacks();
+            playbackAutoRetryCount = 0;
+            handlingPlaybackError = false;
+            pendingRecoveryUri = null;
+            pendingRecoveryPositionMs = -1L;
+        }
         pendingUri = uri;
         resetHandyPlaybackWatchdog(0);
         if (handyManager != null && mediaChanged) {
@@ -664,19 +912,21 @@ public class PlayerActivity extends AppCompatActivity {
         if (handyManager != null && handyManager.isConnected()) {
             handler.postDelayed(this::autoPrepareHandyForCurrentVideo, 300);
         }
-        dbExecutor.execute(() -> {
-            if (!uri.equals(pendingUri)) return;
-            HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
-            if (history != null && history.lastPosition > 5000) {
-                final long pos = history.lastPosition;
-                handler.postDelayed(() -> {
-                    if (uri.equals(pendingUri)) {
-                        seekPlaybackTo(pos);
-                        Toast.makeText(this, "Tiep tuc tu " + formatTime(pos), Toast.LENGTH_SHORT).show();
-                    }
-                }, 1500);
-            }
-        });
+        if (restoreSavedHistory) {
+            dbExecutor.execute(() -> {
+                if (!uri.equals(pendingUri)) return;
+                HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);
+                if (history != null && history.lastPosition > 5000) {
+                    final long pos = history.lastPosition;
+                    handler.postDelayed(() -> {
+                        if (uri.equals(pendingUri)) {
+                            seekPlaybackTo(pos);
+                            Toast.makeText(this, "Tiep tuc tu " + formatTime(pos), Toast.LENGTH_SHORT).show();
+                        }
+                    }, 1500);
+                }
+            });
+        }
     }
 
 
@@ -684,8 +934,8 @@ public class PlayerActivity extends AppCompatActivity {
         if (uriString == null) return;
         final String historyUri = uriString;
         final String historyTitle = videoTitle != null ? videoTitle : "Video";
-        final long duration = mediaPlayer != null ? mediaPlayer.getLength() : 0;
-        long currentPosition = mediaPlayer != null ? mediaPlayer.getTime() : 0;
+        final long duration = getBestKnownMediaDuration();
+        long currentPosition = getBestKnownPlaybackPosition();
         if (duration > 0 && currentPosition >= Math.max(0, duration - 5_000)) {
             currentPosition = 0;
         }
@@ -699,7 +949,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void addBookmark() {
         if (mediaPlayer == null || uriString == null) return;
-        long pos = mediaPlayer.getTime();
+        long pos = getBestKnownPlaybackPosition();
         EditText input = new EditText(this);
         input.setText("Bookmark " + formatTime(pos));
         new AlertDialog.Builder(this)
@@ -728,14 +978,22 @@ public class PlayerActivity extends AppCompatActivity {
                     Toast.makeText(this,
                         "Để The Handy đồng bộ chính xác, tốc độ video được giữ ở 1.0x",
                         Toast.LENGTH_LONG).show();
+                    long position = getBestKnownPlaybackPosition();
                     playbackSpeed = 1.0f;
                     if (mediaPlayer != null) mediaPlayer.setRate(1.0f);
+                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                        startPlaybackClockEstimate(position);
+                    }
                     tvSpeed.setText("1.0x");
                     d.dismiss();
                     return;
                 }
+                long position = getBestKnownPlaybackPosition();
                 playbackSpeed = vals[w];
                 if (mediaPlayer != null) mediaPlayer.setRate(playbackSpeed);
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    startPlaybackClockEstimate(position);
+                }
                 tvSpeed.setText(speeds[w]);
                 d.dismiss();
             }).show();
@@ -1308,13 +1566,15 @@ public class PlayerActivity extends AppCompatActivity {
         // REST v2 HSSP plays scripts at real-time speed. Keeping VLC at 1.0x is
         // the only drift-free behavior for the connection-key integration.
         if (Math.abs(playbackSpeed - 1.0f) > 0.01f) {
+            long position = getBestKnownPlaybackPosition();
             playbackSpeed = 1.0f;
             mediaPlayer.setRate(1.0f);
+            startPlaybackClockEstimate(position);
             tvSpeed.setText("1.0x");
         }
 
         handler.removeCallbacks(handyCorrectionSync);
-        handyManager.play(mediaPlayer.getTime(), null);
+        handyManager.play(getBestKnownPlaybackPosition(), null);
         // Match the official SDK behavior: a second timestamp after VLC has
         // settled corrects startup/caching latency without continuous jolts.
         handler.postDelayed(handyCorrectionSync, 2_500);
@@ -1325,7 +1585,7 @@ public class PlayerActivity extends AppCompatActivity {
             Toast.makeText(this, "The Handy chưa kết nối hoặc chưa có funscript", Toast.LENGTH_SHORT).show();
             return;
         }
-        long pos = mediaPlayer.getTime();
+        long pos = getBestKnownPlaybackPosition();
         handyManager.play(pos, new HandyManager.HandyCallback() {
             @Override public void onSuccess(String m) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "The Handy dong bo tai " + formatTime(pos), Toast.LENGTH_SHORT).show()); }
             @Override public void onError(String e) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Loi dong bo: " + e, Toast.LENGTH_SHORT).show()); }
@@ -1525,15 +1785,22 @@ public class PlayerActivity extends AppCompatActivity {
         super.onStop();
         isInBackground = true;
         saveHistory();
+        cancelPlaybackRecoveryCallbacks();
+        handlingPlaybackError = false;
         handler.removeCallbacks(handyCorrectionSync);
         if (handyManager != null) handyManager.stopPlayback(null);
-        if (mediaPlayer != null) { lastPosition = mediaPlayer.getTime(); mediaPlayer.pause(); }
+        if (mediaPlayer != null) {
+            lastPosition = getBestKnownPlaybackPosition();
+            freezePlaybackClockEstimate();
+            mediaPlayer.pause();
+        }
     }
 
     @Override protected void onDestroy() {
         if (getIntent().getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)) {
             TorrentManager.stopActiveAndCleanup(this);
         }
+        cancelPlaybackRecoveryCallbacks();
         handler.removeCallbacks(handyCorrectionSync);
         handler.removeCallbacks(handyHealthCheck);
         if (handyManager != null) handyManager.destroy();

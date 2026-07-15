@@ -35,6 +35,11 @@ android {
         buildConfig = true
     }
     buildTypes {
+        debug {
+            // Keep local test builds isolated from the signed production app.
+            applicationIdSuffix '.recoverytest'
+            versionNameSuffix '-recoverytest'
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
