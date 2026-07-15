@@ -103,6 +103,11 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean handyConnectInProgress;
     private int handyPrepareFailures;
     private String pendingHandyScriptUrl;
+    private static final long HANDY_STALL_TIMEOUT_MS = 2_000L;
+    private static final long HANDY_PROGRESS_THRESHOLD_MS = 100L;
+    private long handyLastVideoProgressMs = -1L;
+    private long handyLastProgressElapsedMs;
+    private boolean handyStoppedForVideoStall;
 
     private final ActivityResultLauncher<String[]> funscriptPicker =
         registerForActivityResult(new ActivityResultContracts.OpenDocument(),
@@ -135,15 +140,18 @@ public class PlayerActivity extends AppCompatActivity {
 
     private final Runnable updateSeekBar = new Runnable() {
         @Override public void run() {
-            if (mediaPlayer != null && !userSeeking) {
+            if (mediaPlayer != null) {
                 long pos = mediaPlayer.getTime();
-                long len = mediaPlayer.getLength();
-                if (len > 0) {
-                    seekBar.setMax((int) len);
-                    seekBar.setProgress((int) pos);
-                    tvCurrent.setText(formatTime(pos));
-                    tvTotal.setText(formatTime(len));
+                if (!userSeeking) {
+                    long len = mediaPlayer.getLength();
+                    if (len > 0) {
+                        seekBar.setMax((int) len);
+                        seekBar.setProgress((int) pos);
+                        tvCurrent.setText(formatTime(pos));
+                        tvTotal.setText(formatTime(len));
+                    }
                 }
+                monitorHandyPlaybackProgress(pos);
             }
             handler.postDelayed(this, 500);
         }
@@ -340,11 +348,67 @@ public class PlayerActivity extends AppCompatActivity {
         long position = Math.max(0, requestedPositionMs);
         if (duration > 0) position = Math.min(position, duration);
         mediaPlayer.setTime(position);
+        resetHandyPlaybackWatchdog(position);
         handler.removeCallbacks(handyCorrectionSync);
         if (handyManager != null && handyManager.isScriptReady()) {
             if (mediaPlayer.isPlaying()) syncHandyWithPlayback();
             else handyManager.stopPlayback(null);
         }
+    }
+
+    private void monitorHandyPlaybackProgress(long videoTimeMs) {
+        if (handyManager == null || mediaPlayer == null
+                || !handyManager.isScriptReady()) {
+            resetHandyPlaybackWatchdog(videoTimeMs);
+            return;
+        }
+
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (userSeeking) {
+            handyLastVideoProgressMs = videoTimeMs;
+            handyLastProgressElapsedMs = now;
+            return;
+        }
+
+        if (!mediaPlayer.isPlaying()) {
+            if (handyManager.isPlaying() && !handyStoppedForVideoStall) {
+                handyStoppedForVideoStall = true;
+                handler.removeCallbacks(handyCorrectionSync);
+                handyManager.stopPlayback(null);
+                android.util.Log.w("TheHandy", "Video clock stopped; Handy paused");
+            }
+            handyLastVideoProgressMs = videoTimeMs;
+            handyLastProgressElapsedMs = now;
+            return;
+        }
+
+        boolean progressed = handyLastVideoProgressMs < 0
+            || Math.abs(videoTimeMs - handyLastVideoProgressMs)
+                >= HANDY_PROGRESS_THRESHOLD_MS;
+        if (progressed) {
+            handyLastVideoProgressMs = videoTimeMs;
+            handyLastProgressElapsedMs = now;
+            if (handyStoppedForVideoStall) {
+                handyStoppedForVideoStall = false;
+                android.util.Log.i("TheHandy", "Video clock resumed; Handy resyncing");
+                syncHandyWithPlayback();
+            }
+            return;
+        }
+
+        if (!handyStoppedForVideoStall
+                && now - handyLastProgressElapsedMs >= HANDY_STALL_TIMEOUT_MS) {
+            handyStoppedForVideoStall = true;
+            handler.removeCallbacks(handyCorrectionSync);
+            handyManager.stopPlayback(null);
+            android.util.Log.w("TheHandy", "Video clock stalled; Handy paused");
+        }
+    }
+
+    private void resetHandyPlaybackWatchdog(long videoTimeMs) {
+        handyLastVideoProgressMs = videoTimeMs;
+        handyLastProgressElapsedMs = android.os.SystemClock.elapsedRealtime();
+        handyStoppedForVideoStall = false;
     }
 
     private void setupVLC() {
@@ -559,6 +623,7 @@ public class PlayerActivity extends AppCompatActivity {
     private void playMedia(String uri) {
         boolean mediaChanged = pendingUri == null || !uri.equals(pendingUri);
         pendingUri = uri;
+        resetHandyPlaybackWatchdog(0);
         if (handyManager != null && mediaChanged) {
             handler.removeCallbacks(handyCorrectionSync);
             handyManager.resetScript();
