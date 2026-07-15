@@ -99,6 +99,7 @@ public class HandyManager {
     private final ExecutorService commandExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService emergencyExecutor = Executors.newSingleThreadExecutor();
     private final AtomicLong playbackGeneration = new AtomicLong();
+    private final AtomicLong scriptGeneration = new AtomicLong();
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
@@ -134,6 +135,7 @@ public class HandyManager {
     }
 
     public void saveKey(String key) {
+        scriptGeneration.incrementAndGet();
         connectionKey = key == null ? "" : key.trim();
         autoReconnectEnabled = true;
         connected = false;
@@ -218,6 +220,8 @@ public class HandyManager {
             playing = false;
         }
         connected = true;
+        Log.i(TAG, "Connected model=" + model + " firmware=" + firmwareVersion
+            + " mode=" + currentMode + " rtt=" + averageRtt + "ms");
     }
 
     private void syncClientServerTime() throws Exception {
@@ -277,11 +281,13 @@ public class HandyManager {
             postError(callback, "URL script không hợp lệ");
             return;
         }
+        final long generation = beginScriptLoad();
         commandExecutor.execute(() -> {
             try {
                 ensureConnectedInternal();
-                setupScriptInternal(scriptCsvUrl);
-                postSuccess(callback, "Script đã sẵn sàng");
+                if (setupScriptInternal(scriptCsvUrl, generation)) {
+                    postSuccess(callback, "Script đã sẵn sàng");
+                }
             } catch (Exception e) {
                 postError(callback, friendlyError(e));
             }
@@ -294,14 +300,16 @@ public class HandyManager {
             postError(callback, "Không tìm thấy file funscript");
             return;
         }
+        final long generation = beginScriptLoad();
         commandExecutor.execute(() -> {
             try {
                 ensureConnectedInternal();
                 byte[] source = readLimited(new FileInputStream(file), MAX_SOURCE_BYTES);
                 byte[] csv = convertToCsv(source);
                 String scriptUrl = uploadCsv(csv);
-                setupScriptInternal(scriptUrl);
-                postSuccess(callback, "Đã tải và đồng bộ script");
+                if (setupScriptInternal(scriptUrl, generation)) {
+                    postSuccess(callback, "Đã tải và đồng bộ script");
+                }
             } catch (Exception e) {
                 postError(callback, friendlyError(e));
             }
@@ -314,21 +322,30 @@ public class HandyManager {
             postError(callback, "URL funscript không hợp lệ");
             return;
         }
+        final long generation = beginScriptLoad();
         commandExecutor.execute(() -> {
             try {
                 ensureConnectedInternal();
                 byte[] source = downloadScript(sourceUrl);
                 byte[] csv = convertToCsv(source);
                 String scriptUrl = uploadCsv(csv);
-                setupScriptInternal(scriptUrl);
-                postSuccess(callback, "Đã tải và đồng bộ script");
+                if (setupScriptInternal(scriptUrl, generation)) {
+                    postSuccess(callback, "Đã tải và đồng bộ script");
+                }
             } catch (Exception e) {
                 postError(callback, friendlyError(e));
             }
         });
     }
 
-    private void setupScriptInternal(String scriptCsvUrl) throws Exception {
+    private long beginScriptLoad() {
+        long generation = scriptGeneration.incrementAndGet();
+        stopPlayback(null);
+        return generation;
+    }
+
+    private boolean setupScriptInternal(String scriptCsvUrl, long generation) throws Exception {
+        if (generation != scriptGeneration.get()) return false;
         JSONObject modeBody = new JSONObject();
         modeBody.put("mode", HSSP_MODE);
         JSONObject modeResponse = apiRequest("PUT", "/mode", modeBody, false);
@@ -346,18 +363,47 @@ public class HandyManager {
             throw new HandyException("The Handy không tải được script, mã " + setupResult);
         }
 
-        // Never loop a video script unless the video player itself explicitly repeats.
-        try {
-            JSONObject loopBody = new JSONObject();
-            loopBody.put("activated", false);
-            apiRequest("PUT", "/hssp/loop", loopBody, false);
-        } catch (Exception e) {
-            Log.w(TAG, "Could not disable HSSP loop: " + e.getMessage());
+        if (generation != scriptGeneration.get()) return false;
+        disableHsspLoopBestEffort();
+
+        if (generation != scriptGeneration.get()) {
+            Log.d(TAG, "Ignoring stale HSSP setup result");
+            return false;
         }
 
         lastScriptUrl = scriptCsvUrl;
         scriptReady = true;
         playing = false;
+        Log.i(TAG, "HSSP script ready");
+        return true;
+    }
+
+    /** Firmware 4 can briefly report the HSSP service busy just after setup. */
+    private void disableHsspLoopBestEffort() {
+        Exception lastError = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                JSONObject loopBody = new JSONObject();
+                loopBody.put("activated", false);
+                JSONObject response = apiRequest("PUT", "/hssp/loop", loopBody, false);
+                if (!response.has("result") || response.optInt("result", -1) == 0) {
+                    return;
+                }
+                lastError = new HandyException("result=" + response.optInt("result", -1));
+            } catch (Exception e) {
+                lastError = e;
+            }
+            if (attempt < 2) {
+                try {
+                    Thread.sleep(250L * (attempt + 1));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+        Log.w(TAG, "Could not disable HSSP loop after retry: "
+            + (lastError != null ? lastError.getMessage() : "unknown"));
     }
 
     public void play(long videoPositionMs, HandyCallback callback) {
@@ -369,8 +415,11 @@ public class HandyManager {
             try {
                 if (generation != playbackGeneration.get()) return;
                 ensureConnectedInternal();
-                if (!scriptReady && lastScriptUrl != null) {
-                    setupScriptInternal(lastScriptUrl);
+                long currentScriptGeneration = scriptGeneration.get();
+                String currentScriptUrl = lastScriptUrl;
+                if (currentScriptGeneration != scriptGeneration.get()) return;
+                if (!scriptReady && currentScriptUrl != null) {
+                    if (!setupScriptInternal(currentScriptUrl, currentScriptGeneration)) return;
                 }
                 if (!scriptReady) {
                     throw new HandyException("Chưa có funscript cho video này");
@@ -415,6 +464,7 @@ public class HandyManager {
             return false;
         }
         playing = true;
+        Log.d(TAG, "HSSP play accepted at videoTime=" + Math.max(0, videoPositionMs));
         return true;
     }
 
@@ -479,6 +529,7 @@ public class HandyManager {
             throw new HandyException("The Handy không xác nhận lệnh dừng");
         }
         playing = false;
+        Log.d(TAG, "HSSP stop accepted");
     }
 
     private void stopInternalBestEffort() {
@@ -490,6 +541,7 @@ public class HandyManager {
     }
 
     public void resetScript() {
+        scriptGeneration.incrementAndGet();
         playbackGeneration.incrementAndGet();
         desiredPlaying = false;
         playing = false;
@@ -500,6 +552,7 @@ public class HandyManager {
 
     public void disconnect(HandyCallback callback) {
         if (destroyed) return;
+        scriptGeneration.incrementAndGet();
         autoReconnectEnabled = false;
         playbackGeneration.incrementAndGet();
         desiredPlaying = false;
@@ -544,9 +597,13 @@ public class HandyManager {
                 boolean needsReconnect = !connected
                     || (!sessionId.isEmpty() && !sessionId.equals(onlineSession));
                 if (needsReconnect) {
+                    long currentScriptGeneration = scriptGeneration.get();
                     String scriptUrl = lastScriptUrl;
+                    if (currentScriptGeneration != scriptGeneration.get()) return;
                     connectInternal();
-                    if (scriptUrl != null) setupScriptInternal(scriptUrl);
+                    if (scriptUrl != null) {
+                        setupScriptInternal(scriptUrl, currentScriptGeneration);
+                    }
                 }
 
                 if (videoPlaying && scriptReady && !playing) {
@@ -599,6 +656,7 @@ public class HandyManager {
 
     public void destroy() {
         if (destroyed) return;
+        scriptGeneration.incrementAndGet();
         stopPlayback(null);
         destroyed = true;
         mainHandler.removeCallbacksAndMessages(null);
@@ -835,10 +893,12 @@ public class HandyManager {
     }
 
     private void postSuccess(HandyCallback callback, String message) {
+        Log.d(TAG, message);
         if (callback != null && !destroyed) mainHandler.post(() -> callback.onSuccess(message));
     }
 
     private void postError(HandyCallback callback, String message) {
+        Log.w(TAG, message);
         if (callback != null && !destroyed) mainHandler.post(() -> callback.onError(message));
     }
 }
