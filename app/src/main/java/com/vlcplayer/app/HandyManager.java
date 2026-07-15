@@ -383,8 +383,16 @@ public class HandyManager {
         return true;
     }
 
-    /** Firmware 4 can briefly report the HSSP service busy just after setup. */
+    /** Keep legacy firmware from replaying a completed script unexpectedly. */
     private void ensureHsspLoopDisabled() throws Exception {
+        // Firmware 4 implements HSSP on top of HSP. Its HSSP API deliberately
+        // has no loop operation, and the legacy v2 /hssp/loop compatibility
+        // endpoint returns an unspecified error. HSSP remains non-looping.
+        if (parseVersionPart(firmwareVersion, 0) >= 4) {
+            Log.d(TAG, "Firmware 4 HSSP: legacy loop endpoint not applicable");
+            return;
+        }
+
         Exception lastError = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
