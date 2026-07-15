@@ -340,6 +340,11 @@ public class HandyManager {
 
     private long beginScriptLoad() {
         long generation = scriptGeneration.incrementAndGet();
+        // Do not allow play/health recovery to reuse the previous script while
+        // a replacement is being converted, uploaded, or prepared.
+        scriptReady = false;
+        playing = false;
+        lastScriptUrl = null;
         stopPlayback(null);
         return generation;
     }
@@ -364,7 +369,7 @@ public class HandyManager {
         }
 
         if (generation != scriptGeneration.get()) return false;
-        disableHsspLoopBestEffort();
+        ensureHsspLoopDisabled();
 
         if (generation != scriptGeneration.get()) {
             Log.d(TAG, "Ignoring stale HSSP setup result");
@@ -379,7 +384,7 @@ public class HandyManager {
     }
 
     /** Firmware 4 can briefly report the HSSP service busy just after setup. */
-    private void disableHsspLoopBestEffort() {
+    private void ensureHsspLoopDisabled() throws Exception {
         Exception lastError = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
@@ -402,7 +407,25 @@ public class HandyManager {
                 }
             }
         }
-        Log.w(TAG, "Could not disable HSSP loop after retry: "
+
+        // Firmware 4 has been observed returning an error after applying the
+        // update. Verify the actual state before rejecting an otherwise valid
+        // setup, but never start playback when looping may still be enabled.
+        try {
+            JSONObject state = apiRequest("GET", "/hssp/loop", null, false);
+            boolean resultOk = !state.has("result") || state.optInt("result", -1) == 0;
+            if (resultOk && !state.optBoolean("activated", true)) {
+                Log.w(TAG, "HSSP loop update returned an error but loop is disabled");
+                return;
+            }
+            if (state.optBoolean("activated", true)) {
+                lastError = new HandyException("The Handy vẫn còn bật lặp HSSP");
+            }
+        } catch (Exception verifyError) {
+            if (lastError == null) lastError = verifyError;
+        }
+
+        throw new HandyException("Không thể tắt lặp HSSP an toàn: "
             + (lastError != null ? lastError.getMessage() : "unknown"));
     }
 
