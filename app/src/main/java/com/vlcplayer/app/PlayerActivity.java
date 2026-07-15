@@ -297,7 +297,8 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
                 if (isLocked) return false;
-                videoLayout.performClick();
+                android.util.Log.d("PlayerGesture", "single tap confirmed");
+                toggleControls();
                 return true;
             }
 
@@ -326,6 +327,10 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private boolean handleVideoTouch(View view, MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN
+                || event.getAction() == MotionEvent.ACTION_UP) {
+            android.util.Log.d("PlayerGesture", "touch action=" + event.getAction());
+        }
         return gestureDetector != null && gestureDetector.onTouchEvent(event);
     }
 
