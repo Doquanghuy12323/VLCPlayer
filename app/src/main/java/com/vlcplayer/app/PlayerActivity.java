@@ -1496,7 +1496,8 @@ public class PlayerActivity extends AppCompatActivity {
         handler.removeCallbacksAndMessages(null);
         if (mediaPlayer != null) mediaPlayer.release();
         if (libVLC != null) libVLC.release();
-        dbExecutor.shutdownNow();
+        // Let the final history write queued by onStop complete before exit.
+        dbExecutor.shutdown();
         closePfd();
     }
     // Chuyển sang CSV và dùng dịch vụ script tạm chính thức của Handy.
