@@ -9,7 +9,6 @@ import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Paint;
 import android.media.AudioManager;
 import android.media.audiofx.AudioEffect;
-import android.media.audiofx.Equalizer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -61,6 +60,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     public static final String EXTRA_URI   = "extra_uri";
     public static final String EXTRA_TITLE = "extra_title";
+    public static final String EXTRA_USE_PLAYLIST = "extra_use_playlist";
     public static final String EXTRA_AUTO_CLEANUP_TORRENT = "auto_cleanup_torrent";
 
     private LibVLC libVLC;
@@ -71,7 +71,12 @@ public class PlayerActivity extends AppCompatActivity {
     private long lastPosition = 0;
     private volatile String pendingUri = null;
     private ParcelFileDescriptor currentPfd;
-    private Equalizer equalizer;
+    private boolean userPaused;
+    private boolean resumeAfterBackground;
+    private boolean resumeAfterFocusLoss;
+    private boolean audioFocusRequested;
+    private boolean audioFocusHeld;
+    private boolean activityResumed;
 
     private View nightOverlay;
     private boolean nightMode = false;
@@ -198,6 +203,9 @@ public class PlayerActivity extends AppCompatActivity {
             uriString = getIntent().getData().toString();
         }
         videoTitle = getIntent().getStringExtra(EXTRA_TITLE);
+        if (!getIntent().getBooleanExtra(EXTRA_USE_PLAYLIST, false)) {
+            PlaylistManager.get().clear();
+        }
 
         videoLayout     = findViewById(R.id.vlc_video_layout);
         videoTouchLayer = findViewById(R.id.video_touch_layer);
@@ -217,6 +225,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         tvTitle.setText(videoTitle != null ? videoTitle : "Video");
         tvSpeed.setText("1.0x");
+        tvSpeed.setContentDescription(getString(R.string.player_speed) + ": 1.0x");
 
         updatePlaylistButtons();
         setupButtons();
@@ -226,7 +235,6 @@ public class PlayerActivity extends AppCompatActivity {
 
         if (uriString != null) {
             playMedia(uriString);
-            autoDetectAndApplyEQ(videoTitle);
         } else {
             finish();
         }
@@ -274,32 +282,9 @@ public class PlayerActivity extends AppCompatActivity {
             Toast.makeText(this, labels[mode.ordinal()], Toast.LENGTH_SHORT).show();
         });
         findViewById(R.id.btn_queue).setOnClickListener(v -> showQueueDialog());
-        findViewById(R.id.btn_night).setOnClickListener(v -> toggleNightMode());
-        findViewById(R.id.btn_filter).setOnClickListener(v -> showFilterDialog());
-        findViewById(R.id.btn_aspect).setOnClickListener(v -> cycleAspectRatio());
-        findViewById(R.id.btn_speed).setOnClickListener(v -> showSpeedDialog());
-        findViewById(R.id.btn_bookmark).setOnClickListener(v -> addBookmark());
-        findViewById(R.id.btn_eq).setOnClickListener(v -> showEqualizerDialog());
-        findViewById(R.id.btn_pip).setOnClickListener(v -> enterPiP());
-        findViewById(R.id.btn_lock).setOnClickListener(v -> toggleLock());
+        tvSpeed.setOnClickListener(v -> showSpeedDialog());
+        findViewById(R.id.btn_more).setOnClickListener(v -> showMoreDialog());
         findViewById(R.id.btn_unlock).setOnClickListener(v -> toggleLock());
-        // Mo Gemini AI chat voi context video hien tai
-            View btnAiChat = findViewById(R.id.btn_translate);
-            if (btnAiChat != null) btnAiChat.setOnClickListener(v -> openGeminiChat());
-        View btnFunscript = findViewById(R.id.btn_funscript);
-        if (btnFunscript != null) btnFunscript.setOnClickListener(v -> showFunscriptDialog());
-        View btnHandy = findViewById(R.id.btn_handy);
-        if (btnHandy != null) btnHandy.setOnClickListener(v -> showHandyDialog());
-
-        View btnAudio = findViewById(R.id.btn_audio);
-        if (btnAudio != null) btnAudio.setOnClickListener(v -> showAudioTrackDialog());
-
-        // Long press tren title de chon audio track
-        View titleView = findViewById(R.id.tv_title);
-        if (titleView != null) titleView.setOnLongClickListener(v -> {
-            showAudioTrackDialog();
-            return true;
-        });
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
                 if (fromUser) tvCurrent.setText(formatTime(p));
@@ -310,6 +295,37 @@ public class PlayerActivity extends AppCompatActivity {
                 seekPlaybackTo(sb.getProgress());
             }
         });
+    }
+
+    private void showMoreDialog() {
+        String[] actions = {
+            getString(R.string.player_filter),
+            getString(nightMode ? R.string.player_night_off : R.string.player_night_on),
+            getString(R.string.player_bookmark),
+            getString(R.string.player_pip),
+            getString(R.string.player_aspect),
+            getString(R.string.player_lock),
+            getString(R.string.player_translate),
+            getString(R.string.player_funscript),
+            getString(R.string.player_handy),
+            getString(R.string.player_audio_track)
+        };
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.player_more)
+            .setItems(actions, (dialog, which) -> {
+                switch (which) {
+                    case 0: showFilterDialog(); break;
+                    case 1: toggleNightMode(); break;
+                    case 2: addBookmark(); break;
+                    case 3: enterPiP(); break;
+                    case 4: cycleAspectRatio(); break;
+                    case 5: toggleLock(); break;
+                    case 6: openGeminiChat(); break;
+                    case 7: showFunscriptDialog(); break;
+                    case 8: showHandyDialog(); break;
+                    case 9: showAudioTrackDialog(); break;
+                }
+            }).show();
     }
 
     private void setupGestures() {
@@ -443,9 +459,7 @@ public class PlayerActivity extends AppCompatActivity {
         options.add("--audiotrack-session-id=" + audioSessionId);
         libVLC = new LibVLC(this, options);
         mediaPlayer = new MediaPlayer(libVLC);
-        requestAudioFocus();
-        // Khong tao Equalizer de tranh xung dot voi RootlessJamesDSP
-        // DSP se tu quan ly audio effect tren session nay
+        // RootlessJamesDSP manages audio effects on this session.
         mediaPlayer.setEventListener(event -> {
             switch (event.type) {
                 case MediaPlayer.Event.Playing:
@@ -699,7 +713,6 @@ public class PlayerActivity extends AppCompatActivity {
             videoTitle = next.getName();
             tvTitle.setText(videoTitle);
             playMedia(uriString);
-            autoDetectAndApplyEQ(videoTitle);
             updatePlaylistButtons();
         } else {
             Toast.makeText(this, "Het danh sach phat", Toast.LENGTH_SHORT).show();
@@ -714,7 +727,6 @@ public class PlayerActivity extends AppCompatActivity {
             videoTitle = prev.getName();
             tvTitle.setText(videoTitle);
             playMedia(uriString);
-            autoDetectAndApplyEQ(videoTitle);
             updatePlaylistButtons();
         }
     }
@@ -851,6 +863,8 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void playMedia(String uri, boolean restoreSavedHistory) {
+        userPaused = false;
+        resumeAfterFocusLoss = false;
         boolean mediaChanged = pendingUri == null || !uri.equals(pendingUri);
         if (restoreSavedHistory) {
             lastKnownPlaybackPositionMs = 0L;
@@ -900,7 +914,9 @@ public class PlayerActivity extends AppCompatActivity {
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
             mediaPlayer.setMedia(media);
             media.release();
-            mediaPlayer.play();
+            if (requestAudioFocus()) mediaPlayer.play();
+            else if (audioFocusRequested) resumeAfterFocusLoss = true;
+            else Toast.makeText(this, "Không thể lấy quyền phát âm thanh", Toast.LENGTH_SHORT).show();
             videoLayout.post(() -> {
                 if (!uri.equals(pendingUri)) return;
                 try { mediaPlayer.detachViews(); } catch (Exception ignored) {}
@@ -985,6 +1001,7 @@ public class PlayerActivity extends AppCompatActivity {
                         startPlaybackClockEstimate(position);
                     }
                     tvSpeed.setText("1.0x");
+                    tvSpeed.setContentDescription(getString(R.string.player_speed) + ": 1.0x");
                     d.dismiss();
                     return;
                 }
@@ -995,21 +1012,8 @@ public class PlayerActivity extends AppCompatActivity {
                     startPlaybackClockEstimate(position);
                 }
                 tvSpeed.setText(speeds[w]);
+                tvSpeed.setContentDescription(getString(R.string.player_speed) + ": " + speeds[w]);
                 d.dismiss();
-            }).show();
-    }
-
-    private void showEqualizerDialog() {
-        if (equalizer == null) { Toast.makeText(this, "EQ khong kha dung", Toast.LENGTH_SHORT).show(); return; }
-        short presets = equalizer.getNumberOfPresets();
-        String[] names = new String[presets + 1];
-        names[0] = "Mac dinh";
-        for (short i = 0; i < presets; i++) names[i+1] = equalizer.getPresetName(i);
-        new AlertDialog.Builder(this)
-            .setTitle("Equalizer")
-            .setItems(names, (d, w) -> {
-                if (w > 0) equalizer.usePreset((short)(w-1));
-                Toast.makeText(this, names[w], Toast.LENGTH_SHORT).show();
             }).show();
     }
 
@@ -1119,29 +1123,6 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
 
-    private void autoDetectAndApplyEQ(String title) {
-        if (equalizer == null || title == null) return;
-        String lower = title.toLowerCase();
-        short presetIndex = -1;
-        if (lower.contains("fap") || lower.contains("music") || lower.contains("dance"))
-            presetIndex = findPreset(new String[]{"Dance", "Pop"});
-        else if (lower.contains("movie") || lower.contains("film"))
-            presetIndex = findPreset(new String[]{"Theater", "Movie"});
-        else if (lower.contains("anime")) presetIndex = findPreset(new String[]{"Vocal", "Pop"});
-        else if (lower.contains("game") || lower.contains("action")) presetIndex = findPreset(new String[]{"Rock"});
-        if (presetIndex >= 0) equalizer.usePreset(presetIndex);
-    }
-
-    private short findPreset(String[] keywords) {
-        if (equalizer == null) return -1;
-        short presets = equalizer.getNumberOfPresets();
-        for (String kw : keywords)
-            for (short i = 0; i < presets; i++)
-                if (equalizer.getPresetName(i) != null && equalizer.getPresetName(i).toLowerCase().contains(kw.toLowerCase()))
-                    return i;
-        return -1;
-    }
-
     // Overlay trai (do sang) va phai (am luong)
     private float volumeLevel = -1f; // Track float giong brightness
     private android.widget.LinearLayout overlayBrightness;
@@ -1182,7 +1163,6 @@ public class PlayerActivity extends AppCompatActivity {
         layout.addView(pb, pbp);
         layout.setVisibility(android.view.View.GONE);
         layout.setTag(tv);
-        layout.setTag(R.id.btn_filter, pb);
 
         // Vi tri cach man hinh 60dp de khong bi che
         android.widget.FrameLayout.LayoutParams fp =
@@ -1205,14 +1185,12 @@ public class PlayerActivity extends AppCompatActivity {
         if (overlayBrightness == null) {
             overlayBrightness = makeOverlay(true);
             tvBrightnessVal = (android.widget.TextView) overlayBrightness.getTag();
-            barBrightness = (android.widget.ProgressBar)
-                overlayBrightness.getTag(R.id.btn_filter);
+            barBrightness = (android.widget.ProgressBar) overlayBrightness.getChildAt(1);
         }
         if (overlayVolume == null) {
             overlayVolume = makeOverlay(false);
             tvVolumeVal = (android.widget.TextView) overlayVolume.getTag();
-            barVolume = (android.widget.ProgressBar)
-                overlayVolume.getTag(R.id.btn_filter);
+            barVolume = (android.widget.ProgressBar) overlayVolume.getChildAt(1);
         }
     }
 
@@ -1268,8 +1246,18 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void togglePlayPause() {
         if (mediaPlayer == null) return;
-        if (mediaPlayer.isPlaying()) mediaPlayer.pause();
-        else mediaPlayer.play();
+        if (mediaPlayer.isPlaying()) {
+            userPaused = true;
+            resumeAfterBackground = false;
+            resumeAfterFocusLoss = false;
+            mediaPlayer.pause();
+            abandonAudioFocus();
+        } else {
+            userPaused = false;
+            resumeAfterFocusLoss = false;
+            if (requestAudioFocus()) mediaPlayer.play();
+            else if (audioFocusRequested) resumeAfterFocusLoss = true;
+        }
     }
 
     private void toggleControls() {
@@ -1292,32 +1280,43 @@ public class PlayerActivity extends AppCompatActivity {
 
     private android.media.AudioFocusRequest audioFocusRequest;
     private android.media.AudioManager.OnAudioFocusChangeListener focusListener =
-        focusChange -> {
-            if (mediaPlayer == null) return;
+        focusChange -> runOnUiThread(() -> {
+            if (mediaPlayer == null || isDestroyed()) return;
             switch (focusChange) {
-                case android.media.AudioManager.AUDIOFOCUS_LOSS:
-                    // Chi pause khi mat focus hoan toan (call dien thoai...)
-                    runOnUiThread(() -> { if (mediaPlayer.isPlaying()) mediaPlayer.pause(); });
+                case AudioManager.AUDIOFOCUS_LOSS:
+                    audioFocusHeld = false;
+                    audioFocusRequested = false;
+                    resumeAfterFocusLoss = false;
+                    if (mediaPlayer.isPlaying()) mediaPlayer.pause();
                     break;
-                case android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                    // Khong pause - de DSP va cac app khac hoat dong binh thuong
+                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                    audioFocusHeld = false;
+                    if (mediaPlayer.isPlaying()) {
+                        resumeAfterFocusLoss = !userPaused;
+                        mediaPlayer.pause();
+                    }
                     break;
-                case android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
-                    // Khong giam volume - giu nguyen
+                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                     break;
-                case android.media.AudioManager.AUDIOFOCUS_GAIN:
-                    runOnUiThread(() -> {
-                        if (!mediaPlayer.isPlaying()) mediaPlayer.play();
-                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 200);
-                    });
+                case AudioManager.AUDIOFOCUS_GAIN:
+                    if (isInBackground || !audioFocusRequested) return;
+                    audioFocusHeld = true;
+                    if (resumeAfterFocusLoss && !userPaused) {
+                        resumeAfterFocusLoss = false;
+                        mediaPlayer.play();
+                    }
+                    handler.postDelayed(this::broadcastAudioSessionOpen, 200);
                     break;
             }
-        };
+        });
 
-    private void requestAudioFocus() {
+    private boolean requestAudioFocus() {
+        if (audioFocusHeld) return true;
+        if (audioFocusRequested) return false;
         android.media.AudioManager am =
             (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        if (am == null) return;
+        if (am == null) return false;
+        int result;
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             android.media.AudioAttributes attrs = new android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
@@ -1329,15 +1328,21 @@ public class PlayerActivity extends AppCompatActivity {
                 .setOnAudioFocusChangeListener(focusListener)
                 .setWillPauseWhenDucked(false)
                 .build();
-            am.requestAudioFocus(audioFocusRequest);
+            result = am.requestAudioFocus(audioFocusRequest);
         } else {
-            am.requestAudioFocus(focusListener,
+            result = am.requestAudioFocus(focusListener,
                 android.media.AudioManager.STREAM_MUSIC,
                 android.media.AudioManager.AUDIOFOCUS_GAIN);
         }
+        audioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        audioFocusRequested = audioFocusHeld;
+        return audioFocusHeld;
     }
 
     private void abandonAudioFocus() {
+        if (!audioFocusRequested) return;
+        audioFocusRequested = false;
+        audioFocusHeld = false;
         android.media.AudioManager am =
             (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
         if (am == null) return;
@@ -1752,38 +1757,48 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-    }    @Override
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        activityResumed = true;
         // Gui lai session cho DSP khi quay lai app
         if (audioSessionId != android.media.audiofx.AudioEffect.ERROR_BAD_VALUE) {
             handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
         }
         if (mediaPlayer != null && videoLayout != null) {
             videoLayout.post(() -> {
+                if (!activityResumed || !isInBackground) return;
                 try {
-                    // Chi attach lai neu chua attach - tranh reset audio pipeline
-                    if (isInBackground) {
-                        mediaPlayer.attachViews(videoLayout, null, false,
-                            filtersEnabled);
-                    }
-                    if (isInBackground) {
-                        if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
+                    boolean shouldResume = resumeAfterBackground && !userPaused;
+                    mediaPlayer.attachViews(videoLayout, null, false, filtersEnabled);
+                    if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
+                    isInBackground = false;
+                    resumeAfterBackground = false;
+                    if (shouldResume && requestAudioFocus()) {
                         mediaPlayer.play();
-                        isInBackground = false;
-                        // Gui lai session cho DSP sau khi resume
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 1500);
                     }
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                    android.util.Log.w("PlayerActivity", "Could not restore playback", e);
+                }
             });
         }
     }
 
-    
-@Override protected void onStop() {
+    @Override protected void onPause() {
+        activityResumed = false;
+        super.onPause();
+    }
+
+    @Override protected void onStop() {
         super.onStop();
         isInBackground = true;
+        resumeAfterBackground = mediaPlayer != null && !userPaused
+            && (mediaPlayer.isPlaying() || resumeAfterFocusLoss);
+        resumeAfterFocusLoss = false;
         saveHistory();
         cancelPlaybackRecoveryCallbacks();
         handlingPlaybackError = false;
@@ -1792,8 +1807,9 @@ public class PlayerActivity extends AppCompatActivity {
         if (mediaPlayer != null) {
             lastPosition = getBestKnownPlaybackPosition();
             freezePlaybackClockEstimate();
-            mediaPlayer.pause();
+            if (mediaPlayer.isPlaying()) mediaPlayer.pause();
         }
+        abandonAudioFocus();
     }
 
     @Override protected void onDestroy() {
@@ -1805,8 +1821,8 @@ public class PlayerActivity extends AppCompatActivity {
         handler.removeCallbacks(handyHealthCheck);
         if (handyManager != null) handyManager.destroy();
         super.onDestroy();
+        abandonAudioFocus();
         broadcastAudioSessionClose();
-        if (equalizer != null) equalizer.release();
         handler.removeCallbacksAndMessages(null);
         if (mediaPlayer != null) mediaPlayer.release();
         if (libVLC != null) libVLC.release();
@@ -2030,6 +2046,10 @@ public class PlayerActivity extends AppCompatActivity {
             newUri = intent.getData().toString();
         }
         if (newUri == null || newUri.trim().isEmpty()) return;
+        if (!intent.getBooleanExtra(EXTRA_USE_PLAYLIST, false)) {
+            PlaylistManager.get().clear();
+        }
+        updatePlaylistButtons();
 
         saveHistory();
         uriString = newUri;
@@ -2040,7 +2060,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (videoTitle == null || videoTitle.trim().isEmpty()) videoTitle = "Video";
         tvTitle.setText(videoTitle);
         lastPosition = 0;
+        if (isInBackground) resumeAfterBackground = true;
         playMedia(uriString);
-        autoDetectAndApplyEQ(videoTitle);
     }
 }

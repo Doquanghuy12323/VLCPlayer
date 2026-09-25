@@ -29,37 +29,76 @@
         android:layout_height="match_parent"
         android:clipToPadding="false"
         android:paddingTop="8dp"
-        android:paddingBottom="88dp"
+        android:paddingBottom="96dp"
+        android:visibility="gone"
         app:layout_behavior="@string/appbar_scrolling_view_behavior" />
 
-    <TextView
-        android:id="@+id/tv_empty"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:id="@+id/library_state"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="Không có video"
-        android:textColor="@color/text_muted"
-        android:textSize="16sp"
-        android:visibility="gone"/>
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp">
 
-    <ProgressBar
-        android:id="@+id/progress_bar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:indeterminateTint="@color/accent"
-        android:visibility="gone"/>
+        <ProgressBar
+            android:id="@+id/progress_bar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            android:indeterminateTint="@color/accent" />
 
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        <TextView
+            android:id="@+id/state_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/library_loading_title"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/state_message"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="@string/library_loading_message"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/state_primary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:minHeight="48dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/state_secondary"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
         android:id="@+id/fab"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="20dp"
-        android:contentDescription="@string/open_file"
+        android:contentDescription="@string/open_video"
+        android:text="@string/open"
+        android:textColor="@color/white"
         app:backgroundTint="@color/accent"
-        app:srcCompat="@android:drawable/ic_input_add"
-        app:tint="@color/white"
+        app:icon="@drawable/ic_open_video"
+        app:iconTint="@color/white"
         app:elevation="6dp"/>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

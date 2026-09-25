@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_more">Thêm tùy chọn</string>
+    <string name="player_speed">Tốc độ phát</string>
+    <string name="player_previous">Video trước</string>
+    <string name="player_next">Video tiếp theo</string>
+    <string name="player_shuffle">Phát ngẫu nhiên</string>
+    <string name="player_repeat">Lặp lại</string>
+    <string name="player_queue">Danh sách phát</string>
+    <string name="player_unlock">Mở khóa màn hình</string>
+    <string name="player_filter">Bộ lọc hình ảnh</string>
+    <string name="player_night_on">Bật chế độ đêm</string>
+    <string name="player_night_off">Tắt chế độ đêm</string>
+    <string name="player_bookmark">Đánh dấu thời điểm</string>
+    <string name="player_pip">Cửa sổ nổi</string>
+    <string name="player_aspect">Tỉ lệ khung hình</string>
+    <string name="player_lock">Khóa màn hình</string>
+    <string name="player_translate">Dịch phụ đề AI</string>
+    <string name="player_funscript">Funscript</string>
+    <string name="player_handy">The Handy</string>
+    <string name="player_audio_track">Chọn âm thanh</string>
+</resources>
