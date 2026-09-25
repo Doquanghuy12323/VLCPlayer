@@ -915,6 +915,7 @@ public class PlayerActivity extends AppCompatActivity {
             mediaPlayer.setMedia(media);
             media.release();
             if (requestAudioFocus()) mediaPlayer.play();
+            else if (audioFocusRequested) resumeAfterFocusLoss = true;
             else Toast.makeText(this, "Không thể lấy quyền phát âm thanh", Toast.LENGTH_SHORT).show();
             videoLayout.post(() -> {
                 if (!uri.equals(pendingUri)) return;

@@ -102,7 +102,8 @@ public class PlaylistManager {
     }
 
     public boolean hasPrev() {
-        return shuffle ? shuffleCursor > 0 : currentIndex > 0;
+        return shuffle ? shuffleCursor > 0
+            : !queue.isEmpty() && (currentIndex > 0 || repeatMode == RepeatMode.ALL);
     }
 
     public void toggleShuffle() {

@@ -73,4 +73,12 @@ public class PlaylistManagerTest {
         assertEquals(3, playlist.getCurrent().getId());
         assertFalse(playlist.hasNext());
     }
+
+    @Test
+    public void repeatAllAllowsPreviousToWrapFromFirstVideo() {
+        playlist.setQueue(Arrays.asList(video(1), video(2)), 0);
+        playlist.cycleRepeat();
+        assertTrue(playlist.hasPrev());
+        assertEquals(2, playlist.getPrev().getId());
+    }
 }

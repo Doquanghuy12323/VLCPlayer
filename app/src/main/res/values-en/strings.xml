@@ -6,6 +6,7 @@
     <string name="open_source_title">Open video</string>
     <string name="open_local_video">Video on device</string>
     <string name="open_video_url">Play from URL</string>
+    <string name="invalid_shared_url">The shared link is not a valid video URL.</string>
     <string name="url_dialog_title">Play from URL</string>
     <string name="url_dialog_play">Play</string>
     <string name="cancel">Cancel</string>

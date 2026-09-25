@@ -120,7 +120,9 @@ public class MainActivity extends AppCompatActivity
         if (Intent.ACTION_VIEW.equals(action)) {
             uri = intent.getData();
         } else if (Intent.ACTION_SEND.equals(action)) {
-            uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            android.os.Parcelable sharedStream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (sharedStream instanceof Uri) uri = (Uri) sharedStream;
+            if (uri == null) uri = intent.getData();
             if (uri == null) {
                 String sharedUrl = intent.getStringExtra(Intent.EXTRA_TEXT);
                 if (sharedUrl != null && (sharedUrl.startsWith("http://")
@@ -128,6 +130,7 @@ public class MainActivity extends AppCompatActivity
                     openSingleVideo(sharedUrl, getString(R.string.open_video_url));
                     return;
                 }
+                Toast.makeText(this, R.string.invalid_shared_url, Toast.LENGTH_SHORT).show();
             }
         }
         if (uri != null) {

@@ -7,6 +7,7 @@
     <string name="open_source_title">Mở video</string>
     <string name="open_local_video">Video trên máy</string>
     <string name="open_video_url">Phát từ URL</string>
+    <string name="invalid_shared_url">Liên kết được chia sẻ không phải URL video hợp lệ.</string>
     <string name="url_dialog_title">Phát từ URL</string>
     <string name="url_dialog_play">Phát</string>
     <string name="cancel">Hủy</string>
