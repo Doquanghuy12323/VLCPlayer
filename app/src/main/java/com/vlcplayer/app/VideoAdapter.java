@@ -12,7 +12,6 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -71,9 +70,9 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int position) {
         VideoItem item = videoList.get(position);
         h.tvName.setText(item.getName());
-        h.tvInfo.setText(formatDur(item.getDuration()) + " · " + formatSize(item.getSize()));
+        h.tvDuration.setText(formatDur(item.getDuration()));
+        h.tvSize.setText(formatSize(item.getSize()));
         h.ivThumb.setImageResource(android.R.drawable.ic_media_play);
-        if (h.btnPlay != null) h.btnPlay.setVisibility(View.GONE);
 
         // Load thumbnail qua Glide - tu dong quan ly cache
         Glide.with(h.ivThumb.getContext())
@@ -95,11 +94,6 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
             return true;
         });
 
-        if (h.btnPlay != null) {
-            h.btnPlay.setOnClickListener(v -> {
-                if (listener != null) listener.onVideoClick(item);
-            });
-        }
     }
 
     private void showPreviewDialog(Context ctx, VideoItem item) {
@@ -174,14 +168,13 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VH> {
 
     public static class VH extends RecyclerView.ViewHolder {
         ImageView ivThumb;
-        TextView tvName, tvInfo;
-        ImageButton btnPlay;
+        TextView tvName, tvDuration, tvSize;
         VH(View v) {
             super(v);
             ivThumb = v.findViewById(R.id.iv_thumbnail);
             tvName  = v.findViewById(R.id.tv_video_name);
-            tvInfo  = v.findViewById(R.id.tv_duration);
-            btnPlay = null; // no play button in layout
+            tvDuration = v.findViewById(R.id.tv_duration);
+            tvSize = v.findViewById(R.id.tv_size);
         }
     }
 }

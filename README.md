@@ -30,11 +30,13 @@ pkg install openjdk-17
 ```
 
 ## ⚙️ GitHub Actions
-Push code lên GitHub → Actions tự động build APK → tải từ mục **Releases**.
+Mỗi pull request và lần push lên `main` đều chạy Android Lint, unit test và build
+APK debug. Để phát hành APK đã ký, mở **Actions → Verify and release VLC Player
+→ Run workflow** trên nhánh `main`. Workflow tạo `versionCode` tự động và đưa APK
+vào **Releases** sau khi các bước kiểm tra thành công.
 
-Workflow sẽ chạy Android Lint, tạo `versionCode` tự động, ký APK bằng GitHub
-Secrets và tạo GitHub Release. Các secret cần có: `KEYSTORE_BASE64`, `KEY_ALIAS`,
-`KEY_PASSWORD`, `STORE_PASSWORD`.
+Các secret cần cho bước phát hành: `KEYSTORE_BASE64`, `KEY_ALIAS`,
+`KEY_PASSWORD`, `STORE_PASSWORD`. Pull request không sử dụng các secret này.
 
 Gemini API key không còn được nhúng trong APK. Mở mục Trợ lý AI trong ứng dụng
 và nhập key của bạn khi được hỏi.

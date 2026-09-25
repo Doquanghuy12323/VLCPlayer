@@ -11,9 +11,12 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Button;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -39,15 +42,26 @@ public class MainActivity extends AppCompatActivity
     implements VideoAdapter.OnVideoClickListener {
 
     private static final int REQ_PERMISSION = 100;
+    private static final int REQ_VIDEO_DOCUMENT = 2002;
+    private static final String PREF_PERMISSION_REQUESTED = "video_permission_requested";
+
+    private enum LibraryState { LOADING, CONTENT, EMPTY, PERMISSION, ERROR }
 
     private RecyclerView recyclerView;
     private VideoAdapter adapter;
     private ProgressBar progressBar;
-    private TextView tvEmpty;
+    private View libraryState;
+    private TextView stateTitle;
+    private TextView stateMessage;
+    private Button statePrimary;
+    private Button stateSecondary;
     private final List<VideoItem> videoList = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private UpdateManager updateManager;
+    private int scanGeneration;
+    private boolean returningFromSettings;
+    private boolean privacyToggleInProgress;
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -67,7 +81,11 @@ public class MainActivity extends AppCompatActivity
 
         recyclerView = findViewById(R.id.recyclerView);
         progressBar  = findViewById(R.id.progress_bar);
-        tvEmpty      = findViewById(R.id.tv_empty);
+        libraryState = findViewById(R.id.library_state);
+        stateTitle = findViewById(R.id.state_title);
+        stateMessage = findViewById(R.id.state_message);
+        statePrimary = findViewById(R.id.state_primary);
+        stateSecondary = findViewById(R.id.state_secondary);
 
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setHasFixedSize(true);
@@ -80,17 +98,18 @@ public class MainActivity extends AppCompatActivity
         recyclerView.setAdapter(adapter);
 
         View fab = findViewById(R.id.fab);
-        if (fab != null) fab.setOnClickListener(v -> showUrlDialog());
+        fab.setOnClickListener(v -> showOpenChoices());
 
         checkPermissionsAndLoad();
         updateManager = new UpdateManager(this);
         updateManager.checkForUpdate(true);
-        handleShareIntent(getIntent());
+        if (savedInstanceState == null) handleShareIntent(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
         handleShareIntent(intent);
     }
 
@@ -102,17 +121,17 @@ public class MainActivity extends AppCompatActivity
             uri = intent.getData();
         } else if (Intent.ACTION_SEND.equals(action)) {
             uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (uri == null) {
+                String sharedUrl = intent.getStringExtra(Intent.EXTRA_TEXT);
+                if (sharedUrl != null && (sharedUrl.startsWith("http://")
+                        || sharedUrl.startsWith("https://"))) {
+                    openSingleVideo(sharedUrl, getString(R.string.open_video_url));
+                    return;
+                }
+            }
         }
         if (uri != null) {
-            final Uri finalUri = uri;
-            handler.postDelayed(() -> {
-                Intent player = new Intent(this, PlayerActivity.class);
-                player.putExtra(PlayerActivity.EXTRA_URI, finalUri.toString());
-                String name = finalUri.getLastPathSegment();
-                player.putExtra(PlayerActivity.EXTRA_TITLE,
-                    name != null ? name : "Video");
-                startActivity(player);
-            }, 300);
+            openSingleVideo(uri.toString(), getVideoTitle(uri));
         }
     }
 
@@ -121,6 +140,11 @@ public class MainActivity extends AppCompatActivity
         super.onResume();
         // Khi quay lai tu PlayerActivity, dọn Glide memory
         Glide.get(this).clearMemory();
+        if (returningFromSettings) {
+            returningFromSettings = false;
+            if (hasVideoPermission()) loadVideos();
+            else showLibraryState(LibraryState.PERMISSION);
+        }
     }
 
     @Override
@@ -147,35 +171,68 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void checkPermissionsAndLoad() {
-        String perm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-            ? Manifest.permission.READ_MEDIA_VIDEO
-            : Manifest.permission.READ_EXTERNAL_STORAGE;
-        if (ContextCompat.checkSelfPermission(this, perm)
-                == PackageManager.PERMISSION_GRANTED) {
+        if (hasVideoPermission()) {
             loadVideos();
         } else {
-            ActivityCompat.requestPermissions(this,
-                new String[]{perm}, REQ_PERMISSION);
+            showLibraryState(LibraryState.PERMISSION);
+            if (!getPreferences(MODE_PRIVATE).getBoolean(PREF_PERMISSION_REQUESTED, false)) {
+                requestVideoPermission();
+            }
         }
+    }
+
+    private String videoPermission() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            ? Manifest.permission.READ_MEDIA_VIDEO
+            : Manifest.permission.READ_EXTERNAL_STORAGE;
+    }
+
+    private boolean hasVideoPermission() {
+        return ContextCompat.checkSelfPermission(this, videoPermission())
+            == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestVideoPermission() {
+        if (hasVideoPermission()) {
+            loadVideos();
+            return;
+        }
+        String permission = videoPermission();
+        boolean wasRequested = getPreferences(MODE_PRIVATE)
+            .getBoolean(PREF_PERMISSION_REQUESTED, false);
+        if (wasRequested && !ActivityCompat.shouldShowRequestPermissionRationale(
+                this, permission)) {
+            returningFromSettings = true;
+            Intent settings = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + getPackageName()));
+            startActivity(settings);
+            return;
+        }
+        getPreferences(MODE_PRIVATE).edit()
+            .putBoolean(PREF_PERMISSION_REQUESTED, true).apply();
+        ActivityCompat.requestPermissions(this, new String[]{permission}, REQ_PERMISSION);
     }
 
     @Override
     public void onRequestPermissionsResult(int req,
             @NonNull String[] perms, @NonNull int[] results) {
         super.onRequestPermissionsResult(req, perms, results);
-        if (req == REQ_PERMISSION && results.length > 0
-                && results[0] == PackageManager.PERMISSION_GRANTED) {
+        if (req != REQ_PERMISSION) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
             loadVideos();
-        } else {
-            Toast.makeText(this, "Can quyen truy cap bo nho",
-                Toast.LENGTH_LONG).show();
-        }
+        else showLibraryState(LibraryState.PERMISSION);
     }
 
     private void loadVideos() {
-        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+        if (!hasVideoPermission()) {
+            showLibraryState(LibraryState.PERMISSION);
+            return;
+        }
+        showLibraryState(LibraryState.LOADING);
+        final int generation = ++scanGeneration;
         executor.execute(() -> {
             List<VideoItem> items = new ArrayList<>();
+            boolean failed = false;
             String[] proj = {
                 MediaStore.Video.Media._ID,
                 MediaStore.Video.Media.DISPLAY_NAME,
@@ -205,19 +262,77 @@ public class MainActivity extends AppCompatActivity
                             c.getString(c.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA)),
                             uri));
                     }
-                }
+                } else failed = true;
             } catch (Exception e) {
-                e.printStackTrace();
+                android.util.Log.e("MainActivity", "Could not scan videos", e);
+                failed = true;
             }
+            final boolean scanFailed = failed;
             handler.post(() -> {
-                if (progressBar != null) progressBar.setVisibility(View.GONE);
+                if (isDestroyed() || generation != scanGeneration) return;
+                if (scanFailed) {
+                    showLibraryState(hasVideoPermission()
+                        ? LibraryState.ERROR : LibraryState.PERMISSION);
+                    return;
+                }
                 videoList.clear();
                 videoList.addAll(items);
                 adapter.notifyDataSetChanged();
-                if (tvEmpty != null)
-                    tvEmpty.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
+                showLibraryState(items.isEmpty() ? LibraryState.EMPTY : LibraryState.CONTENT);
             });
         });
+    }
+
+    private void showLibraryState(LibraryState state) {
+        recyclerView.setVisibility(state == LibraryState.CONTENT ? View.VISIBLE : View.GONE);
+        libraryState.setVisibility(state == LibraryState.CONTENT ? View.GONE : View.VISIBLE);
+        progressBar.setVisibility(state == LibraryState.LOADING ? View.VISIBLE : View.GONE);
+        statePrimary.setVisibility(View.GONE);
+        stateSecondary.setVisibility(View.GONE);
+        statePrimary.setOnClickListener(null);
+        stateSecondary.setOnClickListener(null);
+        switch (state) {
+            case LOADING:
+                stateTitle.setText(R.string.library_loading_title);
+                stateMessage.setText(R.string.library_loading_message);
+                break;
+            case EMPTY:
+                stateTitle.setText(R.string.library_empty_title);
+                stateMessage.setText(R.string.library_empty_message);
+                setStateActions(R.string.open_local_video, v -> openLocalVideo(),
+                    R.string.library_retry, v -> loadVideos());
+                break;
+            case PERMISSION:
+                stateTitle.setText(R.string.library_permission_title);
+                stateMessage.setText(R.string.library_permission_message);
+                boolean needsSettings = getPreferences(MODE_PRIVATE)
+                    .getBoolean(PREF_PERMISSION_REQUESTED, false)
+                    && !ActivityCompat.shouldShowRequestPermissionRationale(
+                        this, videoPermission());
+                setStateActions(needsSettings ? R.string.library_permission_settings
+                        : R.string.library_permission_grant,
+                    v -> requestVideoPermission(),
+                    R.string.open_local_video, v -> openLocalVideo());
+                break;
+            case ERROR:
+                stateTitle.setText(R.string.library_error_title);
+                stateMessage.setText(R.string.library_error_message);
+                setStateActions(R.string.library_retry, v -> loadVideos(),
+                    R.string.open_local_video, v -> openLocalVideo());
+                break;
+            case CONTENT:
+                break;
+        }
+    }
+
+    private void setStateActions(int primaryLabel, View.OnClickListener primaryAction,
+            int secondaryLabel, View.OnClickListener secondaryAction) {
+        statePrimary.setText(primaryLabel);
+        statePrimary.setOnClickListener(primaryAction);
+        statePrimary.setVisibility(View.VISIBLE);
+        stateSecondary.setText(secondaryLabel);
+        stateSecondary.setOnClickListener(secondaryAction);
+        stateSecondary.setVisibility(View.VISIBLE);
     }
 
     @Override
@@ -227,6 +342,7 @@ public class MainActivity extends AppCompatActivity
         Intent i = new Intent(this, PlayerActivity.class);
         i.putExtra(PlayerActivity.EXTRA_URI, video.getUri().toString());
         i.putExtra(PlayerActivity.EXTRA_TITLE, video.getName());
+        i.putExtra(PlayerActivity.EXTRA_USE_PLAYLIST, true);
         startActivity(i);
     }
 
@@ -240,10 +356,7 @@ public class MainActivity extends AppCompatActivity
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
         int id = item.getItemId();
         if (id == R.id.action_refresh) {
-            loadVideos();
-            return true;
-        } else if (id == R.id.action_url) {
-            showUrlDialog();
+            checkPermissionsAndLoad();
             return true;
         } else if (id == R.id.action_history) {
             showHistoryDialog();
@@ -286,30 +399,73 @@ public class MainActivity extends AppCompatActivity
         return super.onOptionsItemSelected(item);
     }
 
+    private void showOpenChoices() {
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.open_source_title)
+            .setItems(new String[]{getString(R.string.open_local_video),
+                getString(R.string.open_video_url)}, (dialog, which) -> {
+                    if (which == 0) openLocalVideo();
+                    else showUrlDialog();
+                })
+            .show();
+    }
+
+    private void openLocalVideo() {
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        picker.addCategory(Intent.CATEGORY_OPENABLE);
+        picker.setType("video/*");
+        picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+            | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(picker, REQ_VIDEO_DOCUMENT);
+    }
+
+    private String getVideoTitle(Uri uri) {
+        if ("content".equals(uri.getScheme())) {
+            try (Cursor cursor = getContentResolver().query(uri,
+                    new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    String name = cursor.getString(0);
+                    if (name != null && !name.trim().isEmpty()) return name;
+                }
+            } catch (Exception ignored) {
+                // A few document providers do not expose display names.
+            }
+        }
+        String name = uri.getLastPathSegment();
+        return name == null || name.trim().isEmpty()
+            ? getString(R.string.open_video) : name;
+    }
+
+    private void openSingleVideo(String uri, String title) {
+        PlaylistManager.get().clear();
+        Intent player = new Intent(this, PlayerActivity.class);
+        player.putExtra(PlayerActivity.EXTRA_URI, uri);
+        player.putExtra(PlayerActivity.EXTRA_TITLE,
+            title == null || title.trim().isEmpty() ? getString(R.string.open_video) : title);
+        player.putExtra(PlayerActivity.EXTRA_USE_PLAYLIST, false);
+        startActivity(player);
+    }
+
     private void showUrlDialog() {
         android.widget.EditText et = new android.widget.EditText(this);
         et.setHint("https://example.com/video.mp4");
         new AlertDialog.Builder(this)
-            .setTitle("Phat tu URL")
+            .setTitle(R.string.url_dialog_title)
             .setView(et)
-            .setPositiveButton("Phat", (d, w) -> {
+            .setPositiveButton(R.string.url_dialog_play, (d, w) -> {
                 String url = et.getText().toString().trim();
                 if (!url.isEmpty()) {
                     if (url.contains("mega.nz") || url.contains("mega.co.nz")) {
-                        // MEGA dung ma hoa rieng, mo WebView de xem/tai
+                        PlaylistManager.get().clear();
                         Intent i = new Intent(this, MangaBrowserActivity.class);
                         i.putExtra("start_url", url);
                         startActivity(i);
                     } else {
-                        // URL binh thuong → phat bang VLC
-                        Intent i = new Intent(this, PlayerActivity.class);
-                        i.putExtra(PlayerActivity.EXTRA_URI, url);
-                        i.putExtra(PlayerActivity.EXTRA_TITLE, "URL Stream");
-                        startActivity(i);
+                        openSingleVideo(url, "URL Stream");
                     }
                 }
             })
-            .setNegativeButton("Huy", null).show();
+            .setNegativeButton(R.string.cancel, null).show();
     }
 
     private void showHistoryDialog() {
@@ -329,10 +485,7 @@ public class MainActivity extends AppCompatActivity
                     .setTitle("Lich su xem")
                     .setItems(names, (d, w) -> {
                         com.vlcplayer.app.db.HistoryItem h = hist.get(w);
-                        Intent i = new Intent(this, PlayerActivity.class);
-                        i.putExtra(PlayerActivity.EXTRA_URI, h.uri);
-                        i.putExtra(PlayerActivity.EXTRA_TITLE, h.title);
-                        startActivity(i);
+                        openSingleVideo(h.uri, h.title);
                     })
                     .setNegativeButton("Dong", null).show();
             });
@@ -434,6 +587,7 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void showPrivacyDialog() {
+        if (privacyToggleInProgress) return;
         boolean current = new PrivacyManager(this).isEnabled();
         boolean next = !current;
         String msg = current ? "Tat che do bao mat?" : "Bat che do bao mat?";
@@ -441,13 +595,23 @@ public class MainActivity extends AppCompatActivity
             .setTitle("Che do bao mat")
             .setMessage(msg)
             .setPositiveButton("Dong y", (d, w) -> {
-                java.util.List<String> paths2 = getVideoPaths();
-                int changed = new PrivacyManager(this).setEnabled(next, paths2);
-                android.widget.Toast.makeText(this,
-                    (next ? "Da bat bao mat" : "Da tat bao mat")
-                        + " cho " + changed + " thu muc",
-                    android.widget.Toast.LENGTH_SHORT).show();
-                recreate();
+                java.util.List<String> paths2 = next
+                    ? getVideoPaths() : java.util.Collections.emptyList();
+                privacyToggleInProgress = true;
+                Toast.makeText(this, R.string.privacy_working, Toast.LENGTH_SHORT).show();
+                executor.execute(() -> {
+                    int changed = new PrivacyManager(this).setEnabled(next, paths2);
+                    handler.post(() -> {
+                        if (isDestroyed()) return;
+                        privacyToggleInProgress = false;
+                        int message = changed < 0
+                            ? (next ? R.string.privacy_enable_partial : R.string.privacy_disable_partial)
+                            : (next ? R.string.privacy_enabled_count : R.string.privacy_disabled_count);
+                        Toast.makeText(this, changed < 0 ? getString(message)
+                            : getString(message, changed), Toast.LENGTH_LONG).show();
+                        recreate();
+                    });
+                });
             })
             .setNegativeButton("Huy", null).show();
     }
@@ -490,6 +654,19 @@ public class MainActivity extends AppCompatActivity
     @Override
     protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_VIDEO_DOCUMENT && resultCode == RESULT_OK && data != null) {
+            Uri uri = data.getData();
+            if (uri != null) {
+                try {
+                    getContentResolver().takePersistableUriPermission(uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException ignored) {
+                    // The current read grant still permits playback when persistence is unavailable.
+                }
+                openSingleVideo(uri.toString(), getVideoTitle(uri));
+            }
+            return;
+        }
         if (requestCode == 2001 && resultCode == RESULT_OK && data != null) {
             android.net.Uri uri = data.getData();
             if (uri != null) {

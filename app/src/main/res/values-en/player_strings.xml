@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="player_more">More options</string>
+    <string name="player_speed">Playback speed</string>
+    <string name="player_previous">Previous video</string>
+    <string name="player_next">Next video</string>
+    <string name="player_shuffle">Shuffle</string>
+    <string name="player_repeat">Repeat</string>
+    <string name="player_queue">Playlist</string>
+    <string name="player_unlock">Unlock screen</string>
+    <string name="player_filter">Picture filters</string>
+    <string name="player_night_on">Turn on night mode</string>
+    <string name="player_night_off">Turn off night mode</string>
+    <string name="player_bookmark">Bookmark this moment</string>
+    <string name="player_pip">Picture in picture</string>
+    <string name="player_aspect">Aspect ratio</string>
+    <string name="player_lock">Lock screen</string>
+    <string name="player_translate">AI subtitle translation</string>
+    <string name="player_funscript">Funscript</string>
+    <string name="player_handy">The Handy</string>
+    <string name="player_audio_track">Audio track</string>
+</resources>
