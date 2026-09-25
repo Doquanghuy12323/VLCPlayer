@@ -31,7 +31,8 @@ pkg install openjdk-17
 
 ## ⚙️ GitHub Actions
 Mỗi pull request và lần push lên `main` đều chạy Android Lint, unit test và build
-APK debug. Để phát hành APK đã ký, mở **Actions → Verify and release VLC Player
+APK debug. Tải bản cài thử trong artifact `vlcplayer-debug` của lần chạy Actions.
+Để phát hành APK đã ký, mở **Actions → Verify and release VLC Player
 → Run workflow** trên nhánh `main`. Workflow tạo `versionCode` tự động và đưa APK
 vào **Releases** sau khi các bước kiểm tra thành công.
 
