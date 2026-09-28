@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="funscript_video">Video: %1$s</string>
+    <string name="funscript_video_changed">Video đã thay đổi. Hãy chọn lại script cho video hiện tại.</string>
+    <string name="funscript_sync_toggle">Đồng bộ với video</string>
+    <string name="funscript_sync_off">Đã tắt đồng bộ. Thiết bị sẽ không tự chạy lại.</string>
+    <string name="funscript_stop_required">Chưa xác nhận dừng thiết bị. Cần thử dừng lại trước khi đồng bộ.</string>
+    <string name="funscript_sync_waiting">Chờ video phát ổn định để đồng bộ.</string>
+    <string name="funscript_sync_no_script">Chưa có script sẵn sàng để đồng bộ.</string>
+    <string name="funscript_sync_running">Đang đồng bộ theo video · 1.0x</string>
+    <string name="funscript_sync_ready">Script sẵn sàng, đang chờ lệnh đồng bộ.</string>
+    <string name="funscript_resync">Đồng bộ lại thời điểm hiện tại</string>
+    <string name="funscript_synced_at">Đã đồng bộ tại %1$s</string>
+    <string name="funscript_connected">The Handy: Đã kết nối</string>
+    <string name="funscript_connecting">Đang kết nối The Handy…</string>
+    <string name="funscript_disconnected">The Handy: Chưa kết nối</string>
+    <string name="funscript_key_required">Cần nhập Connection Key để kết nối The Handy.</string>
+    <string name="funscript_no_script">Chưa chọn script cho video này.</string>
+    <string name="funscript_selected">Script: %1$s\nNguồn: %2$s</string>
+    <string name="funscript_script_section">Script cho video</string>
+    <string name="funscript_choose">Chọn file .funscript / .csv</string>
+    <string name="funscript_auto_find">Tìm script đã nhập hoặc cùng tên video</string>
+    <string name="funscript_url_action">Nhập URL script</string>
+    <string name="funscript_device_section">Thiết bị</string>
+    <string name="funscript_connect">Kết nối The Handy</string>
+    <string name="funscript_key">Nhập / đổi Connection Key</string>
+    <string name="funscript_key_help">Lấy Connection Key trong tài khoản tại handyfeeling.com.</string>
+    <string name="funscript_save_connect">Lưu và kết nối</string>
+    <string name="funscript_device_status">Thông tin thiết bị</string>
+    <string name="funscript_disconnect">Ngắt kết nối</string>
+    <string name="funscript_retry">Thử lại</string>
+    <string name="funscript_load_action">Tải script</string>
+    <string name="funscript_loading">Đang tải và chuẩn bị script…</string>
+    <string name="funscript_importing">Đang kiểm tra và nhập script…</string>
+    <string name="funscript_loaded">Script đã sẵn sàng.</string>
+    <string name="funscript_invalid_url">Nhập URL http hoặc https có địa chỉ máy chủ hợp lệ.</string>
+    <string name="funscript_import_error">Không nhập được script: %1$s. Script đã lưu trước vẫn được giữ.</string>
+    <string name="funscript_not_found_hint">Không tìm thấy script có thể đọc. Hãy chọn file một lần để gắn với video này.</string>
+    <string name="funscript_source_file">Tệp đã chọn</string>
+    <string name="funscript_source_url">URL</string>
+    <string name="funscript_source_auto">Tìm tự động</string>
+    <string name="funscript_upload_note">Script được chuyển sang CSV và tải lên dịch vụ tạm của Handy để thiết bị đọc. Tắt đồng bộ sẽ giữ kết nối và script, nhưng dừng chuyển động.</string>
+    <string name="funscript_old_device_stop_error">Chưa xác nhận dừng thiết bị cũ: %1$s</string>
+</resources>

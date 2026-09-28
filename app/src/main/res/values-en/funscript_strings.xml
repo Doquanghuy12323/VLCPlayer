@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="funscript_video">Video: %1$s</string>
+    <string name="funscript_video_changed">The video changed. Choose the script again for the current video.</string>
+    <string name="funscript_sync_toggle">Sync with video</string>
+    <string name="funscript_sync_off">Sync is off. The device will not restart automatically.</string>
+    <string name="funscript_stop_required">Device stop is unconfirmed. Retry stopping before syncing.</string>
+    <string name="funscript_sync_waiting">Waiting for stable video playback to sync.</string>
+    <string name="funscript_sync_no_script">No script is ready to sync.</string>
+    <string name="funscript_sync_running">Syncing with video · 1.0x</string>
+    <string name="funscript_sync_ready">Script ready, waiting for a sync command.</string>
+    <string name="funscript_resync">Sync current position again</string>
+    <string name="funscript_synced_at">Synced at %1$s</string>
+    <string name="funscript_connected">The Handy: Connected</string>
+    <string name="funscript_connecting">Connecting to The Handy…</string>
+    <string name="funscript_disconnected">The Handy: Disconnected</string>
+    <string name="funscript_key_required">Enter a Connection Key to connect The Handy.</string>
+    <string name="funscript_no_script">No script selected for this video.</string>
+    <string name="funscript_selected">Script: %1$s\nSource: %2$s</string>
+    <string name="funscript_script_section">Script for this video</string>
+    <string name="funscript_choose">Choose .funscript / .csv file</string>
+    <string name="funscript_auto_find">Find imported script or matching video name</string>
+    <string name="funscript_url_action">Enter script URL</string>
+    <string name="funscript_device_section">Device</string>
+    <string name="funscript_connect">Connect The Handy</string>
+    <string name="funscript_key">Enter / change Connection Key</string>
+    <string name="funscript_key_help">Find your Connection Key in your account at handyfeeling.com.</string>
+    <string name="funscript_save_connect">Save and connect</string>
+    <string name="funscript_device_status">Device information</string>
+    <string name="funscript_disconnect">Disconnect</string>
+    <string name="funscript_retry">Retry</string>
+    <string name="funscript_load_action">Load script</string>
+    <string name="funscript_loading">Loading and preparing script…</string>
+    <string name="funscript_importing">Validating and importing script…</string>
+    <string name="funscript_loaded">Script is ready.</string>
+    <string name="funscript_invalid_url">Enter an http or https URL with a valid host.</string>
+    <string name="funscript_import_error">Could not import script: %1$s. The previously saved script is preserved.</string>
+    <string name="funscript_not_found_hint">No readable script found. Choose a file once to associate it with this video.</string>
+    <string name="funscript_source_file">Selected file</string>
+    <string name="funscript_source_url">URL</string>
+    <string name="funscript_source_auto">Automatic search</string>
+    <string name="funscript_upload_note">Scripts are converted to CSV and uploaded to the Handy temporary service for the device to read. Turning sync off keeps the connection and script, while stopping motion.</string>
+    <string name="funscript_old_device_stop_error">Could not confirm stopping the previous device: %1$s</string>
+</resources>

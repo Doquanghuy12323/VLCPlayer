@@ -49,6 +49,7 @@ public class HandyManager {
         "https://scripts01.handyfeeling.com/api/script/v0/temp/upload";
     private static final String PREF = "handy_prefs";
     private static final String KEY_TOKEN = "connection_key";
+    private static final String KEY_SYNC_ENABLED = "sync_enabled";
 
     private static final int HSSP_MODE = 1;
     private static final int SYNC_SAMPLES = 30;
@@ -98,22 +99,31 @@ public class HandyManager {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService commandExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService emergencyExecutor = Executors.newSingleThreadExecutor();
-    private final AtomicLong playbackGeneration = new AtomicLong();
+    private final Object playbackLock = new Object();
+    private final HandyPlaybackPolicy playbackPolicy;
     private final AtomicLong scriptGeneration = new AtomicLong();
+    private final AtomicLong connectionGeneration = new AtomicLong();
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .writeTimeout(12, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build();
+    // Playback retries are explicit below so each attempt checks current intent.
+    private final OkHttpClient playbackHttpClient = httpClient.newBuilder()
+        .retryOnConnectionFailure(false)
+        .build();
 
     private volatile String connectionKey;
     private volatile boolean connected;
     private volatile boolean scriptReady;
     private volatile boolean playing;
-    private volatile boolean desiredPlaying;
     private volatile boolean destroyed;
     private volatile boolean autoReconnectEnabled = true;
+    private volatile boolean disconnectInProgress;
+    // A failed stop keeps ownership of the old device until a retry confirms it.
+    private volatile boolean disconnectRequired;
+    private volatile boolean motionMayBeActive;
     private volatile long serverTimeOffset;
     private volatile long averageRtt;
     private volatile long lastTimeSyncElapsed;
@@ -132,18 +142,29 @@ public class HandyManager {
         appContext = context.getApplicationContext();
         connectionKey = appContext.getSharedPreferences(PREF, Context.MODE_PRIVATE)
             .getString(KEY_TOKEN, "");
+        playbackPolicy = new HandyPlaybackPolicy(appContext
+            .getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SYNC_ENABLED, true));
     }
 
     public void saveKey(String key) {
-        scriptGeneration.incrementAndGet();
-        connectionKey = key == null ? "" : key.trim();
-        autoReconnectEnabled = true;
-        connected = false;
-        scriptReady = false;
-        playing = false;
-        desiredPlaying = false;
-        appContext.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-            .edit().putString(KEY_TOKEN, connectionKey).apply();
+        synchronized (playbackLock) {
+            if (disconnectInProgress || disconnectRequired || playbackPolicy.isStopRequired()
+                    || motionMayBeActive) {
+                throw new IllegalStateException("Phải xác nhận dừng thiết bị cũ trước khi đổi key");
+            }
+            connectionGeneration.incrementAndGet();
+            scriptGeneration.incrementAndGet();
+            playbackPolicy.invalidate();
+            cancelActivePlaybackCall();
+            connectionKey = key == null ? "" : key.trim();
+            autoReconnectEnabled = true;
+            connected = false;
+            scriptReady = false;
+            playing = false;
+            appContext.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                .edit().putString(KEY_TOKEN, connectionKey).apply();
+        }
     }
 
     public String getSavedKey() {
@@ -151,7 +172,10 @@ public class HandyManager {
     }
 
     public boolean isConnected() {
-        return connected;
+        // Network reachability is not proof that a previously started device
+        // stopped. Keep its identity until an acknowledged stop clears motion.
+        return connected || disconnectRequired || motionMayBeActive
+            || playbackPolicy.isStopRequired();
     }
 
     public boolean isScriptReady() {
@@ -162,15 +186,92 @@ public class HandyManager {
         return playing;
     }
 
+    public boolean isSynchronizationEnabled() {
+        return playbackPolicy.isSynchronizationEnabled();
+    }
+
+    /** A stop was not confirmed; retry a stop before allowing new motion. */
+    public boolean isStopRequired() {
+        return playbackPolicy.isStopRequired() || disconnectRequired;
+    }
+
+    /** Persists user intent. Enabling only permits a future explicit play request. */
+    public void setSynchronizationEnabled(boolean enabled, HandyCallback callback) {
+        if (destroyed) return;
+        synchronized (playbackLock) {
+            if (enabled && (isStopRequired() || disconnectInProgress)) {
+                postError(callback, "Chưa xác nhận dừng The Handy. Hãy thử dừng lại trước khi bật đồng bộ");
+                return;
+            }
+            playbackPolicy.setSynchronizationEnabled(enabled);
+            appContext.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_SYNC_ENABLED, enabled).apply();
+            if (!enabled) {
+                stopPlayback(callback);
+                return;
+            }
+        }
+        postSuccess(callback, "Đã bật đồng bộ; thiết bị chỉ chạy khi video đang phát");
+    }
+
+    /**
+     * The video may authorize motion only while VLC is actually advancing.
+     * This state is transient and is deliberately blocked on manager creation.
+     */
+    public void setVideoPlaybackAllowed(boolean allowed) {
+        if (destroyed) return;
+        synchronized (playbackLock) {
+            boolean shouldStop = !allowed && (playbackPolicy.isVideoPlaybackAllowed()
+                || playbackPolicy.isPlaybackDesired() || playing || activePlaybackCall != null);
+            playbackPolicy.setVideoPlaybackAllowed(allowed);
+            if (shouldStop) stopPlayback(null);
+        }
+    }
+
+    private boolean isPlaybackAllowed(long generation) {
+        return !destroyed && !disconnectInProgress && !disconnectRequired
+            && playbackPolicy.canPlay(generation);
+    }
+
+    private boolean isConnectionCurrent(long generation) {
+        return !destroyed && !disconnectInProgress && !disconnectRequired
+            && generation == connectionGeneration.get();
+    }
+
+    private void requireCurrentConnection(long generation) throws HandyException {
+        if (!isConnectionCurrent(generation)) {
+            throw new HandyException("Thao tác kết nối cũ đã bị hủy");
+        }
+    }
+
+    private boolean isScriptCurrent(long generation) {
+        return !destroyed && !disconnectInProgress && !disconnectRequired
+            && generation == scriptGeneration.get();
+    }
+
+    private boolean rejectWhileDisconnecting(HandyCallback callback) {
+        if (!disconnectInProgress && !isStopRequired()) return false;
+        postError(callback, "Chưa xác nhận dừng thiết bị cũ. Hãy thử ngắt kết nối lại");
+        return true;
+    }
+
+    private void cancelActivePlaybackCall() {
+        Call playbackCall = activePlaybackCall;
+        if (playbackCall != null) playbackCall.cancel();
+    }
+
     public void connect(HandyCallback callback) {
         if (destroyed) return;
+        if (rejectWhileDisconnecting(callback)) return;
         if (connectionKey.isEmpty()) {
             postError(callback, "Chưa nhập Connection Key");
             return;
         }
         autoReconnectEnabled = true;
+        final long generation = connectionGeneration.get();
         commandExecutor.execute(() -> {
             try {
+                if (!isConnectionCurrent(generation)) return;
                 connectInternal();
                 String updateText = firmwareStatus == 0
                     ? "Firmware đã cập nhật"
@@ -179,23 +280,29 @@ public class HandyManager {
                         : firmwareStatus == 2
                             ? "Có bản firmware mới"
                             : "Không xác định trạng thái cập nhật";
-                postSuccess(callback, "Kết nối thành công\nFirmware: " + firmwareVersion
-                    + "\nModel: " + model + "\n" + updateText);
+                postConnectionSuccess(callback, "Kết nối thành công\nFirmware: " + firmwareVersion
+                    + "\nModel: " + model + "\n" + updateText, generation);
             } catch (Exception e) {
-                connected = false;
-                playing = false;
-                postError(callback, friendlyError(e));
+                if (isConnectionCurrent(generation)) {
+                    connected = false;
+                    playing = false;
+                    postConnectionError(callback, friendlyError(e), generation);
+                }
             }
         });
     }
 
     private void connectInternal() throws Exception {
+        final long generation = connectionGeneration.get();
+        requireCurrentConnection(generation);
         JSONObject connectedResponse = apiRequest("GET", "/connected", null, false);
+        requireCurrentConnection(generation);
         if (!connectedResponse.optBoolean("connected", false)) {
             throw new HandyException("The Handy chưa ở Online Mode hoặc chưa kết nối Wi-Fi");
         }
 
         JSONObject info = apiRequest("GET", "/info", null, false);
+        requireCurrentConnection(generation);
         String newFirmware = info.optString("fwVersion", "?");
         int majorVersion = parseVersionPart(newFirmware, 0);
         if (majorVersion > 0 && majorVersion < 3) {
@@ -211,22 +318,28 @@ public class HandyManager {
         sessionId = newSession;
 
         syncClientServerTime();
+        requireCurrentConnection(generation);
         syncHandyServerTimeBestEffort();
 
         JSONObject status = apiRequest("GET", "/status", null, false);
-        currentMode = status.optInt("mode", -1);
-        if (sessionChanged) {
-            scriptReady = false;
-            playing = false;
+        synchronized (playbackLock) {
+            requireCurrentConnection(generation);
+            currentMode = status.optInt("mode", -1);
+            if (sessionChanged) {
+                scriptReady = false;
+                playing = false;
+            }
+            connected = true;
         }
-        connected = true;
         Log.i(TAG, "Connected model=" + model + " firmware=" + firmwareVersion
             + " mode=" + currentMode + " rtt=" + averageRtt + "ms");
     }
 
     private void syncClientServerTime() throws Exception {
+        final long generation = connectionGeneration.get();
         List<TimeSample> samples = new ArrayList<>();
         for (int i = 0; i < SYNC_SAMPLES && !Thread.currentThread().isInterrupted(); i++) {
+            requireCurrentConnection(generation);
             long sent = System.currentTimeMillis();
             try {
                 JSONObject response = apiRequest("GET", "/servertime", null, false);
@@ -277,6 +390,7 @@ public class HandyManager {
 
     public void setupScript(String scriptCsvUrl, HandyCallback callback) {
         if (destroyed) return;
+        if (rejectWhileDisconnecting(callback)) return;
         if (!isHttpUrl(scriptCsvUrl)) {
             postError(callback, "URL script không hợp lệ");
             return;
@@ -284,18 +398,21 @@ public class HandyManager {
         final long generation = beginScriptLoad();
         commandExecutor.execute(() -> {
             try {
+                if (!isScriptCurrent(generation)) return;
                 ensureConnectedInternal();
+                if (!isScriptCurrent(generation)) return;
                 if (setupScriptInternal(scriptCsvUrl, generation)) {
-                    postSuccess(callback, "Script đã sẵn sàng");
+                    postScriptSuccess(callback, "Script đã sẵn sàng", generation);
                 }
             } catch (Exception e) {
-                postError(callback, friendlyError(e));
+                postScriptError(callback, friendlyError(e), generation);
             }
         });
     }
 
     public void uploadAndSetupScript(File file, HandyCallback callback) {
         if (destroyed) return;
+        if (rejectWhileDisconnecting(callback)) return;
         if (file == null || !file.isFile()) {
             postError(callback, "Không tìm thấy file funscript");
             return;
@@ -303,21 +420,25 @@ public class HandyManager {
         final long generation = beginScriptLoad();
         commandExecutor.execute(() -> {
             try {
+                if (!isScriptCurrent(generation)) return;
                 ensureConnectedInternal();
+                if (!isScriptCurrent(generation)) return;
                 byte[] source = readLimited(new FileInputStream(file), MAX_SOURCE_BYTES);
                 byte[] csv = convertToCsv(source);
+                if (!isScriptCurrent(generation)) return;
                 String scriptUrl = uploadCsv(csv);
                 if (setupScriptInternal(scriptUrl, generation)) {
-                    postSuccess(callback, "Đã tải và đồng bộ script");
+                    postScriptSuccess(callback, "Đã tải và đồng bộ script", generation);
                 }
             } catch (Exception e) {
-                postError(callback, friendlyError(e));
+                postScriptError(callback, friendlyError(e), generation);
             }
         });
     }
 
     public void uploadAndSetupScript(String sourceUrl, HandyCallback callback) {
         if (destroyed) return;
+        if (rejectWhileDisconnecting(callback)) return;
         if (!isHttpUrl(sourceUrl)) {
             postError(callback, "URL funscript không hợp lệ");
             return;
@@ -325,15 +446,18 @@ public class HandyManager {
         final long generation = beginScriptLoad();
         commandExecutor.execute(() -> {
             try {
+                if (!isScriptCurrent(generation)) return;
                 ensureConnectedInternal();
+                if (!isScriptCurrent(generation)) return;
                 byte[] source = downloadScript(sourceUrl);
                 byte[] csv = convertToCsv(source);
+                if (!isScriptCurrent(generation)) return;
                 String scriptUrl = uploadCsv(csv);
                 if (setupScriptInternal(scriptUrl, generation)) {
-                    postSuccess(callback, "Đã tải và đồng bộ script");
+                    postScriptSuccess(callback, "Đã tải và đồng bộ script", generation);
                 }
             } catch (Exception e) {
-                postError(callback, friendlyError(e));
+                postScriptError(callback, friendlyError(e), generation);
             }
         });
     }
@@ -350,7 +474,7 @@ public class HandyManager {
     }
 
     private boolean setupScriptInternal(String scriptCsvUrl, long generation) throws Exception {
-        if (generation != scriptGeneration.get()) return false;
+        if (!isScriptCurrent(generation)) return false;
         JSONObject modeBody = new JSONObject();
         modeBody.put("mode", HSSP_MODE);
         JSONObject modeResponse = apiRequest("PUT", "/mode", modeBody, false);
@@ -358,7 +482,10 @@ public class HandyManager {
         if (modeResult != 0 && modeResult != 1) {
             throw new HandyException("Không chuyển được The Handy sang chế độ HSSP");
         }
-        currentMode = HSSP_MODE;
+        synchronized (playbackLock) {
+            if (!isScriptCurrent(generation)) return false;
+            currentMode = HSSP_MODE;
+        }
 
         JSONObject setupBody = new JSONObject();
         setupBody.put("url", scriptCsvUrl);
@@ -368,17 +495,18 @@ public class HandyManager {
             throw new HandyException("The Handy không tải được script, mã " + setupResult);
         }
 
-        if (generation != scriptGeneration.get()) return false;
+        if (!isScriptCurrent(generation)) return false;
         ensureHsspLoopDisabled();
 
-        if (generation != scriptGeneration.get()) {
-            Log.d(TAG, "Ignoring stale HSSP setup result");
-            return false;
+        synchronized (playbackLock) {
+            if (!isScriptCurrent(generation)) {
+                Log.d(TAG, "Ignoring stale HSSP setup result");
+                return false;
+            }
+            lastScriptUrl = scriptCsvUrl;
+            scriptReady = true;
+            playing = false;
         }
-
-        lastScriptUrl = scriptCsvUrl;
-        scriptReady = true;
-        playing = false;
         Log.i(TAG, "HSSP script ready");
         return true;
     }
@@ -439,13 +567,26 @@ public class HandyManager {
 
     public void play(long videoPositionMs, HandyCallback callback) {
         if (destroyed) return;
-        desiredPlaying = true;
-        lastRequestedPositionMs = Math.max(0, videoPositionMs);
-        final long generation = playbackGeneration.incrementAndGet();
+        final long generation;
+        synchronized (playbackLock) {
+            if (rejectWhileDisconnecting(callback)) return;
+            generation = playbackPolicy.requestPlay();
+            if (generation != HandyPlaybackPolicy.NOT_ALLOWED) {
+                lastRequestedPositionMs = Math.max(0, videoPositionMs);
+                // A newer seek/play invalidates any in-flight request as well.
+                cancelActivePlaybackCall();
+            }
+        }
+        if (generation == HandyPlaybackPolicy.NOT_ALLOWED) {
+            postError(callback, isSynchronizationEnabled()
+                ? "Chỉ đồng bộ khi video đang phát" : "Đồng bộ đã tắt");
+            return;
+        }
         commandExecutor.execute(() -> {
             try {
-                if (generation != playbackGeneration.get()) return;
+                if (!isPlaybackAllowed(generation)) return;
                 ensureConnectedInternal();
+                if (!isPlaybackAllowed(generation)) return;
                 long currentScriptGeneration = scriptGeneration.get();
                 String currentScriptUrl = lastScriptUrl;
                 if (currentScriptGeneration != scriptGeneration.get()) return;
@@ -460,18 +601,19 @@ public class HandyManager {
                     syncHandyServerTimeBestEffort();
                 }
                 if (playInternal(videoPositionMs, generation)) {
-                    postSuccess(callback, "The Handy đang phát đồng bộ");
+                    postPlaybackSuccess(callback, "The Handy đang phát đồng bộ", generation);
                 }
             } catch (Exception e) {
-                if (generation == playbackGeneration.get()) {
-                    postError(callback, friendlyError(e));
+                if (isPlaybackAllowed(generation)) {
+                    postPlaybackError(callback, friendlyError(e), generation);
                 }
             }
         });
     }
 
     private boolean playInternal(long videoPositionMs, long generation) throws Exception {
-        if (generation != playbackGeneration.get()) return false;
+        final long requestConnectionGeneration = connectionGeneration.get();
+        if (!isPlaybackAllowed(generation)) return false;
         if (currentMode != HSSP_MODE) {
             JSONObject modeBody = new JSONObject();
             modeBody.put("mode", HSSP_MODE);
@@ -483,20 +625,26 @@ public class HandyManager {
             currentMode = HSSP_MODE;
         }
 
+        if (!isPlaybackAllowed(generation)) return false;
+
         JSONObject body = new JSONObject();
         body.put("estimatedServerTime", System.currentTimeMillis() + serverTimeOffset);
         body.put("startTime", Math.max(0, videoPositionMs));
-        JSONObject response = apiRequest("PUT", "/hssp/play", body, true);
+        JSONObject response = apiRequest("PUT", "/hssp/play", body, true, generation);
         if (response.optInt("result", -1) != 0) {
             throw new HandyException("The Handy không bắt đầu được script");
         }
-        if (generation != playbackGeneration.get()) {
-            stopInternalBestEffort();
-            return false;
+        synchronized (playbackLock) {
+            if (isPlaybackAllowed(generation)) {
+                playing = true;
+                Log.d(TAG, "HSSP play accepted at videoTime=" + Math.max(0, videoPositionMs));
+                return true;
+            }
         }
-        playing = true;
-        Log.d(TAG, "HSSP play accepted at videoTime=" + Math.max(0, videoPositionMs));
-        return true;
+        // A stop/disable that raced with the HTTP response must win, even if
+        // cancellation reached the gateway after it accepted the play request.
+        stopInternalBestEffort(requestConnectionGeneration);
+        return false;
     }
 
     public void seekSync(long newVideoPositionMs) {
@@ -514,32 +662,42 @@ public class HandyManager {
     /** Stops motion while preserving the device connection and loaded script. */
     public void stopPlayback(HandyCallback callback) {
         if (destroyed) return;
-        final long stopGeneration = playbackGeneration.incrementAndGet();
-        desiredPlaying = false;
-        playing = false;
-        Call playbackCall = activePlaybackCall;
-        if (playbackCall != null) playbackCall.cancel();
+        final long stopGeneration;
+        final long stopConnectionGeneration;
+        synchronized (playbackLock) {
+            stopGeneration = playbackPolicy.invalidate();
+            stopConnectionGeneration = connectionGeneration.get();
+            playing = false;
+            cancelActivePlaybackCall();
+        }
 
         emergencyExecutor.execute(() -> {
             try {
+                if (stopConnectionGeneration != connectionGeneration.get()) return;
                 stopInternal();
-                postSuccess(callback, "Đã dừng The Handy");
+                if (stopConnectionGeneration == connectionGeneration.get()) {
+                    postSuccess(callback, "Đã dừng The Handy");
+                }
             } catch (Exception e) {
-                postError(callback, friendlyError(e));
+                if (stopConnectionGeneration == connectionGeneration.get()) {
+                    latchUnconfirmedStop();
+                    postError(callback, friendlyError(e));
+                }
             } finally {
-                recoverFromStaleStop(stopGeneration);
+                if (stopConnectionGeneration == connectionGeneration.get()) {
+                    recoverFromStaleStop(stopGeneration);
+                }
             }
         });
     }
 
     private void recoverFromStaleStop(long stopGeneration) {
-        if (destroyed || stopGeneration == playbackGeneration.get()
-                || !desiredPlaying || !scriptReady) return;
-        final long recoveryGeneration = playbackGeneration.get();
+        final long recoveryGeneration = playbackPolicy.getGeneration();
+        if (stopGeneration == recoveryGeneration
+                || !isPlaybackAllowed(recoveryGeneration) || !scriptReady) return;
         commandExecutor.execute(() -> {
             try {
-                if (recoveryGeneration == playbackGeneration.get()
-                        && desiredPlaying && scriptReady) {
+                if (isPlaybackAllowed(recoveryGeneration) && scriptReady) {
                     playInternal(lastRequestedPositionMs, recoveryGeneration);
                 }
             } catch (Exception e) {
@@ -554,27 +712,48 @@ public class HandyManager {
     }
 
     private void stopInternal() throws Exception {
-        if (!connected || (!scriptReady && currentMode != HSSP_MODE)) return;
+        final long stopConnectionGeneration = connectionGeneration.get();
+        if (!isStopRequired() && !motionMayBeActive
+                && (!connected || (!scriptReady && currentMode != HSSP_MODE))) return;
+        if (connectionKey.isEmpty()) {
+            throw new HandyException("Không còn Connection Key để xác nhận dừng The Handy");
+        }
         JSONObject response = apiRequest("PUT", "/hssp/stop", null, false);
-        if (response.has("result") && response.optInt("result", -1) != 0) {
+        if (response.optInt("result", -1) != 0) {
             throw new HandyException("The Handy không xác nhận lệnh dừng");
         }
-        playing = false;
+        synchronized (playbackLock) {
+            if (stopConnectionGeneration != connectionGeneration.get()) return;
+            playing = false;
+            motionMayBeActive = false;
+            playbackPolicy.confirmStop();
+            disconnectRequired = false;
+        }
         Log.d(TAG, "HSSP stop accepted");
     }
 
-    private void stopInternalBestEffort() {
+    private void latchUnconfirmedStop() {
+        synchronized (playbackLock) {
+            playbackPolicy.requireConfirmedStop();
+            playing = false;
+            cancelActivePlaybackCall();
+        }
+    }
+
+    private void stopInternalBestEffort(long requestConnectionGeneration) {
+        if (requestConnectionGeneration != connectionGeneration.get()) return;
         try {
             stopInternal();
         } catch (Exception e) {
+            if (requestConnectionGeneration == connectionGeneration.get()) {
+                latchUnconfirmedStop();
+            }
             Log.w(TAG, "Fail-safe stop failed: " + e.getMessage());
         }
     }
 
     public void resetScript() {
         scriptGeneration.incrementAndGet();
-        playbackGeneration.incrementAndGet();
-        desiredPlaying = false;
         playing = false;
         scriptReady = false;
         lastScriptUrl = null;
@@ -583,24 +762,42 @@ public class HandyManager {
 
     public void disconnect(HandyCallback callback) {
         if (destroyed) return;
-        scriptGeneration.incrementAndGet();
-        autoReconnectEnabled = false;
-        playbackGeneration.incrementAndGet();
-        desiredPlaying = false;
-        Call playbackCall = activePlaybackCall;
-        if (playbackCall != null) playbackCall.cancel();
+        synchronized (playbackLock) {
+            if (disconnectInProgress) {
+                postError(callback, "Đang xác nhận dừng và ngắt The Handy");
+                return;
+            }
+            disconnectInProgress = true;
+            connectionGeneration.incrementAndGet();
+            scriptGeneration.incrementAndGet();
+            autoReconnectEnabled = false;
+            playbackPolicy.invalidate();
+            cancelActivePlaybackCall();
+        }
         emergencyExecutor.execute(() -> {
             Exception stopError = null;
             try {
                 stopInternal();
+                synchronized (playbackLock) {
+                    connected = false;
+                    scriptReady = false;
+                    playing = false;
+                    currentMode = -1;
+                    lastScriptUrl = null;
+                    disconnectRequired = false;
+                    playbackPolicy.confirmStop();
+                    motionMayBeActive = false;
+                }
             } catch (Exception e) {
                 stopError = e;
+                synchronized (playbackLock) {
+                    // Preserve key, connection, mode and script for retrying the
+                    // old device; no fresh operation can restart it meanwhile.
+                    disconnectRequired = true;
+                    latchUnconfirmedStop();
+                }
             } finally {
-                connected = false;
-                scriptReady = false;
-                playing = false;
-                currentMode = -1;
-                lastScriptUrl = null;
+                disconnectInProgress = false;
             }
             if (stopError == null) postSuccess(callback, "Đã ngắt The Handy");
             else postError(callback, friendlyError(stopError));
@@ -609,21 +806,31 @@ public class HandyManager {
 
     public void healthCheck(long videoPositionMs, boolean videoPlaying) {
         if (destroyed || !autoReconnectEnabled || connectionKey.isEmpty()) return;
+        final long healthConnectionGeneration = connectionGeneration.get();
+        // A pause/stop/seek made after this snapshot must invalidate its motion
+        // recovery, even while a reconnect spends time in network requests.
+        final long healthGeneration = playbackPolicy.getGeneration();
         long now = SystemClock.elapsedRealtime();
         if (now - lastHealthCheckElapsed < HEALTH_CHECK_INTERVAL_MS) return;
         lastHealthCheckElapsed = now;
 
         commandExecutor.execute(() -> {
             try {
+                if (!isConnectionCurrent(healthConnectionGeneration)) return;
                 JSONObject onlineResponse = apiRequest("GET", "/connected", null, false);
+                if (!isConnectionCurrent(healthConnectionGeneration)) return;
                 if (!onlineResponse.optBoolean("connected", false)) {
-                    connected = false;
-                    scriptReady = false;
-                    playing = false;
+                    synchronized (playbackLock) {
+                        if (!isConnectionCurrent(healthConnectionGeneration)) return;
+                        connected = false;
+                        scriptReady = false;
+                        playing = false;
+                    }
                     return;
                 }
 
                 JSONObject info = apiRequest("GET", "/info", null, false);
+                if (!isConnectionCurrent(healthConnectionGeneration)) return;
                 String onlineSession = info.optString("sessionId", "");
                 boolean needsReconnect = !connected
                     || (!sessionId.isEmpty() && !sessionId.equals(onlineSession));
@@ -637,11 +844,16 @@ public class HandyManager {
                     }
                 }
 
-                if (videoPlaying && scriptReady && !playing) {
-                    long generation = playbackGeneration.incrementAndGet();
-                    playInternal(videoPositionMs, generation);
-                } else if (!videoPlaying && playing) {
-                    stopInternalBestEffort();
+                if (videoPlaying && scriptReady && !playing
+                        && isPlaybackAllowed(healthGeneration)) {
+                    synchronized (playbackLock) {
+                        if (!isPlaybackAllowed(healthGeneration)) return;
+                        lastRequestedPositionMs = Math.max(0, videoPositionMs);
+                    }
+                    playInternal(videoPositionMs, healthGeneration);
+                } else if (!videoPlaying && playing
+                        && healthGeneration == playbackPolicy.getGeneration()) {
+                    stopInternalBestEffort(healthConnectionGeneration);
                 }
             } catch (Exception e) {
                 Log.w(TAG, "Health check failed: " + e.getMessage());
@@ -651,42 +863,53 @@ public class HandyManager {
 
     public void getStatus(HandyCallback callback) {
         if (destroyed) return;
+        if (rejectWhileDisconnecting(callback)) return;
+        final long generation = connectionGeneration.get();
         commandExecutor.execute(() -> {
             try {
+                if (!isConnectionCurrent(generation)) return;
                 JSONObject onlineResponse = apiRequest("GET", "/connected", null, false);
+                if (!isConnectionCurrent(generation)) return;
                 boolean online = onlineResponse.optBoolean("connected", false);
                 if (!online) {
-                    connected = false;
-                    playing = false;
-                    postError(callback, "The Handy hiện không Online");
+                    synchronized (playbackLock) {
+                        if (!isConnectionCurrent(generation)) return;
+                        connected = false;
+                        playing = false;
+                    }
+                    postConnectionError(callback, "The Handy hiện không Online", generation);
                     return;
                 }
                 JSONObject info = apiRequest("GET", "/info", null, false);
                 JSONObject status = apiRequest("GET", "/status", null, false);
-                firmwareVersion = info.optString("fwVersion", firmwareVersion);
-                firmwareStatus = info.optInt("fwStatus", firmwareStatus);
-                model = info.optString("model", model);
-                currentMode = status.optInt("mode", currentMode);
-                connected = true;
+                synchronized (playbackLock) {
+                    if (!isConnectionCurrent(generation)) return;
+                    firmwareVersion = info.optString("fwVersion", firmwareVersion);
+                    firmwareStatus = info.optInt("fwStatus", firmwareStatus);
+                    model = info.optString("model", model);
+                    currentMode = status.optInt("mode", currentMode);
+                    connected = true;
+                }
                 String state = status.has("state")
                     ? String.valueOf(status.optInt("state", -1))
                     : "?";
-                postSuccess(callback, "Model: " + model
+                postConnectionSuccess(callback, "Model: " + model
                     + "\nFirmware: " + firmwareVersion
                     + "\nFirmware status: " + firmwareStatusText(firmwareStatus)
                     + "\nOnline: Có"
                     + "\nMode: " + modeText(currentMode)
                     + "\nState: " + state
                     + "\nScript: " + (scriptReady ? "Sẵn sàng" : "Chưa có")
-                    + "\nĐộ trễ trung bình: " + averageRtt + " ms");
+                    + "\nĐộ trễ trung bình: " + averageRtt + " ms", generation);
             } catch (Exception e) {
-                postError(callback, friendlyError(e));
+                postConnectionError(callback, friendlyError(e), generation);
             }
         });
     }
 
     public void destroy() {
         if (destroyed) return;
+        connectionGeneration.incrementAndGet();
         scriptGeneration.incrementAndGet();
         stopPlayback(null);
         destroyed = true;
@@ -741,7 +964,15 @@ public class HandyManager {
         }
     }
 
-    private byte[] convertToCsv(byte[] sourceBytes) throws Exception {
+    /** Validates a local replacement without connecting to or moving a device. */
+    public static void validateScript(File file) throws Exception {
+        if (file == null || !file.isFile()) {
+            throw new HandyException("Không tìm thấy file funscript");
+        }
+        convertToCsv(readLimited(new FileInputStream(file), MAX_SOURCE_BYTES));
+    }
+
+    private static byte[] convertToCsv(byte[] sourceBytes) throws Exception {
         String source = new String(sourceBytes, StandardCharsets.UTF_8).trim();
         if (source.isEmpty()) throw new HandyException("Funscript rỗng");
 
@@ -764,7 +995,7 @@ public class HandyManager {
         return output;
     }
 
-    private List<ScriptPoint> parseFunscript(String json) throws Exception {
+    private static List<ScriptPoint> parseFunscript(String json) throws Exception {
         JSONObject root = new JSONObject(json);
         JSONArray actions = root.optJSONArray("actions");
         if (actions == null) throw new HandyException("File không có danh sách actions");
@@ -777,7 +1008,7 @@ public class HandyManager {
         return points;
     }
 
-    private List<ScriptPoint> parseCsv(String csv) throws Exception {
+    private static List<ScriptPoint> parseCsv(String csv) throws Exception {
         List<ScriptPoint> points = new ArrayList<>();
         String[] lines = csv.split("\\r?\\n");
         for (String line : lines) {
@@ -798,7 +1029,7 @@ public class HandyManager {
         return points;
     }
 
-    private void addValidatedPoint(List<ScriptPoint> points, long at, int pos)
+    private static void addValidatedPoint(List<ScriptPoint> points, long at, int pos)
             throws HandyException {
         if (at < 0 || pos < 0 || pos > 100) {
             throw new HandyException("Funscript có thời gian hoặc vị trí ngoài giới hạn");
@@ -808,8 +1039,18 @@ public class HandyManager {
 
     private JSONObject apiRequest(String method, String endpoint, JSONObject jsonBody,
                                   boolean playbackRequest) throws Exception {
+        return apiRequest(method, endpoint, jsonBody, playbackRequest,
+            HandyPlaybackPolicy.NOT_ALLOWED);
+    }
+
+    private JSONObject apiRequest(String method, String endpoint, JSONObject jsonBody,
+                                  boolean playbackRequest, long generation) throws Exception {
         Exception lastError = null;
+        final String requestConnectionKey = connectionKey;
         for (int attempt = 0; attempt < 2; attempt++) {
+            if (playbackRequest && !isPlaybackAllowed(generation)) {
+                throw new HandyException("Lệnh phát đồng bộ đã bị hủy");
+            }
             RequestBody requestBody = null;
             if ("PUT".equals(method)) {
                 requestBody = jsonBody == null
@@ -818,12 +1059,23 @@ public class HandyManager {
             }
             Request request = new Request.Builder()
                 .url(BASE_URL + endpoint)
-                .header("X-Connection-Key", connectionKey)
+                .header("X-Connection-Key", requestConnectionKey)
                 .header("Accept", "application/json")
                 .method(method, requestBody)
                 .build();
-            Call call = httpClient.newCall(request);
-            if (playbackRequest) activePlaybackCall = call;
+            Call call;
+            if (playbackRequest) {
+                synchronized (playbackLock) {
+                    if (!isPlaybackAllowed(generation)) {
+                        throw new HandyException("Lệnh phát đồng bộ đã bị hủy");
+                    }
+                    call = playbackHttpClient.newCall(request);
+                    activePlaybackCall = call;
+                    motionMayBeActive = true;
+                }
+            } else {
+                call = httpClient.newCall(request);
+            }
             try (Response response = call.execute()) {
                 ResponseBody responseBody = response.body();
                 String text = responseBody != null ? responseBody.string() : "";
@@ -926,6 +1178,60 @@ public class HandyManager {
     private void postSuccess(HandyCallback callback, String message) {
         Log.d(TAG, message);
         if (callback != null && !destroyed) mainHandler.post(() -> callback.onSuccess(message));
+    }
+
+    private void postScriptSuccess(HandyCallback callback, String message, long generation) {
+        if (callback != null && isScriptCurrent(generation)) {
+            mainHandler.post(() -> {
+                if (isScriptCurrent(generation)) {
+                    if (isStopRequired()) callback.onError("Chưa xác nhận dừng The Handy. Hãy thử dừng lại");
+                    else callback.onSuccess(message);
+                }
+            });
+        }
+    }
+
+    private void postPlaybackSuccess(HandyCallback callback, String message, long generation) {
+        if (callback != null && isPlaybackAllowed(generation)) {
+            mainHandler.post(() -> {
+                if (isPlaybackAllowed(generation)) callback.onSuccess(message);
+            });
+        }
+    }
+
+    private void postPlaybackError(HandyCallback callback, String message, long generation) {
+        if (callback != null && isPlaybackAllowed(generation)) {
+            mainHandler.post(() -> {
+                if (isPlaybackAllowed(generation)) callback.onError(message);
+            });
+        }
+    }
+
+    private void postScriptError(HandyCallback callback, String message, long generation) {
+        if (callback != null && isScriptCurrent(generation)) {
+            mainHandler.post(() -> {
+                if (isScriptCurrent(generation)) callback.onError(message);
+            });
+        }
+    }
+
+    private void postConnectionSuccess(HandyCallback callback, String message, long generation) {
+        if (callback != null && isConnectionCurrent(generation)) {
+            mainHandler.post(() -> {
+                if (isConnectionCurrent(generation)) {
+                    if (isStopRequired()) callback.onError("Chưa xác nhận dừng The Handy. Hãy thử dừng lại");
+                    else callback.onSuccess(message);
+                }
+            });
+        }
+    }
+
+    private void postConnectionError(HandyCallback callback, String message, long generation) {
+        if (callback != null && isConnectionCurrent(generation)) {
+            mainHandler.post(() -> {
+                if (isConnectionCurrent(generation)) callback.onError(message);
+            });
+        }
     }
 
     private void postError(HandyCallback callback, String message) {

@@ -39,6 +39,18 @@ vào **Releases** sau khi các bước kiểm tra thành công.
 Các secret cần cho bước phát hành: `KEYSTORE_BASE64`, `KEY_ALIAS`,
 `KEY_PASSWORD`, `STORE_PASSWORD`. Pull request không sử dụng các secret này.
 
+## Funscript và The Handy
+Trong player, mở **Thêm tùy chọn → Funscript & The Handy** để xem trạng thái
+thiết bị, script và đồng bộ. Chọn file `.funscript`/`.csv` hoặc nhập URL; nếu chưa
+có Connection Key, ứng dụng sẽ yêu cầu nhập trước khi kết nối.
+
+Công tắc **Đồng bộ với video** được ghi nhớ. Khi tắt, thao tác phát lại, tua và
+kiểm tra kết nối không tự bật thiết bị. Khi bật, đồng bộ chỉ chạy lúc video đang
+phát và không buffering; video tạm dừng hoặc đứng thời gian VLC sẽ chặn chuyển động.
+Script nhập được kiểm tra trước khi thay file đã lưu và gắn với URI video, nên
+hai video trùng tên có thể dùng script riêng. Script được tải lên dịch vụ tạm
+của Handy để thiết bị đọc.
+
 Gemini API key không còn được nhúng trong APK. Mở mục Trợ lý AI trong ứng dụng
 và nhập key của bạn khi được hỏi.
 

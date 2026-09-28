@@ -22,6 +22,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -30,6 +31,10 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
+import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import com.vlcplayer.app.db.AppDatabase;
 import com.vlcplayer.app.db.BookmarkItem;
@@ -42,7 +47,6 @@ import org.videolan.libvlc.util.VLCVideoLayout;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
@@ -104,18 +108,29 @@ public class PlayerActivity extends AppCompatActivity {
     private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
     private GestureDetector gestureDetector;
     private String handyCheckedUri;
-    private String handyPreparedUri;
     private boolean handyConnectInProgress;
-    private int handyPrepareFailures;
+    private boolean handyDisconnectInProgress;
     private String pendingHandyScriptUrl;
-    private static final long HANDY_STALL_TIMEOUT_MS = 2_000L;
-    private static final long HANDY_PROGRESS_THRESHOLD_MS = 100L;
+    private String pendingHandyScriptVideoUri;
+    private File pendingPickedScript;
+    private String funscriptPickerVideoUri;
+    private String activeScriptName;
+    private String activeScriptSource;
+    private boolean funscriptLoadInProgress;
+    private String funscriptMessage;
+    private Runnable funscriptRetryAction;
+    private int funscriptOperationGeneration;
+    private BottomSheetDialog funscriptDialog;
+    private TextView funscriptConnectionView, funscriptFileView, funscriptSyncView,
+        funscriptMessageView;
+    private ProgressBar funscriptProgressView;
+    private SwitchMaterial funscriptSyncSwitch;
+    private boolean updatingFunscriptSwitch;
+    private boolean videoBuffering;
+    private final PlaybackProgressGuard handyProgressGuard = new PlaybackProgressGuard();
     private static final int MAX_PLAYBACK_AUTO_RETRIES = 1;
     private static final long PLAYBACK_RETRY_DELAY_MS = 2_000L;
     private static final long PLAYBACK_STABLE_RESET_MS = 15_000L;
-    private long handyLastVideoProgressMs = -1L;
-    private long handyLastProgressElapsedMs;
-    private boolean handyStoppedForVideoStall;
     private int playbackAutoRetryCount;
     private boolean handlingPlaybackError;
     private Runnable playbackRetryRunnable;
@@ -133,17 +148,18 @@ public class PlayerActivity extends AppCompatActivity {
 
     private final Runnable handyCorrectionSync = () -> {
         if (handyManager == null || mediaPlayer == null
-                || !handyManager.isScriptReady() || !mediaPlayer.isPlaying()) return;
+                || !handyManager.isScriptReady() || !isHandyPlaybackAllowed()
+                || !handyManager.isSynchronizationEnabled()) return;
         if (Math.abs(playbackSpeed - 1.0f) > 0.01f) return;
-        handyManager.play(getBestKnownPlaybackPosition(), null);
+        handyManager.play(getRawPlaybackPosition(), null);
     };
 
     private final Runnable handyHealthCheck = new Runnable() {
         @Override public void run() {
             if (handyManager != null && mediaPlayer != null) {
                 handyManager.healthCheck(
-                    getBestKnownPlaybackPosition(), mediaPlayer.isPlaying());
-                if (handyManager.isConnected()) prepareScriptAfterConnection();
+                    getRawPlaybackPosition(), isHandyPlaybackAllowed());
+                if (!isInBackground && handyManager.isConnected()) prepareScriptAfterConnection();
             }
             handler.postDelayed(this, 30_000);
         }
@@ -171,7 +187,7 @@ public class PlayerActivity extends AppCompatActivity {
                     tvCurrent.setText(formatTime(effectivePosition));
                     tvTotal.setText(formatTime(len));
                 }
-                monitorHandyPlaybackProgress(effectivePosition);
+                monitorHandyPlaybackProgress(pos);
             }
             handler.postDelayed(this, 500);
         }
@@ -289,7 +305,10 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
                 if (fromUser) tvCurrent.setText(formatTime(p));
             }
-            @Override public void onStartTrackingTouch(SeekBar sb) { userSeeking = true; }
+            @Override public void onStartTrackingTouch(SeekBar sb) {
+                userSeeking = true;
+                blockHandyPlayback();
+            }
             @Override public void onStopTrackingTouch(SeekBar sb) {
                 userSeeking = false;
                 seekPlaybackTo(sb.getProgress());
@@ -307,7 +326,6 @@ public class PlayerActivity extends AppCompatActivity {
             getString(R.string.player_lock),
             getString(R.string.player_translate),
             getString(R.string.player_funscript),
-            getString(R.string.player_handy),
             getString(R.string.player_audio_track)
         };
         new AlertDialog.Builder(this)
@@ -322,8 +340,7 @@ public class PlayerActivity extends AppCompatActivity {
                     case 5: toggleLock(); break;
                     case 6: openGeminiChat(); break;
                     case 7: showFunscriptDialog(); break;
-                    case 8: showHandyDialog(); break;
-                    case 9: showAudioTrackDialog(); break;
+                    case 8: showAudioTrackDialog(); break;
                 }
             }).show();
     }
@@ -393,58 +410,44 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void monitorHandyPlaybackProgress(long videoTimeMs) {
-        if (handyManager == null || mediaPlayer == null
-                || !handyManager.isScriptReady()) {
-            resetHandyPlaybackWatchdog(videoTimeMs);
-            return;
+        if (mediaPlayer == null) return;
+        boolean wasAllowed = handyProgressGuard.isAllowed();
+        boolean allowed = handyProgressGuard.update(videoTimeMs,
+            android.os.SystemClock.elapsedRealtime(),
+            !isInBackground && !userPaused && audioFocusHeld && !userSeeking
+                && mediaPlayer.isPlaying(), videoBuffering);
+        allowed = allowed && !handyDisconnectInProgress
+            && (handyManager == null || !handyManager.isStopRequired());
+        if (handyManager != null) {
+            handyManager.setVideoPlaybackAllowed(allowed);
+            if (!allowed) handler.removeCallbacks(handyCorrectionSync);
+            else if (!wasAllowed && handyManager.isScriptReady()) syncHandyWithPlayback();
         }
-
-        long now = android.os.SystemClock.elapsedRealtime();
-        if (userSeeking) {
-            handyLastVideoProgressMs = videoTimeMs;
-            handyLastProgressElapsedMs = now;
-            return;
-        }
-
-        if (!mediaPlayer.isPlaying()) {
-            if (handyManager.isPlaying() && !handyStoppedForVideoStall) {
-                handyStoppedForVideoStall = true;
-                handler.removeCallbacks(handyCorrectionSync);
-                handyManager.stopPlayback(null);
-                android.util.Log.w("TheHandy", "Video clock stopped; Handy paused");
-            }
-            handyLastVideoProgressMs = videoTimeMs;
-            handyLastProgressElapsedMs = now;
-            return;
-        }
-
-        boolean progressed = handyLastVideoProgressMs < 0
-            || Math.abs(videoTimeMs - handyLastVideoProgressMs)
-                >= HANDY_PROGRESS_THRESHOLD_MS;
-        if (progressed) {
-            handyLastVideoProgressMs = videoTimeMs;
-            handyLastProgressElapsedMs = now;
-            if (handyStoppedForVideoStall) {
-                handyStoppedForVideoStall = false;
-                android.util.Log.i("TheHandy", "Video clock resumed; Handy resyncing");
-                syncHandyWithPlayback();
-            }
-            return;
-        }
-
-        if (!handyStoppedForVideoStall
-                && now - handyLastProgressElapsedMs >= HANDY_STALL_TIMEOUT_MS) {
-            handyStoppedForVideoStall = true;
-            handler.removeCallbacks(handyCorrectionSync);
-            handyManager.stopPlayback(null);
-            android.util.Log.w("TheHandy", "Video clock stalled; Handy paused");
-        }
+        if (wasAllowed != allowed || funscriptDialog != null) renderFunscriptState();
     }
 
     private void resetHandyPlaybackWatchdog(long videoTimeMs) {
-        handyLastVideoProgressMs = videoTimeMs;
-        handyLastProgressElapsedMs = android.os.SystemClock.elapsedRealtime();
-        handyStoppedForVideoStall = false;
+        handyProgressGuard.reset(videoTimeMs, android.os.SystemClock.elapsedRealtime());
+        if (handyManager != null) handyManager.setVideoPlaybackAllowed(false);
+    }
+
+    private long getRawPlaybackPosition() {
+        return mediaPlayer == null ? -1L : mediaPlayer.getTime();
+    }
+
+    private boolean isHandyPlaybackAllowed() {
+        return mediaPlayer != null && !isInBackground && !userPaused && audioFocusHeld
+            && !videoBuffering && !userSeeking
+            && !handyDisconnectInProgress && handyManager != null && !handyManager.isStopRequired()
+            && mediaPlayer.isPlaying() && handyProgressGuard.isAllowed();
+    }
+
+    private void blockHandyPlayback() {
+        handyProgressGuard.update(getRawPlaybackPosition(),
+            android.os.SystemClock.elapsedRealtime(), false, videoBuffering);
+        handler.removeCallbacks(handyCorrectionSync);
+        if (handyManager != null) handyManager.setVideoPlaybackAllowed(false);
+        renderFunscriptState();
     }
 
     private void setupVLC() {
@@ -477,6 +480,7 @@ public class PlayerActivity extends AppCompatActivity {
                         // Delay de VLC khoi dong audiotrack truoc
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 300);
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 1000);
+                        monitorHandyPlaybackProgress(getRawPlaybackPosition());
                         syncHandyWithPlayback();
                         schedulePlaybackStableReset();
                     });
@@ -485,9 +489,16 @@ public class PlayerActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         freezePlaybackClockEstimate();
                         cancelPlaybackStableReset();
-                        handler.removeCallbacks(handyCorrectionSync);
-                        if (handyManager != null) handyManager.stopPlayback(null);
+                        blockHandyPlayback();
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
+                    });
+                    break;
+                case MediaPlayer.Event.Buffering:
+                    final float buffered = event.getBuffering();
+                    runOnUiThread(() -> {
+                        videoBuffering = buffered < 100f;
+                        if (videoBuffering) blockHandyPlayback();
+                        else monitorHandyPlaybackProgress(getRawPlaybackPosition());
                     });
                     break;
                 case MediaPlayer.Event.EndReached:
@@ -502,6 +513,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void handlePlaybackEndReached() {
+        blockHandyPlayback();
         long position = getBestKnownPlaybackPosition();
         lastKnownPlaybackPositionMs = position;
         playbackClockBasePositionMs = position;
@@ -547,6 +559,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (handlingPlaybackError || isFinishing() || isDestroyed() || isInBackground) return;
 
         handlingPlaybackError = true;
+        blockHandyPlayback();
         cancelPlaybackStableReset();
         handler.removeCallbacks(handyCorrectionSync);
         if (handyManager != null) handyManager.stopPlayback(null);
@@ -885,13 +898,22 @@ public class PlayerActivity extends AppCompatActivity {
             pendingRecoveryPositionMs = -1L;
         }
         pendingUri = uri;
+        videoBuffering = false;
         resetHandyPlaybackWatchdog(0);
         if (handyManager != null && mediaChanged) {
             handler.removeCallbacks(handyCorrectionSync);
             handyManager.resetScript();
             handyCheckedUri = null;
-            handyPreparedUri = null;
-            handyPrepareFailures = 0;
+            funscriptOperationGeneration++;
+            pendingHandyScriptUrl = null;
+            pendingHandyScriptVideoUri = null;
+            pendingPickedScript = null;
+            activeScriptName = null;
+            activeScriptSource = null;
+            funscriptLoadInProgress = false;
+            funscriptRetryAction = null;
+            funscriptMessage = null;
+            renderFunscriptState();
         }
         try {
             Uri u = Uri.parse(uri);
@@ -1250,6 +1272,7 @@ public class PlayerActivity extends AppCompatActivity {
             userPaused = true;
             resumeAfterBackground = false;
             resumeAfterFocusLoss = false;
+            blockHandyPlayback();
             mediaPlayer.pause();
             abandonAudioFocus();
         } else {
@@ -1287,10 +1310,12 @@ public class PlayerActivity extends AppCompatActivity {
                     audioFocusHeld = false;
                     audioFocusRequested = false;
                     resumeAfterFocusLoss = false;
+                    blockHandyPlayback();
                     if (mediaPlayer.isPlaying()) mediaPlayer.pause();
                     break;
                 case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
                     audioFocusHeld = false;
+                    blockHandyPlayback();
                     if (mediaPlayer.isPlaying()) {
                         resumeAfterFocusLoss = !userPaused;
                         mediaPlayer.pause();
@@ -1409,164 +1434,135 @@ public class PlayerActivity extends AppCompatActivity {
 
 
 
-    private void showHandyDialog() {
-        String savedKey = handyManager.getSavedKey();
-        String status = handyManager.isConnected()
-            ? "Trạng thái: ĐÃ KẾT NỐI" + (handyManager.isScriptReady() ? " · SCRIPT SẴN SÀNG" : "")
-            : "Trạng thái: Chưa kết nối";
-        String[] opts = {
-            status,
-            "Nhap / doi Connection Key",
-            "Ket noi The Handy",
-            "Load Funscript + Sync",
-            "Dong bo voi video hien tai",
-            "Ngat ket noi"
-        };
-        new AlertDialog.Builder(this)
-            .setTitle("The Handy")
-            .setItems(opts, (d, w) -> {
-                switch (w) {
-                    case 0: showHandyStatus(); break;
-                    case 1: showKeyInput(); break;
-                    case 2: connectHandy(); break;
-                    case 3: showHandyFunscriptDialog(); break;
-                    case 4: syncHandyNow(); break;
-                    case 5: disconnectHandy(); break;
-                }
-            }).show();
-    }
-
     private void showHandyStatus() {
         if (!handyManager.isConnected()) {
-            Toast.makeText(this, "Chua ket noi The Handy", Toast.LENGTH_SHORT).show();
+            setFunscriptMessage(getString(R.string.funscript_disconnected), null);
             return;
         }
         handyManager.getStatus(new HandyManager.HandyCallback() {
-            @Override public void onSuccess(String m) { runOnUiThread(() -> new AlertDialog.Builder(PlayerActivity.this).setTitle("The Handy Status").setMessage(m).setPositiveButton("OK", null).show()); }
-            @Override public void onError(String e) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, e, Toast.LENGTH_SHORT).show()); }
+            @Override public void onSuccess(String message) {
+                if (isFinishing() || isDestroyed()) return;
+                new AlertDialog.Builder(PlayerActivity.this)
+                    .setTitle(R.string.funscript_device_status).setMessage(message)
+                    .setPositiveButton(android.R.string.ok, null).show();
+                renderFunscriptState();
+            }
+            @Override public void onError(String error) {
+                setFunscriptMessage(error, () -> showHandyStatus());
+            }
         });
     }
 
     private void showKeyInput() {
+        if (isFinishing() || isDestroyed()) return;
         EditText input = new EditText(this);
         input.setHint("xxxx-xxxx-xxxx-xxxx");
         input.setText(handyManager.getSavedKey());
         input.setSingleLine(true);
-        new AlertDialog.Builder(this)
-            .setTitle("Connection Key")
-            .setMessage("Lay key tai: handyfeeling.com")
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.funscript_key)
+            .setMessage(R.string.funscript_key_help)
             .setView(input)
-            .setPositiveButton("Luu", (d, w) -> {
+            .setPositiveButton(R.string.funscript_save_connect, null)
+            .setNegativeButton(R.string.cancel, null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
                 String key = input.getText().toString().trim();
-                if (!key.isEmpty()) {
-                    saveAndConnectHandyKey(key);
+                if (key.isEmpty()) {
+                    input.setError(getString(R.string.funscript_key_required));
+                    return;
                 }
-            })
-            .setNegativeButton("Huy", null).show();
+                dialog.dismiss();
+                saveAndConnectHandyKey(key);
+            }));
+        dialog.show();
     }
 
     private void saveAndConnectHandyKey(String key) {
         Runnable saveNewKey = () -> {
-            handyManager.saveKey(key);
+            handyDisconnectInProgress = false;
+            try {
+                handyManager.saveKey(key);
+            } catch (IllegalStateException error) {
+                setFunscriptMessage(getString(R.string.funscript_old_device_stop_error,
+                    error.getMessage()), () -> saveAndConnectHandyKey(key));
+                return;
+            }
             handyCheckedUri = null;
-            handyPreparedUri = null;
-            Toast.makeText(this, "Đã lưu key, app sẽ tự kết nối", Toast.LENGTH_SHORT).show();
-            autoConnectHandy(false);
+            funscriptRetryAction = null;
+            autoConnectHandy(true);
         };
-        if (!handyManager.isConnected()) {
+        if (!handyManager.isConnected() && !handyManager.isStopRequired()) {
             saveNewKey.run();
             return;
         }
-        // Stop the old device before switching keys so it can never be left moving.
+        handyDisconnectInProgress = true;
+        blockHandyPlayback();
         handyManager.disconnect(new HandyManager.HandyCallback() {
-            @Override public void onSuccess(String message) {
-                saveNewKey.run();
-            }
-
+            @Override public void onSuccess(String message) { saveNewKey.run(); }
             @Override public void onError(String error) {
-                Toast.makeText(PlayerActivity.this,
-                    "Không xác nhận được lệnh dừng thiết bị cũ: " + error,
-                    Toast.LENGTH_LONG).show();
+                handyDisconnectInProgress = false;
+                setFunscriptMessage(getString(R.string.funscript_old_device_stop_error, error),
+                    () -> saveAndConnectHandyKey(key));
             }
         });
     }
 
     private void connectHandy() {
+        funscriptRetryAction = null;
         autoConnectHandy(true);
     }
 
     private void autoConnectHandy(boolean interactive) {
-        if (handyManager == null || handyManager.getSavedKey().isEmpty()) {
-            if (interactive) showKeyInput();
+        if (handyManager == null) return;
+        if (handyDisconnectInProgress) return;
+        if (handyManager.getSavedKey().isEmpty()) {
+            if (interactive) {
+                setFunscriptMessage(getString(R.string.funscript_key_required), null);
+                showKeyInput();
+            }
             return;
         }
         if (handyManager.isConnected()) {
             prepareScriptAfterConnection();
+            renderFunscriptState();
             return;
         }
         if (handyConnectInProgress) return;
         handyConnectInProgress = true;
-        if (interactive) Toast.makeText(this, "Đang kết nối...", Toast.LENGTH_SHORT).show();
+        setFunscriptMessage(getString(R.string.funscript_connecting), null);
         handyManager.connect(new HandyManager.HandyCallback() {
             @Override public void onSuccess(String message) {
                 handyConnectInProgress = false;
+                if (isFinishing() || isDestroyed()) return;
+                setFunscriptMessage(getString(R.string.funscript_connected), null);
                 prepareScriptAfterConnection();
-                if (interactive) {
-                    new AlertDialog.Builder(PlayerActivity.this)
-                        .setTitle("The Handy")
-                        .setMessage(message)
-                        .setPositiveButton("OK", null).show();
-                } else {
-                    Toast.makeText(PlayerActivity.this,
-                        "The Handy đã tự kết nối", Toast.LENGTH_SHORT).show();
-                }
             }
-
             @Override public void onError(String error) {
                 handyConnectInProgress = false;
-                if (interactive) {
-                    Toast.makeText(PlayerActivity.this, "Lỗi: " + error, Toast.LENGTH_LONG).show();
-                } else {
-                    android.util.Log.w("TheHandy", "Auto connect: " + error);
-                }
+                if (isFinishing() || isDestroyed()) return;
+                setFunscriptMessage(error, () -> connectHandy());
+                if (interactive) Toast.makeText(PlayerActivity.this, error,
+                    Toast.LENGTH_LONG).show();
             }
         });
     }
 
     private void prepareScriptAfterConnection() {
+        if (funscriptLoadInProgress || funscriptRetryAction != null || isInBackground) return;
         if (pendingHandyScriptUrl != null) uploadPendingHandyScriptUrl();
-        else autoPrepareHandyForCurrentVideo();
+        else if (pendingPickedScript != null) {
+            if (uriString.equals(pendingHandyScriptVideoUri)) {
+                loadFunscriptFile(pendingPickedScript, pendingHandyScriptVideoUri,
+                    activeScriptSource == null ? getString(R.string.funscript_source_file)
+                        : activeScriptSource, true);
+            }
+        } else autoPrepareHandyForCurrentVideo();
     }
-
-    private void showHandyFunscriptDialog() {
-        if (!handyManager.isConnected()) { Toast.makeText(this, "Ket noi The Handy truoc!", Toast.LENGTH_SHORT).show(); return; }
-        EditText input = new EditText(this);
-        input.setHint("URL file .funscript hoặc .csv");
-        new AlertDialog.Builder(this)
-            .setTitle("Tải Funscript cho The Handy")
-            .setMessage("App sẽ tự chuyển sang CSV và tải lên máy chủ tạm chính thức của Handy")
-            .setView(input)
-            .setPositiveButton("Load & Sync", (d, w) -> {
-                String url = input.getText().toString().trim();
-                if (url.isEmpty()) return;
-                Toast.makeText(this, "Đang xử lý script...", Toast.LENGTH_SHORT).show();
-                handyManager.uploadAndSetupScript(url, new HandyManager.HandyCallback() {
-                    @Override public void onSuccess(String m) {
-                        handyPreparedUri = uriString;
-                        Toast.makeText(PlayerActivity.this, m, Toast.LENGTH_SHORT).show();
-                        if (mediaPlayer != null && mediaPlayer.isPlaying()) syncHandyWithPlayback();
-                    }
-                    @Override public void onError(String e) {
-                        Toast.makeText(PlayerActivity.this, "Lỗi: " + e, Toast.LENGTH_LONG).show();
-                    }
-                });
-            })
-            .setNegativeButton("Huy", null).show();
-    }
-
     private void syncHandyWithPlayback() {
         if (handyManager == null || mediaPlayer == null
-                || !handyManager.isScriptReady() || !mediaPlayer.isPlaying()) return;
+                || !handyManager.isScriptReady() || !isHandyPlaybackAllowed()
+                || !handyManager.isSynchronizationEnabled()) return;
 
         // REST v2 HSSP plays scripts at real-time speed. Keeping VLC at 1.0x is
         // the only drift-free behavior for the connection-key integration.
@@ -1576,10 +1572,17 @@ public class PlayerActivity extends AppCompatActivity {
             mediaPlayer.setRate(1.0f);
             startPlaybackClockEstimate(position);
             tvSpeed.setText("1.0x");
+            tvSpeed.setContentDescription(getString(R.string.player_speed) + ": 1.0x");
         }
 
         handler.removeCallbacks(handyCorrectionSync);
-        handyManager.play(getBestKnownPlaybackPosition(), null);
+        handyManager.setVideoPlaybackAllowed(true);
+        handyManager.play(getRawPlaybackPosition(), new HandyManager.HandyCallback() {
+            @Override public void onSuccess(String message) { renderFunscriptState(); }
+            @Override public void onError(String error) {
+                setFunscriptMessage(error, () -> syncHandyNow());
+            }
+        });
         // Match the official SDK behavior: a second timestamp after VLC has
         // settled corrects startup/caching latency without continuous jolts.
         handler.postDelayed(handyCorrectionSync, 2_500);
@@ -1587,173 +1590,354 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void syncHandyNow() {
         if (!handyManager.isConnected() || !handyManager.isScriptReady() || mediaPlayer == null) {
-            Toast.makeText(this, "The Handy chưa kết nối hoặc chưa có funscript", Toast.LENGTH_SHORT).show();
+            setFunscriptMessage(getString(R.string.funscript_sync_no_script), null);
             return;
         }
-        long pos = getBestKnownPlaybackPosition();
+        if (!handyManager.isSynchronizationEnabled() || !isHandyPlaybackAllowed()) {
+            setFunscriptMessage(getString(R.string.funscript_sync_waiting), null);
+            return;
+        }
+        long pos = getRawPlaybackPosition();
+        handyManager.setVideoPlaybackAllowed(true);
         handyManager.play(pos, new HandyManager.HandyCallback() {
-            @Override public void onSuccess(String m) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "The Handy dong bo tai " + formatTime(pos), Toast.LENGTH_SHORT).show()); }
-            @Override public void onError(String e) { runOnUiThread(() -> Toast.makeText(PlayerActivity.this, "Loi dong bo: " + e, Toast.LENGTH_SHORT).show()); }
+            @Override public void onSuccess(String message) {
+                setFunscriptMessage(getString(R.string.funscript_synced_at, formatTime(pos)), null);
+            }
+            @Override public void onError(String error) {
+                setFunscriptMessage(error, () -> syncHandyNow());
+            }
         });
     }
 
     private void disconnectHandy() {
+        if (handyDisconnectInProgress) return;
+        handyDisconnectInProgress = true;
+        funscriptOperationGeneration++;
+        funscriptLoadInProgress = false;
         handler.removeCallbacks(handyCorrectionSync);
+        renderFunscriptState();
         handyManager.disconnect(new HandyManager.HandyCallback() {
             @Override public void onSuccess(String m) {
-                Toast.makeText(PlayerActivity.this, "Đã ngắt The Handy", Toast.LENGTH_SHORT).show();
+                handyDisconnectInProgress = false;
+                handyCheckedUri = null;
+                setFunscriptMessage(getString(R.string.funscript_disconnected), null);
             }
             @Override public void onError(String e) {
+                handyDisconnectInProgress = false;
+                setFunscriptMessage(e, () -> disconnectHandy());
                 Toast.makeText(PlayerActivity.this, e, Toast.LENGTH_LONG).show();
             }
         });
     }
 
     private void showFunscriptDialog() {
-        String[] opts = {
-            "Tự động tìm và đồng bộ",
-            "Chọn file .funscript/.csv",
-            "Tải từ URL và đồng bộ",
-            "Dừng đồng bộ"
-        };
-        new AlertDialog.Builder(this).setTitle("Funscript")
-            .setItems(opts, (d, w) -> {
-                if (w == 0) autoFindAndSyncFunscript();
-                else if (w == 1) {
-                    funscriptPicker.launch(new String[]{
-                        "application/json", "text/plain", "text/csv",
-                        "application/octet-stream", "*/*"
-                    });
-                } else if (w == 2) {
-                    showFunscriptUrlInput();
-                } else {
-                    handler.removeCallbacks(handyCorrectionSync);
-                    if (handyManager != null) handyManager.stopPlayback(null);
-                    Toast.makeText(this, "Đã dừng đồng bộ The Handy", Toast.LENGTH_SHORT).show();
+        if (funscriptDialog != null && funscriptDialog.isShowing()) return;
+        funscriptDialog = new BottomSheetDialog(this);
+        funscriptDialog.setContentView(R.layout.dialog_funscript);
+        funscriptConnectionView = funscriptDialog.findViewById(R.id.funscript_connection);
+        funscriptFileView = funscriptDialog.findViewById(R.id.funscript_file);
+        funscriptSyncView = funscriptDialog.findViewById(R.id.funscript_sync_state);
+        funscriptMessageView = funscriptDialog.findViewById(R.id.funscript_message);
+        funscriptProgressView = funscriptDialog.findViewById(R.id.funscript_progress);
+        funscriptSyncSwitch = funscriptDialog.findViewById(R.id.funscript_sync_toggle);
+        TextView video = funscriptDialog.findViewById(R.id.funscript_video);
+        video.setText(getString(R.string.funscript_video, videoTitle == null ? "Video" : videoTitle));
+        funscriptSyncSwitch.setOnCheckedChangeListener((button, enabled) -> {
+            if (updatingFunscriptSwitch) return;
+            if (enabled && handyDisconnectInProgress) {
+                renderFunscriptState();
+                return;
+            }
+            setHandySynchronizationEnabled(enabled);
+        });
+        funscriptDialog.findViewById(R.id.funscript_choose).setOnClickListener(v -> {
+            funscriptPickerVideoUri = uriString;
+            funscriptPicker.launch(new String[]{"application/json", "text/plain",
+                "text/csv", "application/octet-stream", "*/*"});
+        });
+        funscriptDialog.findViewById(R.id.funscript_auto_find)
+            .setOnClickListener(v -> autoFindAndSyncFunscript());
+        funscriptDialog.findViewById(R.id.funscript_url)
+            .setOnClickListener(v -> showFunscriptUrlInput());
+        funscriptDialog.findViewById(R.id.funscript_resync)
+            .setOnClickListener(v -> syncHandyNow());
+        funscriptDialog.findViewById(R.id.funscript_connect)
+            .setOnClickListener(v -> connectHandy());
+        funscriptDialog.findViewById(R.id.funscript_key)
+            .setOnClickListener(v -> showKeyInput());
+        funscriptDialog.findViewById(R.id.funscript_status)
+            .setOnClickListener(v -> showHandyStatus());
+        funscriptDialog.findViewById(R.id.funscript_disconnect)
+            .setOnClickListener(v -> disconnectHandy());
+        funscriptDialog.findViewById(R.id.funscript_retry).setOnClickListener(v -> {
+            Runnable retry = funscriptRetryAction;
+            funscriptRetryAction = null;
+            if (handyManager.isStopRequired()) setHandySynchronizationEnabled(false, retry);
+            else if (retry != null) retry.run();
+        });
+        funscriptDialog.setOnDismissListener(d -> {
+            funscriptDialog = null;
+            funscriptConnectionView = null;
+            funscriptFileView = null;
+            funscriptSyncView = null;
+            funscriptMessageView = null;
+            funscriptProgressView = null;
+            funscriptSyncSwitch = null;
+        });
+        funscriptDialog.getBehavior().setState(BottomSheetBehavior.STATE_EXPANDED);
+        renderFunscriptState();
+        funscriptDialog.show();
+    }
+
+    private void setHandySynchronizationEnabled(boolean enabled) {
+        setHandySynchronizationEnabled(enabled, null);
+    }
+
+    private void setHandySynchronizationEnabled(boolean enabled, Runnable retryAfterStop) {
+        handler.removeCallbacks(handyCorrectionSync);
+        handyManager.setSynchronizationEnabled(enabled, new HandyManager.HandyCallback() {
+            @Override public void onSuccess(String message) {
+                if (isFinishing() || isDestroyed()
+                        || enabled != handyManager.isSynchronizationEnabled()) return;
+                setFunscriptMessage(getString(enabled ? R.string.funscript_sync_waiting
+                    : R.string.funscript_sync_off), enabled ? null : retryAfterStop);
+                if (enabled) {
+                    if (handyManager.isConnected()) {
+                        prepareScriptAfterConnection();
+                        syncHandyWithPlayback();
+                    } else autoConnectHandy(true);
                 }
-            }).show();
+            }
+            @Override public void onError(String error) {
+                setFunscriptMessage(error,
+                    () -> setHandySynchronizationEnabled(false, retryAfterStop));
+                Toast.makeText(PlayerActivity.this, error, Toast.LENGTH_LONG).show();
+            }
+        });
+        renderFunscriptState();
+    }
+
+    private void renderFunscriptState() {
+        if (funscriptDialog == null || handyManager == null) return;
+        TextView video = funscriptDialog.findViewById(R.id.funscript_video);
+        video.setText(getString(R.string.funscript_video, videoTitle == null ? "Video" : videoTitle));
+        int connection = handyConnectInProgress ? R.string.funscript_connecting
+            : handyManager.isConnected() ? R.string.funscript_connected
+            : handyManager.getSavedKey().isEmpty() ? R.string.funscript_key_required
+            : R.string.funscript_disconnected;
+        funscriptConnectionView.setText(connection);
+        funscriptFileView.setText(activeScriptName == null
+            ? getString(R.string.funscript_no_script)
+            : getString(R.string.funscript_selected, activeScriptName,
+                activeScriptSource == null ? "" : activeScriptSource));
+        int sync = handyManager.isStopRequired() ? R.string.funscript_stop_required
+            : !handyManager.isSynchronizationEnabled() ? R.string.funscript_sync_off
+            : !handyManager.isScriptReady() ? R.string.funscript_sync_no_script
+            : !isHandyPlaybackAllowed() ? R.string.funscript_sync_waiting
+            : handyManager.isPlaying() ? R.string.funscript_sync_running
+            : R.string.funscript_sync_ready;
+        funscriptSyncView.setText(sync);
+        updatingFunscriptSwitch = true;
+        funscriptSyncSwitch.setChecked(handyManager.isSynchronizationEnabled());
+        funscriptSyncSwitch.setEnabled(!handyDisconnectInProgress);
+        updatingFunscriptSwitch = false;
+        funscriptProgressView.setVisibility(handyConnectInProgress || handyDisconnectInProgress || funscriptLoadInProgress
+            ? View.VISIBLE : View.GONE);
+        funscriptMessageView.setText(funscriptMessage == null ? "" : funscriptMessage);
+        funscriptMessageView.setVisibility(funscriptMessage == null ? View.GONE : View.VISIBLE);
+        funscriptDialog.findViewById(R.id.funscript_retry)
+            .setVisibility(funscriptRetryAction == null && !handyManager.isStopRequired()
+                ? View.GONE : View.VISIBLE);
+        int[] sources = {R.id.funscript_choose, R.id.funscript_auto_find, R.id.funscript_url};
+        for (int id : sources) funscriptDialog.findViewById(id)
+            .setEnabled(!funscriptLoadInProgress && !handyDisconnectInProgress && !handyManager.isStopRequired());
+        funscriptDialog.findViewById(R.id.funscript_connect)
+            .setEnabled(!handyConnectInProgress && !handyDisconnectInProgress && !handyManager.isConnected());
+        funscriptDialog.findViewById(R.id.funscript_key)
+            .setEnabled(!handyConnectInProgress && !handyDisconnectInProgress && !funscriptLoadInProgress);
+        funscriptDialog.findViewById(R.id.funscript_disconnect)
+            .setEnabled(handyManager.isConnected() && !handyConnectInProgress && !handyDisconnectInProgress);
+        funscriptDialog.findViewById(R.id.funscript_status)
+            .setEnabled(handyManager.isConnected());
+        funscriptDialog.findViewById(R.id.funscript_resync).setEnabled(
+            handyManager.isSynchronizationEnabled() && handyManager.isScriptReady()
+                && isHandyPlaybackAllowed());
+    }
+
+    private void setFunscriptMessage(String message, Runnable retry) {
+        if (isDestroyed() || isFinishing()) return;
+        funscriptMessage = message;
+        funscriptRetryAction = retry;
+        renderFunscriptState();
     }
 
     private void showFunscriptUrlInput() {
         EditText input = new EditText(this);
         input.setHint("https://example.com/video.funscript");
-        new AlertDialog.Builder(this).setTitle("Funscript URL").setView(input)
-            .setPositiveButton("Tải và đồng bộ", (d, w) -> {
+        input.setSingleLine(true);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.funscript_url_action)
+            .setMessage(R.string.funscript_upload_note).setView(input)
+            .setPositiveButton(R.string.funscript_load_action, null)
+            .setNegativeButton(R.string.cancel, null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
                 String url = input.getText().toString().trim();
-                if (url.isEmpty()) return;
+                Uri parsed = Uri.parse(url);
+                String scheme = parsed.getScheme();
+                if (parsed.getHost() == null || parsed.getHost().isEmpty()
+                        || (!"https".equalsIgnoreCase(scheme) && !"http".equalsIgnoreCase(scheme))) {
+                    input.setError(getString(R.string.funscript_invalid_url));
+                    return;
+                }
+                dialog.dismiss();
                 prepareHandyScriptUrl(url);
-            }).setNegativeButton("Hủy", null).show();
+            }));
+        dialog.show();
     }
 
     private void prepareHandyScriptUrl(String url) {
-        String lower = url.toLowerCase(Locale.US);
-        if (!lower.startsWith("https://") && !lower.startsWith("http://")) {
-            Toast.makeText(this, "URL funscript không hợp lệ", Toast.LENGTH_LONG).show();
-            return;
-        }
+        funscriptOperationGeneration++;
         pendingHandyScriptUrl = url;
-        if (handyManager != null && handyManager.isConnected()) {
-            uploadPendingHandyScriptUrl();
-        } else {
-            Toast.makeText(this, "Đang kết nối The Handy...", Toast.LENGTH_SHORT).show();
-            autoConnectHandy(false);
-        }
+        pendingHandyScriptVideoUri = uriString;
+        pendingPickedScript = null;
+        funscriptRetryAction = null;
+        if (handyManager.isConnected()) uploadPendingHandyScriptUrl();
+        else autoConnectHandy(true);
+    }
+
+    private boolean isCurrentFunscriptOperation(int generation, String videoUri) {
+        return !isDestroyed() && !isFinishing()
+            && generation == funscriptOperationGeneration && videoUri.equals(uriString);
     }
 
     private void uploadPendingHandyScriptUrl() {
-        if (pendingHandyScriptUrl == null || handyManager == null
-                || !handyManager.isConnected()) return;
-        String url = pendingHandyScriptUrl;
-        pendingHandyScriptUrl = null;
-        Toast.makeText(this, "Đang tải và chuẩn bị funscript...", Toast.LENGTH_SHORT).show();
+        if (pendingHandyScriptUrl == null || !handyManager.isConnected()
+                || funscriptLoadInProgress) return;
+        final String url = pendingHandyScriptUrl;
+        final String videoUri = pendingHandyScriptVideoUri;
+        final int generation = funscriptOperationGeneration;
+        if (videoUri == null || !videoUri.equals(uriString)) return;
+        funscriptLoadInProgress = true;
+        activeScriptName = Uri.parse(url).getLastPathSegment();
+        if (activeScriptName == null || activeScriptName.isEmpty())
+            activeScriptName = getString(R.string.funscript_source_url);
+        activeScriptSource = getString(R.string.funscript_source_url);
+        setFunscriptMessage(getString(R.string.funscript_loading), null);
         handyManager.uploadAndSetupScript(url, new HandyManager.HandyCallback() {
             @Override public void onSuccess(String message) {
-                handyPreparedUri = uriString;
-                handyPrepareFailures = 0;
-                Toast.makeText(PlayerActivity.this,
-                    "The Handy đã sẵn sàng", Toast.LENGTH_SHORT).show();
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) syncHandyWithPlayback();
+                if (!isCurrentFunscriptOperation(generation, videoUri)) return;
+                funscriptLoadInProgress = false;
+                pendingHandyScriptUrl = null;
+                handyCheckedUri = videoUri;
+                setFunscriptMessage(getString(R.string.funscript_loaded), null);
+                syncHandyWithPlayback();
             }
-
             @Override public void onError(String error) {
-                Toast.makeText(PlayerActivity.this,
-                    "Lỗi The Handy: " + error, Toast.LENGTH_LONG).show();
+                if (!isCurrentFunscriptOperation(generation, videoUri)) return;
+                funscriptLoadInProgress = false;
+                setFunscriptMessage(error, () -> {
+                    if (handyManager.isConnected()) uploadPendingHandyScriptUrl();
+                    else autoConnectHandy(true);
+                });
+                Toast.makeText(PlayerActivity.this, error, Toast.LENGTH_LONG).show();
             }
         });
     }
 
     private void onFunscriptPicked(Uri pickedUri) {
-        if (pickedUri == null || uriString == null) return;
-        try {
-            getContentResolver().takePersistableUriPermission(pickedUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (Exception ignored) {
-            // A copied app-private file is used, so a persistable grant is optional.
+        final String videoUri = funscriptPickerVideoUri;
+        funscriptPickerVideoUri = null;
+        if (pickedUri == null || videoUri == null) return;
+        if (!videoUri.equals(uriString)) {
+            setFunscriptMessage(getString(R.string.funscript_video_changed), null);
+            Toast.makeText(this, R.string.funscript_video_changed, Toast.LENGTH_LONG).show();
+            return;
         }
-        Toast.makeText(this, "Đang nhập funscript...", Toast.LENGTH_SHORT).show();
+        final int generation = ++funscriptOperationGeneration;
+        funscriptLoadInProgress = true;
+        setFunscriptMessage(getString(R.string.funscript_importing), null);
         dbExecutor.execute(() -> {
             try {
-                File cachedScript = copyPickedFunscript(pickedUri);
-                handler.post(() -> preparePickedFunscript(cachedScript));
+                File cachedScript = copyPickedFunscript(pickedUri, videoUri);
+                handler.post(() -> {
+                    if (!isCurrentFunscriptOperation(generation, videoUri)) return;
+                    funscriptLoadInProgress = false;
+                    pendingHandyScriptUrl = null;
+                    pendingPickedScript = cachedScript;
+                    pendingHandyScriptVideoUri = videoUri;
+                    activeScriptName = getScriptDisplayName(cachedScript, videoUri);
+                    activeScriptSource = getString(R.string.funscript_source_file);
+                    funscriptRetryAction = null;
+                    if (handyManager.isConnected()) prepareScriptAfterConnection();
+                    else autoConnectHandy(true);
+                });
             } catch (Exception e) {
-                handler.post(() -> Toast.makeText(PlayerActivity.this,
-                    "Không nhập được funscript: " + e.getMessage(),
-                    Toast.LENGTH_LONG).show());
+                handler.post(() -> {
+                    if (!isCurrentFunscriptOperation(generation, videoUri)) return;
+                    funscriptLoadInProgress = false;
+                    setFunscriptMessage(getString(R.string.funscript_import_error, e.getMessage()), null);
+                    Toast.makeText(PlayerActivity.this, funscriptMessage, Toast.LENGTH_LONG).show();
+                });
             }
         });
     }
 
-    private File copyPickedFunscript(Uri pickedUri) throws Exception {
-        String baseName = resolveVideoBaseName(uriString);
-        if (baseName == null || baseName.trim().isEmpty()) {
-            throw new IOException("Không xác định được tên video");
-        }
+    private File copyPickedFunscript(Uri pickedUri, String videoUri) throws Exception {
+        String baseName = resolveVideoBaseName(videoUri);
+        if (baseName == null || baseName.trim().isEmpty()) baseName = "video";
         String pickedName = queryDisplayName(pickedUri);
-        String extension = pickedName != null
-                && pickedName.toLowerCase(Locale.US).endsWith(".csv")
+        String extension = pickedName != null && pickedName.toLowerCase(Locale.US).endsWith(".csv")
             ? ".csv" : ".funscript";
-        File directory = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS);
-        if (directory == null) directory = new File(getFilesDir(), "funscripts");
-        if (!directory.isDirectory() && !directory.mkdirs()) {
-            throw new IOException("Không tạo được thư mục funscript của app");
-        }
-        File destination = new File(directory, baseName + extension);
-        int total = 0;
-        try (InputStream input = getContentResolver().openInputStream(pickedUri);
-             FileOutputStream output = new FileOutputStream(destination, false)) {
-            if (input == null) throw new IOException("Không đọc được file đã chọn");
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                total += read;
-                if (total > 2 * 1024 * 1024) {
-                    throw new IOException("Funscript vượt giới hạn 2 MB");
-                }
-                output.write(buffer, 0, read);
+        File destination = FunscriptStore.destinationFor(
+            new File(getFilesDir(), "funscripts"), videoUri, baseName, extension);
+        File imported = FunscriptStore.importScript(
+            getContentResolver().openInputStream(pickedUri), destination, HandyManager::validateScript);
+        getSharedPreferences("funscript_bindings", MODE_PRIVATE).edit()
+            .putString(videoUri, imported.getAbsolutePath())
+            .putString("name:" + videoUri, pickedName == null ? baseName + extension : pickedName)
+            .apply();
+        return imported;
+    }
+
+    private String getScriptDisplayName(File script, String videoUri) {
+        android.content.SharedPreferences bindings = getSharedPreferences("funscript_bindings", MODE_PRIVATE);
+        return script.getAbsolutePath().equals(bindings.getString(videoUri, ""))
+            ? bindings.getString("name:" + videoUri, script.getName()) : script.getName();
+    }
+
+    private void loadFunscriptFile(File script, String videoUri, String source, boolean showSuccess) {
+        if (funscriptLoadInProgress || !videoUri.equals(uriString)) return;
+        final int generation = funscriptOperationGeneration;
+        funscriptLoadInProgress = true;
+        activeScriptName = getScriptDisplayName(script, videoUri);
+        activeScriptSource = source;
+        setFunscriptMessage(getString(R.string.funscript_loading), null);
+        handyManager.uploadAndSetupScript(script, new HandyManager.HandyCallback() {
+            @Override public void onSuccess(String message) {
+                if (!isCurrentFunscriptOperation(generation, videoUri)) return;
+                funscriptLoadInProgress = false;
+                pendingPickedScript = null;
+                handyCheckedUri = videoUri;
+                setFunscriptMessage(getString(R.string.funscript_loaded), null);
+                if (showSuccess) Toast.makeText(PlayerActivity.this,
+                    R.string.funscript_loaded, Toast.LENGTH_SHORT).show();
+                syncHandyWithPlayback();
             }
-        } catch (Exception e) {
-            if (destination.exists()) destination.delete();
-            throw e;
-        }
-        if (total == 0) {
-            destination.delete();
-            throw new IOException("Funscript rỗng");
-        }
-        return destination;
+            @Override public void onError(String error) {
+                if (!isCurrentFunscriptOperation(generation, videoUri)) return;
+                funscriptLoadInProgress = false;
+                setFunscriptMessage(error, () -> {
+                    pendingPickedScript = script;
+                    pendingHandyScriptVideoUri = videoUri;
+                    if (handyManager.isConnected())
+                        loadFunscriptFile(script, videoUri, source, true);
+                    else autoConnectHandy(true);
+                });
+                Toast.makeText(PlayerActivity.this, error, Toast.LENGTH_LONG).show();
+            }
+        });
     }
-
-    private void preparePickedFunscript(File script) {
-        handyCheckedUri = null;
-        if (handyManager != null && handyManager.isConnected()) {
-            handyCheckedUri = uriString;
-            uploadFunscriptAndSync(script, true);
-        } else {
-            Toast.makeText(this,
-                "Đã lưu script, đang kết nối The Handy...", Toast.LENGTH_SHORT).show();
-            autoConnectHandy(false);
-        }
-    }
-
     @Override
     protected void onStart() {
         super.onStart();
@@ -1776,6 +1960,7 @@ public class PlayerActivity extends AppCompatActivity {
                     if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
                     isInBackground = false;
                     resumeAfterBackground = false;
+                    prepareScriptAfterConnection();
                     if (shouldResume && requestAudioFocus()) {
                         mediaPlayer.play();
                         handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
@@ -1796,6 +1981,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override protected void onStop() {
         super.onStop();
         isInBackground = true;
+        blockHandyPlayback();
         resumeAfterBackground = mediaPlayer != null && !userPaused
             && (mediaPlayer.isPlaying() || resumeAfterFocusLoss);
         resumeAfterFocusLoss = false;
@@ -1813,6 +1999,8 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     @Override protected void onDestroy() {
+        funscriptOperationGeneration++;
+        if (funscriptDialog != null) funscriptDialog.dismiss();
         if (getIntent().getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)) {
             TorrentManager.stopActiveAndCleanup(this);
         }
@@ -1830,61 +2018,23 @@ public class PlayerActivity extends AppCompatActivity {
         dbExecutor.shutdown();
         closePfd();
     }
-    // Chuyển sang CSV và dùng dịch vụ script tạm chính thức của Handy.
-    private void uploadFunscriptAndSync(java.io.File file) {
-        uploadFunscriptAndSync(file, true);
-    }
-
-    private void uploadFunscriptAndSync(java.io.File file, boolean showSuccess) {
-        if (handyManager == null) return;
-        Toast.makeText(this, "Đang chuẩn bị funscript...", Toast.LENGTH_SHORT).show();
-        handyManager.uploadAndSetupScript(file, new HandyManager.HandyCallback() {
-            @Override public void onSuccess(String message) {
-                handyPreparedUri = uriString;
-                handyPrepareFailures = 0;
-                if (showSuccess) {
-                    Toast.makeText(PlayerActivity.this,
-                        "The Handy đã sẵn sàng", Toast.LENGTH_SHORT).show();
-                }
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) syncHandyWithPlayback();
-            }
-
-            @Override public void onError(String error) {
-                handyPreparedUri = null;
-                handyCheckedUri = null;
-                if (!showSuccess && handyPrepareFailures < 3) {
-                    handyPrepareFailures++;
-                    handyCheckedUri = null;
-                    long retryDelay = 10_000L * handyPrepareFailures;
-                    handler.postDelayed(PlayerActivity.this::autoPrepareHandyForCurrentVideo,
-                        retryDelay);
-                    android.util.Log.w("TheHandy", "Auto script retry "
-                        + handyPrepareFailures + ": " + error);
-                } else {
-                    Toast.makeText(PlayerActivity.this,
-                        "Lỗi The Handy: " + error, Toast.LENGTH_LONG).show();
-                }
-            }
-        });
-    }
-
     private void autoPrepareHandyForCurrentVideo() {
-        if (handyManager == null || !handyManager.isConnected()
+        if (handyManager == null || !handyManager.isConnected() || isInBackground
+                || funscriptLoadInProgress || funscriptRetryAction != null
                 || uriString == null || uriString.equals(handyCheckedUri)) return;
-
         File script = findMatchingHandyScript(uriString);
-        if (script == null) {
-            // Keep checking every health cycle so a newly downloaded script is
-            // picked up without reopening the video or pressing another button.
-            handyCheckedUri = null;
-            return;
-        }
+        if (script == null) return;
         handyCheckedUri = uriString;
-        uploadFunscriptAndSync(script, false);
+        loadFunscriptFile(script, uriString, getString(R.string.funscript_source_auto), false);
     }
-
     private File findMatchingHandyScript(String mediaUri) {
         if (mediaUri == null || mediaUri.trim().isEmpty()) return null;
+        String boundPath = getSharedPreferences("funscript_bindings", MODE_PRIVATE)
+            .getString(mediaUri, null);
+        if (boundPath != null) {
+            File bound = new File(boundPath);
+            if (bound.isFile() && bound.canRead()) return bound;
+        }
         Uri uri = Uri.parse(mediaUri);
         String scheme = uri.getScheme();
         if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
@@ -1983,20 +2133,25 @@ public class PlayerActivity extends AppCompatActivity {
 
     // Find and synchronize a matching script without a second confirmation dialog.
     private void autoFindAndSyncFunscript() {
+        funscriptOperationGeneration++;
+        pendingHandyScriptUrl = null;
+        pendingPickedScript = null;
+        funscriptRetryAction = null;
         handyCheckedUri = null;
         File script = findMatchingHandyScript(uriString);
         if (script == null) {
-            Toast.makeText(this,
-                "Không tìm thấy script cùng tên. Hãy chọn file một lần để app ghi nhớ.",
-                Toast.LENGTH_LONG).show();
+            setFunscriptMessage(getString(R.string.funscript_not_found_hint), null);
             return;
         }
+        pendingPickedScript = script;
+        pendingHandyScriptVideoUri = uriString;
+        activeScriptName = getScriptDisplayName(script, uriString);
+        activeScriptSource = getString(R.string.funscript_source_auto);
         if (handyManager != null && handyManager.isConnected()) {
             handyCheckedUri = uriString;
-            uploadFunscriptAndSync(script);
+            loadFunscriptFile(script, uriString, getString(R.string.funscript_source_auto), true);
         } else {
-            Toast.makeText(this, "Đang kết nối The Handy...", Toast.LENGTH_SHORT).show();
-            autoConnectHandy(false);
+            autoConnectHandy(true);
         }
     }
 
