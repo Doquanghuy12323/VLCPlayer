@@ -39,6 +39,16 @@ vào **Releases** sau khi các bước kiểm tra thành công.
 Các secret cần cho bước phát hành: `KEYSTORE_BASE64`, `KEY_ALIAS`,
 `KEY_PASSWORD`, `STORE_PASSWORD`. Pull request không sử dụng các secret này.
 
+## Lưu dữ liệu torrent
+Trong màn Torrent, **Tự xóa dữ liệu khi đóng video** được ghi nhớ cho các phiên mới.
+Bật để dừng tải và dọn dữ liệu tạm khi đóng video; tắt để dừng tải nhưng giữ dữ liệu
+trong thư mục riêng của ứng dụng. Dữ liệu được giữ không bị xóa khi mở torrent khác
+hoặc dọn cache. Bạn vẫn có thể xóa từng file trong danh sách.
+
+Torrent tải theo phần video đang đọc, nên file giữ lại có thể chưa hoàn tất.
+Chạm dữ liệu đã giữ để mở lại torrent gốc và tiếp tục tải qua proxy; cần mạng và
+nguồn torrent còn hoạt động. File chưa tải đủ không bảo đảm phát được ngoại tuyến.
+
 ## Funscript và The Handy
 Trong player, mở **Thêm tùy chọn → Funscript & The Handy** để xem trạng thái
 thiết bị, script và đồng bộ. Chọn file `.funscript`/`.csv` hoặc nhập URL; nếu chưa

@@ -11,6 +11,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
@@ -22,6 +23,9 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class TorrentActivity extends AppCompatActivity {
 
@@ -36,6 +40,15 @@ public class TorrentActivity extends AppCompatActivity {
     private TorrentManager torrentManager;
     private TorrentManager.Callback torrentCallback;
     private boolean playerLaunched;
+    private Switch autoCleanupSwitch;
+    private TextView cleanupHint;
+    private boolean streamAutoCleanup;
+    private boolean lastPlayerAutoCleanup;
+    private int requestGeneration;
+    private int listGeneration;
+    private boolean filePickerShown;
+    private AlertDialog filePickerDialog;
+    private final ExecutorService fileExecutor = Executors.newSingleThreadExecutor();
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -55,17 +68,56 @@ public class TorrentActivity extends AppCompatActivity {
         tvStatus    = findViewById(R.id.tv_status);
         tvSpeed     = findViewById(R.id.tv_speed);
         rvDownloaded = findViewById(R.id.rv_downloaded);
+        autoCleanupSwitch = findViewById(R.id.sw_stream_only);
+        cleanupHint = findViewById(R.id.tv_cleanup_hint);
+        autoCleanupSwitch.setChecked(getSharedPreferences("torrent_prefs", MODE_PRIVATE)
+            .getBoolean("auto_cleanup", false));
+        autoCleanupSwitch.setOnCheckedChangeListener((button, checked) -> {
+            getSharedPreferences("torrent_prefs", MODE_PRIVATE).edit()
+                .putBoolean("auto_cleanup", checked).apply();
+            updateCleanupHint();
+        });
+        updateCleanupHint();
 
-        torrentManager = new TorrentManager(this);
+        torrentManager = TorrentManager.getActiveManager();
+        boolean reattaching = torrentManager != null;
+        if (!reattaching) torrentManager = new TorrentManager(this);
         rvDownloaded.setLayoutManager(new LinearLayoutManager(this));
-        loadDownloadedFiles();
 
         findViewById(R.id.btn_back).setOnClickListener(v -> finish());
         btnStream.setOnClickListener(v -> startStream());
         btnStop.setOnClickListener(v -> stopStream());
         btnPickFile.setOnClickListener(v -> pickTorrentFile());
 
-        handleIntent(getIntent());
+        if (savedInstanceState != null) {
+            etMagnet.setText(savedInstanceState.getString("torrent_source", ""));
+            playerLaunched = savedInstanceState.getBoolean("player_launched", false);
+            lastPlayerAutoCleanup = savedInstanceState.getBoolean("player_auto_cleanup", false);
+        }
+        if (reattaching) {
+            streamAutoCleanup = torrentManager.isAutoCleanupEnabled();
+            autoCleanupSwitch.setChecked(streamAutoCleanup);
+            setStreamControls(true);
+            torrentCallback = createTorrentCallback(requestGeneration);
+            torrentManager.attachCallback(torrentCallback);
+        }
+        if (savedInstanceState == null) handleIntent(getIntent());
+    }
+
+    private void updateCleanupHint() {
+        cleanupHint.setText(autoCleanupSwitch.isChecked()
+            ? R.string.torrent_cleanup_on_hint : R.string.torrent_cleanup_off_hint);
+    }
+
+    private void setStreamControls(boolean running) {
+        btnStream.setEnabled(!running);
+        btnStop.setEnabled(running);
+        autoCleanupSwitch.setEnabled(!running);
+        btnPickFile.setEnabled(!running);
+    }
+
+    private boolean isCurrentRequest(int generation) {
+        return generation == requestGeneration && !isFinishing() && !isDestroyed();
     }
 
     private void handleIntent(Intent intent) {
@@ -75,6 +127,10 @@ public class TorrentActivity extends AppCompatActivity {
             source = intent.getData().toString();
         }
         if (source != null && !source.isEmpty()) {
+            if (source.startsWith("content://")) {
+                importTorrentFile(Uri.parse(source));
+                return;
+            }
             etMagnet.setText(source);
             etMagnet.post(this::startStream);
         }
@@ -100,24 +156,62 @@ public class TorrentActivity extends AppCompatActivity {
         if (req == REQ_PICK_TORRENT && res == RESULT_OK && data != null) {
             Uri uri = data.getData();
             if (uri == null) return;
+            importTorrentFile(uri);
+        }
+    }
+
+    private void importTorrentFile(Uri uri) {
+        if (isFinishing() || isDestroyed()) return;
+        if (torrentManager.getPlaybackSessionId() != null) stopStream();
+        final int generation = ++requestGeneration;
+        streamAutoCleanup = autoCleanupSwitch.isChecked();
+        setStreamControls(true);
+        progressBar.setIndeterminate(true);
+        progressBar.setVisibility(View.VISIBLE);
+        tvStatus.setText(R.string.torrent_importing);
+        fileExecutor.execute(() -> {
+            File tmp = null;
             try {
-                File tmp = new File(getCacheDir(), "stream.torrent");
+                File inputs = new File(getCacheDir(), "torrent_inputs");
+                if (!inputs.isDirectory() && !inputs.mkdirs())
+                    throw new java.io.IOException("Cannot create torrent input directory");
+                tmp = File.createTempFile("selected-", ".torrent", inputs);
                 try (InputStream is = getContentResolver().openInputStream(uri);
                      FileOutputStream fos = new FileOutputStream(tmp)) {
                     if (is == null) throw new java.io.IOException("Khong mo duoc file torrent");
                     byte[] buf = new byte[8192];
                     int len;
-                    while ((len = is.read(buf)) != -1) fos.write(buf, 0, len);
+                    int total = 0;
+                    while ((len = is.read(buf)) != -1) {
+                        if (Thread.currentThread().isInterrupted())
+                            throw new java.io.IOException("Torrent import cancelled");
+                        total += len;
+                        if (total > 8 * 1024 * 1024)
+                            throw new java.io.IOException("Torrent metadata exceeds 8 MiB");
+                        fos.write(buf, 0, len);
+                    }
                 }
-                etMagnet.setText("file://" + tmp.getAbsolutePath());
-                startStream();
+                final File imported = tmp;
+                runOnUiThread(() -> {
+                    if (!isCurrentRequest(generation)) { imported.delete(); return; }
+                    etMagnet.setText(Uri.fromFile(imported).toString());
+                    startStream();
+                });
             } catch (Exception e) {
-                Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                if (tmp != null) tmp.delete();
+                runOnUiThread(() -> {
+                    if (isCurrentRequest(generation)) {
+                        setStreamControls(false);
+                        progressBar.setVisibility(View.GONE);
+                        Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                });
             }
-        }
+        });
     }
 
     private void startStream() {
+        if (isFinishing() || isDestroyed()) return;
         String url = etMagnet.getText().toString().trim();
         if (url.isEmpty()) {
             Toast.makeText(this, "Nhap magnet link hoac chon file .torrent", Toast.LENGTH_SHORT).show();
@@ -134,22 +228,36 @@ public class TorrentActivity extends AppCompatActivity {
             return;
         }
 
-        btnStream.setEnabled(false);
-        btnStop.setEnabled(true);
+        if (torrentCallback != null) torrentManager.detachCallback(torrentCallback);
+        final int generation = ++requestGeneration;
+        dismissFilePicker();
+        playerLaunched = false;
+        streamAutoCleanup = autoCleanupSwitch.isChecked();
+        filePickerShown = false;
+        setStreamControls(true);
+        progressBar.setIndeterminate(false);
         progressBar.setProgress(0);
         progressBar.setVisibility(View.VISIBLE);
         tvStatus.setText("Dang ket noi...");
         tvSpeed.setText("");
 
-        torrentCallback = new TorrentManager.Callback() {
+        torrentCallback = createTorrentCallback(generation);
+        torrentManager.startStream(url, streamAutoCleanup, torrentCallback);
+    }
+
+    private TorrentManager.Callback createTorrentCallback(int generation) {
+        return new TorrentManager.Callback() {
             @Override
             public void onStatusUpdate(String status) {
-                runOnUiThread(() -> tvStatus.setText(status));
+                runOnUiThread(() -> {
+                    if (isCurrentRequest(generation)) tvStatus.setText(status);
+                });
             }
 
             @Override
             public void onProgress(int progress, float dlSpeed) {
                 runOnUiThread(() -> {
+                    if (!isCurrentRequest(generation)) return;
                     progressBar.setProgress(progress);
                     tvSpeed.setText(String.format("%.1f KB/s", dlSpeed));
                 });
@@ -157,19 +265,26 @@ public class TorrentActivity extends AppCompatActivity {
 
             @Override
             public void onFilesFound(List<TorrentManager.VideoFileEntry> files) {
-                runOnUiThread(() -> showFilePicker(files));
+                runOnUiThread(() -> {
+                    if (isCurrentRequest(generation) && !filePickerShown)
+                        showFilePicker(files, generation);
+                });
             }
 
             @Override
             public void onReady(String streamUrl) {
                 runOnUiThread(() -> {
+                    if (!isCurrentRequest(generation) || playerLaunched) return;
                     tvStatus.setText("San sang xem!");
                     progressBar.setVisibility(View.GONE);
                     Intent intent = new Intent(TorrentActivity.this, PlayerActivity.class);
                     intent.putExtra(PlayerActivity.EXTRA_URI, streamUrl);
                     intent.putExtra(PlayerActivity.EXTRA_TITLE, "Torrent Stream");
-                    intent.putExtra(PlayerActivity.EXTRA_AUTO_CLEANUP_TORRENT, true);
+                    intent.putExtra(PlayerActivity.EXTRA_AUTO_CLEANUP_TORRENT, streamAutoCleanup);
+                    intent.putExtra(PlayerActivity.EXTRA_TORRENT_SESSION_ID,
+                        torrentManager.getPlaybackSessionId());
                     playerLaunched = true;
+                    lastPlayerAutoCleanup = streamAutoCleanup;
                     startActivity(intent);
                 });
             }
@@ -177,11 +292,14 @@ public class TorrentActivity extends AppCompatActivity {
             @Override
             public void onError(String error) {
                 runOnUiThread(() -> {
+                    if (!isCurrentRequest(generation)) return;
                     tvStatus.setText("Loi: " + error);
                     progressBar.setVisibility(View.GONE);
-                    btnStream.setEnabled(true);
-                    btnStop.setEnabled(false);
-                    torrentManager.stopAndClearCache();
+                    setStreamControls(false);
+                    requestGeneration++;
+                    dismissFilePicker();
+                    torrentManager.detachCallback(torrentCallback);
+                    torrentManager.destroy();
                     Toast.makeText(TorrentActivity.this, "Loi: " + error, Toast.LENGTH_LONG).show();
                 });
             }
@@ -189,18 +307,22 @@ public class TorrentActivity extends AppCompatActivity {
             @Override
             public void onStopped() {
                 runOnUiThread(() -> {
-                    tvStatus.setText("Da dung");
+                    if (!isCurrentRequest(generation)) return;
+                    dismissFilePicker();
+                    tvStatus.setText(streamAutoCleanup ? R.string.torrent_stopped_deleted
+                        : R.string.torrent_stopped_kept);
                     progressBar.setVisibility(View.GONE);
-                    btnStream.setEnabled(true);
-                    btnStop.setEnabled(false);
+                    playerLaunched = false;
+                    setStreamControls(false);
+                    loadDownloadedFiles();
                 });
             }
         };
 
-        torrentManager.startStream(url, torrentCallback);
     }
 
-    private void showFilePicker(List<TorrentManager.VideoFileEntry> files) {
+    private void showFilePicker(List<TorrentManager.VideoFileEntry> files, int generation) {
+        filePickerShown = true;
         tvStatus.setText("Torrent co " + files.size() + " video - chon file de xem");
 
         String[] labels = new String[files.size()];
@@ -212,32 +334,61 @@ public class TorrentActivity extends AppCompatActivity {
             labels[i] = shortName + "  (" + formatSize(f.size) + ")";
         }
 
-        new AlertDialog.Builder(this)
+        filePickerDialog = new AlertDialog.Builder(this)
             .setTitle("Chon video de xem")
             .setItems(labels, (d, which) -> {
+                filePickerShown = false;
+                if (!isCurrentRequest(generation)) return;
                 TorrentManager.VideoFileEntry chosen = files.get(which);
                 tvStatus.setText("Dang tai: " + chosen.name);
                 progressBar.setVisibility(View.VISIBLE);
                 torrentManager.selectFile(chosen.index, torrentCallback);
             })
             .setCancelable(false)
-            .setNegativeButton("Huy", (d, w) -> stopStream())
-            .show();
+            .setNegativeButton("Huy", (d, w) -> {
+                filePickerShown = false;
+                if (isCurrentRequest(generation)) stopStream();
+            })
+            .create();
+        filePickerDialog.setOnDismissListener(d -> {
+            filePickerShown = false;
+            filePickerDialog = null;
+        });
+        filePickerDialog.show();
+    }
+
+    private void dismissFilePicker() {
+        if (filePickerDialog != null) filePickerDialog.dismiss();
+        filePickerShown = false;
     }
 
     private void stopStream() {
-        torrentManager.stopAndClearCache();
-        btnStream.setEnabled(true);
-        btnStop.setEnabled(false);
+        final int generation = ++requestGeneration;
+        playerLaunched = false;
+        dismissFilePicker();
+        if (torrentCallback != null) torrentManager.detachCallback(torrentCallback);
+        torrentManager.destroy();
+        setStreamControls(false);
         progressBar.setVisibility(View.GONE);
-        tvStatus.setText("Da dung");
+        tvStatus.setText(streamAutoCleanup ? R.string.torrent_stopped_deleted
+            : R.string.torrent_stopped_kept);
+        loadDownloadedFiles();
+        rvDownloaded.postDelayed(() -> {
+            if (isCurrentRequest(generation)) loadDownloadedFiles();
+        }, 1000);
     }
 
     private void loadDownloadedFiles() {
-        File dir = TorrentManager.getCacheDirectory(this);
-        List<File> files = new ArrayList<>();
-        if (dir.exists()) collectVideoFiles(dir, files);
-        rvDownloaded.setAdapter(new DownloadedAdapter(files));
+        final int generation = ++listGeneration;
+        fileExecutor.execute(() -> {
+            List<File> files = new ArrayList<>();
+            for (File dir : TorrentManager.getStorageDirectories(this))
+                if (dir.exists()) collectVideoFiles(dir, files);
+            runOnUiThread(() -> {
+                if (isDestroyed() || isFinishing() || generation != listGeneration) return;
+                rvDownloaded.setAdapter(new DownloadedAdapter(files));
+            });
+        });
     }
 
     private void collectVideoFiles(File dir, List<File> out) {
@@ -247,9 +398,9 @@ public class TorrentActivity extends AppCompatActivity {
             if (f.isDirectory()) {
                 collectVideoFiles(f, out);
             } else {
-                String n = f.getName().toLowerCase();
+                String n = f.getName().toLowerCase(Locale.US);
                 if (n.endsWith(".mp4") || n.endsWith(".mkv")
-                        || n.endsWith(".avi") || n.endsWith(".webm")) {
+                        || n.endsWith(".avi") || n.endsWith(".webm") || n.endsWith(".mov")) {
                     out.add(f);
                 }
             }
@@ -271,17 +422,52 @@ public class TorrentActivity extends AppCompatActivity {
             h.tvName.setText(f.getName());
             h.tvSize.setText(formatSize(f.length()));
             h.itemView.setOnClickListener(v -> {
+                int index = h.getBindingAdapterPosition();
+                if (index == RecyclerView.NO_POSITION) return;
+                File selected = data.get(index);
+                if (torrentManager.getPlaybackSessionId() != null) {
+                    Toast.makeText(TorrentActivity.this, R.string.torrent_stop_before_open,
+                        Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String resumeSource = TorrentManager.getResumeSource(TorrentActivity.this, selected);
+                if (resumeSource != null) {
+                    etMagnet.setText(resumeSource);
+                    startStream();
+                    return;
+                }
                 Intent i = new Intent(TorrentActivity.this, PlayerActivity.class);
-                i.putExtra(PlayerActivity.EXTRA_URI, "file://" + f.getAbsolutePath());
-                i.putExtra(PlayerActivity.EXTRA_TITLE, f.getName());
-                i.putExtra(PlayerActivity.EXTRA_AUTO_CLEANUP_TORRENT, true);
+                i.putExtra(PlayerActivity.EXTRA_URI, Uri.fromFile(selected).toString());
+                i.putExtra(PlayerActivity.EXTRA_TITLE, selected.getName());
+                lastPlayerAutoCleanup = autoCleanupSwitch.isChecked();
+                i.putExtra(PlayerActivity.EXTRA_AUTO_CLEANUP_TORRENT, lastPlayerAutoCleanup);
+                if (lastPlayerAutoCleanup) {
+                    String token = TorrentManager.prepareStoredPlayback(TorrentActivity.this, selected);
+                    if (token == null) {
+                        Toast.makeText(TorrentActivity.this, R.string.torrent_delete_failed,
+                            Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    i.putExtra(PlayerActivity.EXTRA_TORRENT_FILE_TOKEN, token);
+                }
                 playerLaunched = true;
                 startActivity(i);
             });
             h.btnDelete.setOnClickListener(v -> {
-                f.delete();
-                data.remove(pos);
-                notifyItemRemoved(pos);
+                int index = h.getBindingAdapterPosition();
+                if (index == RecyclerView.NO_POSITION) return;
+                if (torrentManager.getPlaybackSessionId() != null) {
+                    Toast.makeText(TorrentActivity.this, R.string.torrent_stop_before_delete,
+                        Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if (!TorrentManager.deleteStoredFile(TorrentActivity.this, data.get(index))) {
+                    Toast.makeText(TorrentActivity.this, R.string.torrent_delete_failed,
+                        Toast.LENGTH_LONG).show();
+                    return;
+                }
+                data.remove(index);
+                notifyItemRemoved(index);
             });
         }
 
@@ -309,19 +495,34 @@ public class TorrentActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (playerLaunched && !torrentManager.isStreaming()) {
+        loadDownloadedFiles();
+        rvDownloaded.postDelayed(() -> {
+            if (!isDestroyed() && !isFinishing()) loadDownloadedFiles();
+        }, 1000);
+        if (playerLaunched && torrentManager.getPlaybackSessionId() == null) {
             playerLaunched = false;
-            btnStream.setEnabled(true);
-            btnStop.setEnabled(false);
+            setStreamControls(false);
             progressBar.setVisibility(View.GONE);
             tvSpeed.setText("");
-            tvStatus.setText("Da tu dong don cache torrent");
-            loadDownloadedFiles();
+            tvStatus.setText(lastPlayerAutoCleanup ? R.string.torrent_stopped_deleted
+                : R.string.torrent_stopped_kept);
         }
     }
 
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putString("torrent_source", etMagnet.getText().toString());
+        state.putBoolean("player_launched", playerLaunched);
+        state.putBoolean("player_auto_cleanup", lastPlayerAutoCleanup);
+    }
+
     @Override protected void onDestroy() {
+        requestGeneration++;
+        listGeneration++;
+        dismissFilePicker();
+        if (torrentCallback != null) torrentManager.detachCallback(torrentCallback);
+        if (!isChangingConfigurations() && !playerLaunched) torrentManager.destroy();
+        fileExecutor.shutdownNow();
         super.onDestroy();
-        if (!playerLaunched || !torrentManager.isStreaming()) torrentManager.destroy();
     }
 }

@@ -97,7 +97,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Xem xong tu dong xoa"
+                    android:text="@string/torrent_auto_cleanup"
                     android:textColor="#B5BAC1"
                     android:textSize="13sp"/>
 
@@ -105,9 +105,20 @@
                     android:id="@+id/sw_stream_only"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:contentDescription="@string/torrent_auto_cleanup"
                     android:checked="false"/>
 
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_cleanup_hint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/torrent_cleanup_off_hint"
+                android:textColor="#B5BAC1"
+                android:textSize="12sp"
+                android:paddingBottom="8dp"/>
 
             <!-- Buttons -->
             <LinearLayout
@@ -165,7 +176,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="File đã tải:"
+                android:text="@string/torrent_saved_data"
                 android:textColor="#B5BAC1"
                 android:textSize="14sp"
                 android:textStyle="bold"

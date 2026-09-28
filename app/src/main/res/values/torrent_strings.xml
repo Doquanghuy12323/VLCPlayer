@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="torrent_auto_cleanup">Tự xóa dữ liệu khi đóng video</string>
+    <string name="torrent_cleanup_on_hint">Bật: dừng tải và xóa dữ liệu của phiên mới khi đóng video.</string>
+    <string name="torrent_cleanup_off_hint">Tắt: dừng tải nhưng giữ dữ liệu. File tải dở cần mở lại torrent gốc để tải tiếp.</string>
+    <string name="torrent_saved_data">Dữ liệu torrent đã lưu</string>
+    <string name="torrent_importing">Đang đọc file torrent…</string>
+    <string name="torrent_stopped_deleted">Đã dừng tải và dọn dữ liệu tạm.</string>
+    <string name="torrent_stopped_kept">Đã dừng tải. Dữ liệu đã tải được giữ lại.</string>
+    <string name="torrent_stop_before_open">Hãy dừng phiên hiện tại trước khi mở dữ liệu đã lưu.</string>
+    <string name="torrent_stop_before_delete">Hãy dừng phiên hiện tại trước khi xóa dữ liệu đã lưu.</string>
+    <string name="torrent_delete_failed">Không xóa được file đã chọn. Hãy thử lại.</string>
+</resources>
