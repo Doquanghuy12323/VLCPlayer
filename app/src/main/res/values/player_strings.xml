@@ -16,7 +16,7 @@
     <string name="player_aspect">Tỉ lệ khung hình</string>
     <string name="player_lock">Khóa màn hình</string>
     <string name="player_translate">Dịch phụ đề AI</string>
-    <string name="player_funscript">Funscript</string>
+    <string name="player_funscript">Funscript &amp; The Handy</string>
     <string name="player_handy">The Handy</string>
     <string name="player_audio_track">Chọn âm thanh</string>
 </resources>

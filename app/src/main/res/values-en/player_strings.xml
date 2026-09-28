@@ -16,7 +16,7 @@
     <string name="player_aspect">Aspect ratio</string>
     <string name="player_lock">Lock screen</string>
     <string name="player_translate">AI subtitle translation</string>
-    <string name="player_funscript">Funscript</string>
+    <string name="player_funscript">Funscript &amp; The Handy</string>
     <string name="player_handy">The Handy</string>
     <string name="player_audio_track">Audio track</string>
 </resources>

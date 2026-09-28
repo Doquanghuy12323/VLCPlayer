@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true"
+    android:background="@color/surface_darker">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/player_funscript"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+        <TextView android:id="@+id/funscript_video"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:maxLines="2" android:ellipsize="end"
+            android:textColor="@color/text_secondary" />
+        <TextView android:id="@+id/funscript_connection"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:textColor="@color/text_primary" />
+        <TextView android:id="@+id/funscript_file"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:textColor="@color/text_secondary" />
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/funscript_sync_toggle"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:layout_marginTop="12dp"
+            android:text="@string/funscript_sync_toggle" android:textColor="@color/text_primary" />
+        <TextView android:id="@+id/funscript_sync_state"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="@color/text_secondary" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_resync"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_resync" />
+        <ProgressBar android:id="@+id/funscript_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:indeterminate="true"
+            android:visibility="gone" />
+        <TextView android:id="@+id/funscript_message"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:textColor="@color/text_secondary"
+            android:accessibilityLiveRegion="polite" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_retry"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_retry" android:visibility="gone" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="@string/funscript_script_section"
+            android:textColor="@color/text_primary" android:textStyle="bold" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_choose"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_choose" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_auto_find"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_auto_find" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_url"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_url_action" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="20dp" android:text="@string/funscript_device_section"
+            android:textColor="@color/text_primary" android:textStyle="bold" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_connect"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_connect" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_key"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_key" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_status"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_device_status" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/funscript_disconnect"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/funscript_disconnect" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="12dp" android:text="@string/funscript_upload_note"
+            android:textColor="@color/text_muted" android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>
