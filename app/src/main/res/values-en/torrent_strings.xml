@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="torrent_auto_cleanup">Delete data when closing the video</string>
+    <string name="torrent_cleanup_on_hint">On: stop downloading and delete the new session data when closing the video.</string>
+    <string name="torrent_cleanup_off_hint">Off: stop downloading but keep the data. Incomplete files need the original torrent to continue downloading.</string>
+    <string name="torrent_saved_data">Saved torrent data</string>
+    <string name="torrent_importing">Reading torrent file…</string>
+    <string name="torrent_stopped_deleted">Downloading stopped and temporary data cleared.</string>
+    <string name="torrent_stopped_kept">Downloading stopped. Downloaded data was kept.</string>
+    <string name="torrent_stop_before_open">Stop the current session before opening saved data.</string>
+    <string name="torrent_stop_before_delete">Stop the current session before deleting saved data.</string>
+    <string name="torrent_delete_failed">Could not delete the selected file. Try again.</string>
+</resources>

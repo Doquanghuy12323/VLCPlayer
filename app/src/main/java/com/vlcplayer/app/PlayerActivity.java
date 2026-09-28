@@ -66,6 +66,9 @@ public class PlayerActivity extends AppCompatActivity {
     public static final String EXTRA_TITLE = "extra_title";
     public static final String EXTRA_USE_PLAYLIST = "extra_use_playlist";
     public static final String EXTRA_AUTO_CLEANUP_TORRENT = "auto_cleanup_torrent";
+    public static final String EXTRA_TORRENT_SESSION_ID = "torrent_session_id";
+    public static final String EXTRA_TORRENT_FILE_TOKEN = "torrent_file_token";
+    private boolean torrentPlaybackFinished;
 
     private LibVLC libVLC;
     private MediaPlayer mediaPlayer;
@@ -1012,6 +1015,7 @@ public class PlayerActivity extends AppCompatActivity {
             .setTitle("Toc do phat")
             .setSingleChoiceItems(speeds, cur, (d, w) -> {
                 if (handyManager != null && handyManager.isScriptReady()
+                        && handyManager.isSynchronizationEnabled()
                         && Math.abs(vals[w] - 1.0f) > 0.01f) {
                     Toast.makeText(this,
                         "Để The Handy đồng bộ chính xác, tốc độ video được giữ ở 1.0x",
@@ -1996,14 +2000,24 @@ public class PlayerActivity extends AppCompatActivity {
             if (mediaPlayer.isPlaying()) mediaPlayer.pause();
         }
         abandonAudioFocus();
+        if (isFinishing()) {
+            if (mediaPlayer != null) mediaPlayer.stop();
+            finishTorrentPlayback();
+        }
+    }
+
+    private void finishTorrentPlayback() {
+        if (torrentPlaybackFinished) return;
+        torrentPlaybackFinished = true;
+        String sessionId = getIntent().getStringExtra(EXTRA_TORRENT_SESSION_ID);
+        if (sessionId != null) TorrentManager.finishPlayback(this, sessionId);
+        String fileToken = getIntent().getStringExtra(EXTRA_TORRENT_FILE_TOKEN);
+        if (fileToken != null) TorrentManager.finishStoredPlayback(this, fileToken);
     }
 
     @Override protected void onDestroy() {
         funscriptOperationGeneration++;
         if (funscriptDialog != null) funscriptDialog.dismiss();
-        if (getIntent().getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)) {
-            TorrentManager.stopActiveAndCleanup(this);
-        }
         cancelPlaybackRecoveryCallbacks();
         handler.removeCallbacks(handyCorrectionSync);
         handler.removeCallbacks(handyHealthCheck);
@@ -2014,6 +2028,7 @@ public class PlayerActivity extends AppCompatActivity {
         handler.removeCallbacksAndMessages(null);
         if (mediaPlayer != null) mediaPlayer.release();
         if (libVLC != null) libVLC.release();
+        if (!isChangingConfigurations()) finishTorrentPlayback();
         // Let the final history write queued by onStop complete before exit.
         dbExecutor.shutdown();
         closePfd();
@@ -2191,22 +2206,39 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
-        if (getIntent().getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)
-                && !intent.getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false)) {
-            TorrentManager.stopActiveAndCleanup(this);
-        }
-        setIntent(intent);
         String newUri = intent.getStringExtra(EXTRA_URI);
         if (newUri == null && intent.getData() != null) {
             newUri = intent.getData().toString();
         }
         if (newUri == null || newUri.trim().isEmpty()) return;
+        saveHistory();
+        String previousSession = getIntent().getStringExtra(EXTRA_TORRENT_SESSION_ID);
+        boolean sameSession = previousSession != null
+            && previousSession.equals(intent.getStringExtra(EXTRA_TORRENT_SESSION_ID));
+        String previousFileToken = getIntent().getStringExtra(EXTRA_TORRENT_FILE_TOKEN);
+        boolean sameStoredFile = previousSession == null
+            && previousFileToken != null && newUri.equals(uriString);
+        if (sameStoredFile) {
+            String replacementToken = intent.getStringExtra(EXTRA_TORRENT_FILE_TOKEN);
+            if ((replacementToken != null && !previousFileToken.equals(replacementToken))
+                    || (intent.hasExtra(EXTRA_AUTO_CLEANUP_TORRENT)
+                        && !intent.getBooleanExtra(EXTRA_AUTO_CLEANUP_TORRENT, false))) {
+                TorrentManager.discardStoredPlayback(previousFileToken);
+            } else if (replacementToken == null) {
+                intent.putExtra(EXTRA_TORRENT_FILE_TOKEN, previousFileToken);
+            }
+        }
+        if (!sameSession && !sameStoredFile) {
+            if (mediaPlayer != null) mediaPlayer.stop();
+            finishTorrentPlayback();
+        }
+        setIntent(intent);
+        torrentPlaybackFinished = false;
         if (!intent.getBooleanExtra(EXTRA_USE_PLAYLIST, false)) {
             PlaylistManager.get().clear();
         }
         updatePlaylistButtons();
 
-        saveHistory();
         uriString = newUri;
         videoTitle = intent.getStringExtra(EXTRA_TITLE);
         if (videoTitle == null || videoTitle.trim().isEmpty()) {

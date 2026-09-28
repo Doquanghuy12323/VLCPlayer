@@ -16,6 +16,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class TorrentManager {
@@ -23,6 +26,11 @@ public class TorrentManager {
     private static final long GIB = 1024L * 1024L * 1024L;
     private static final long STARTUP_HEADROOM_BYTES = 128L * 1024L * 1024L;
     private static volatile TorrentManager activeInstance;
+    private static final ExecutorService START_EXECUTOR = Executors.newSingleThreadExecutor();
+    private static final TorrentStorage.DeletionTokens STORED_PLAYBACK_TOKENS =
+        new TorrentStorage.DeletionTokens();
+    private static final TorrentStorage.TemporaryOwnership TEMPORARY_OWNERSHIP =
+        new TorrentStorage.TemporaryOwnership();
 
     public static class VideoFileEntry {
         public final int index;
@@ -43,7 +51,7 @@ public class TorrentManager {
     }
 
     private static SessionManager session;
-    private TorrentHandle handle;
+    private volatile TorrentHandle handle;
     private Timer monitorTimer;
     private ServerSocket proxyServer;
     private volatile boolean proxyRunning = false;
@@ -54,90 +62,116 @@ public class TorrentManager {
     private volatile File selectedVideoFile = null;
     private volatile boolean lowStorageStopping = false;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final File saveDir;
+    private final File temporaryDirectory;
+    private final File retainedRoot;
+    private volatile File saveDir;
+    private volatile boolean autoCleanup = true;
+    private volatile boolean streamActive;
+    private long temporaryGeneration;
+    private volatile String playbackSessionId;
+    private volatile Callback callback;
+    private volatile String lastStatus = "Khoi dong...";
     private static final Object CACHE_LOCK = new Object();
     private final AtomicInteger lifecycleGeneration = new AtomicInteger();
 
     public TorrentManager(Context ctx) {
-        saveDir = getCacheDirectory(ctx);
-        if (!saveDir.exists()) saveDir.mkdirs();
-        if (session == null) {
-            session = new SessionManager();
-            new Thread(() -> {
-                try { session.start(); } catch (Exception ignored) {}
-            }).start();
+        temporaryDirectory = getCacheDirectory(ctx);
+        retainedRoot = getRetainedDirectory(ctx);
+        saveDir = temporaryDirectory;
+        synchronized (CACHE_LOCK) {
+            if (session == null) session = new SessionManager();
         }
     }
 
     public void startStream(String url, Callback cb) {
-        activeInstance = this;
-        stop();
-        final int operationId = lifecycleGeneration.incrementAndGet();
-        readyCalled = false;
-        lowStorageStopping = false;
-        handler.post(() -> cb.onStatusUpdate("Khoi dong..."));
+        startStream(url, true, cb);
+    }
 
-        new Thread(() -> {
+    public void startStream(String url, boolean cleanupAfterPlayback, Callback uiCallback) {
+        final int operationId;
+        final String source = url == null ? "" : url.trim();
+        final String sessionId = UUID.randomUUID().toString();
+        synchronized (CACHE_LOCK) {
+            TorrentManager previous = activeInstance;
+            if (previous != null && previous != this) previous.destroy();
+            destroy();
+            operationId = lifecycleGeneration.incrementAndGet();
+            autoCleanup = cleanupAfterPlayback;
+            temporaryGeneration = cleanupAfterPlayback ? TEMPORARY_OWNERSHIP.claim(temporaryDirectory) : 0;
+            callback = uiCallback;
+            playbackSessionId = sessionId;
+            streamActive = true;
+            activeInstance = this;
+            readyCalled = false;
+            lowStorageStopping = false;
+        }
+        final Callback cb = new ForwardingCallback(operationId);
+        cb.onStatusUpdate("Khoi dong...");
+
+        // Native metadata/add operations are serialized so cancelled workers cannot
+        // install an old handle after a replacement stream has started.
+        START_EXECUTOR.execute(() -> {
             try {
                 if (!isCurrent(operationId)) return;
-                clearCacheWithRetries(false);
+                if (!session.isRunning()) session.start();
                 if (!isCurrent(operationId)) return;
-                if (!saveDir.exists() && !saveDir.mkdirs()) {
-                    throw new IOException("Khong tao duoc bo nho tam torrent");
-                }
-                ensureStorageAvailable();
-
-                String path = url.trim();
-                if (path.startsWith("file://")) path = path.substring(7);
-
-                if (path.startsWith("/")) {
-                    File f = new File(path);
-                    if (!f.exists()) {
-                        handler.post(() -> cb.onError("File khong tim thay"));
-                        return;
-                    }
-                    TorrentInfo ti = new TorrentInfo(f);
-                    session.download(ti, saveDir);
-                    long t = System.currentTimeMillis();
-                    while (isCurrent(operationId) && handle == null
-                            && System.currentTimeMillis() - t < 10000) {
-                        try { handle = session.find(ti.infoHash()); } catch (Exception ignored) {}
-                        if (handle == null) Thread.sleep(300);
+                final File operationDir = cleanupAfterPlayback ? temporaryDirectory
+                    : TorrentStorage.sourceDirectory(retainedRoot, source);
+                synchronized (CACHE_LOCK) {
+                    if (!isCurrent(operationId)) return;
+                    saveDir = operationDir;
+                    if (cleanupAfterPlayback) {
+                        if (!clearCacheWithRetries(operationDir, false, operationId, temporaryGeneration, false)
+                                && isCurrent(operationId)) {
+                            throw new IOException("Khong don duoc du lieu torrent tam, thu lai sau");
+                        }
                     }
                     if (!isCurrent(operationId)) return;
-                } else if (path.startsWith("http://") || path.startsWith("https://")) {
-                    handler.post(() -> cb.onStatusUpdate("Dang tai file .torrent..."));
-                    File torrentFile = new File(saveDir, "remote.torrent");
-                    HttpURLConnection conn = (HttpURLConnection) new URL(path).openConnection();
+                    if (!operationDir.exists() && !operationDir.mkdirs()) {
+                        throw new IOException("Khong tao duoc thu muc torrent");
+                    }
+                    ensureStorageAvailable();
+                    if (!cleanupAfterPlayback) TorrentStorage.rememberSource(operationDir, source);
+                }
+
+                TorrentInfo ti;
+                File local = TorrentStorage.localSource(source);
+                if (local != null) {
+                    File f = local;
+                    if (!f.exists()) {
+                        cb.onError("File khong tim thay");
+                        return;
+                    }
+                    ti = new TorrentInfo(f);
+                } else if (source.startsWith("http://") || source.startsWith("https://")) {
+                    cb.onStatusUpdate("Dang tai file .torrent...");
+                    File torrentFile = new File(operationDir, "remote-" + sessionId + ".torrent");
+                    HttpURLConnection conn = (HttpURLConnection) new URL(source).openConnection();
                     conn.setConnectTimeout(15000);
                     conn.setReadTimeout(30000);
                     conn.setInstanceFollowRedirects(true);
-                    int responseCode = conn.getResponseCode();
-                    if (responseCode < 200 || responseCode >= 300) {
-                        throw new IOException("HTTP " + responseCode + " khi tai torrent");
-                    }
-                    try (InputStream input = conn.getInputStream();
-                         OutputStream output = new FileOutputStream(torrentFile)) {
-                        byte[] buffer = new byte[8192];
-                        int read;
-                        while ((read = input.read(buffer)) != -1) {
-                            output.write(buffer, 0, read);
+                    try {
+                        int responseCode = conn.getResponseCode();
+                        if (responseCode < 200 || responseCode >= 300) {
+                            throw new IOException("HTTP " + responseCode + " khi tai torrent");
                         }
+                        try (InputStream input = conn.getInputStream();
+                             OutputStream output = new FileOutputStream(torrentFile)) {
+                            byte[] buffer = new byte[8192];
+                            int read;
+                            while ((read = input.read(buffer)) != -1) {
+                                if (!isCurrent(operationId)) return;
+                                output.write(buffer, 0, read);
+                            }
+                        }
+                        if (!isCurrent(operationId)) return;
+                        ti = new TorrentInfo(torrentFile);
                     } finally {
                         conn.disconnect();
+                        torrentFile.delete();
                     }
-                    if (!isCurrent(operationId)) return;
-                    TorrentInfo ti = new TorrentInfo(torrentFile);
-                    session.download(ti, saveDir);
-                    long t = System.currentTimeMillis();
-                    while (isCurrent(operationId) && handle == null
-                            && System.currentTimeMillis() - t < 10000) {
-                        try { handle = session.find(ti.infoHash()); } catch (Exception ignored) {}
-                        if (handle == null) Thread.sleep(300);
-                    }
-                    if (!isCurrent(operationId)) return;
-                } else if (path.startsWith("magnet:")) {
-                    String magnet = path;
+                } else if (source.startsWith("magnet:")) {
+                    String magnet = source;
                     if (!magnet.contains("&tr=")) {
                         magnet += "&tr=udp://tracker.opentrackr.org:1337/announce"
                             + "&tr=udp://open.stealth.si:80/announce"
@@ -145,77 +179,89 @@ public class TorrentManager {
                             + "&tr=udp://9.rarbg.to:2920/announce"
                             + "&tr=udp://tracker.coppersurfer.tk:6969/announce";
                     }
-                    handler.post(() -> cb.onStatusUpdate("Tim metadata..."));
-                    String hash = extractHash(path);
-                    byte[] data = session.fetchMagnet(magnet, 30, saveDir);
+                    cb.onStatusUpdate("Tim metadata...");
+                    byte[] data = session.fetchMagnet(magnet, 30, operationDir);
                     if (!isCurrent(operationId)) return;
                     if (data == null) {
-                        handler.post(() -> cb.onError("Khong tim duoc metadata. Kiem tra ket noi mang"));
+                        cb.onError("Khong tim duoc metadata. Kiem tra ket noi mang");
                         return;
                     }
-                    if (!hash.isEmpty()) {
-                        long t = System.currentTimeMillis();
-                        while (isCurrent(operationId) && handle == null
-                                && System.currentTimeMillis() - t < 8000) {
-                            try {
-                                handle = session.find(org.libtorrent4j.Sha1Hash.parseHex(hash));
-                            } catch (Exception ignored) {}
-                            if (handle == null) Thread.sleep(300);
-                        }
-                    }
-                    if (!isCurrent(operationId)) return;
+                    ti = new TorrentInfo(data);
                 } else {
-                    handler.post(() -> cb.onError("Link khong hop le"));
+                    cb.onError("Link khong hop le");
                     return;
                 }
 
-                if (handle == null) {
-                    handler.post(() -> cb.onError("Khong bat duoc torrent"));
-                    return;
-                }
-
-                try { handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD); } catch (Exception ignored) {}
-
-                TorrentInfo ti = null;
-                long tMeta = System.currentTimeMillis();
-                while (isCurrent(operationId) && ti == null
-                        && System.currentTimeMillis() - tMeta < 15000) {
-                    ti = handle.torrentFile();
-                    if (ti == null) Thread.sleep(200);
-                }
-                if (!isCurrent(operationId)) return;
-                if (ti == null) {
-                    handler.post(() -> cb.onError("Khong doc duoc metadata torrent"));
-                    return;
-                }
-                cachedInfo = ti;
-                ignoreAllFiles(ti);
+                if (!downloadAndFind(ti, operationDir, operationId)) return;
 
                 List<VideoFileEntry> videos = listVideoFiles(ti);
                 if (videos.isEmpty()) {
-                    handler.post(() -> cb.onError("Torrent nay khong chua file video"));
+                    cb.onError("Torrent nay khong chua file video");
                     return;
                 }
 
                 if (videos.size() == 1) {
-                    selectFileInternal(videos.get(0).index, cb);
+                    selectFileInternal(videos.get(0).index, cb, operationId);
                 } else {
-                    handler.post(() -> cb.onFilesFound(videos));
+                    cb.onFilesFound(videos);
                 }
 
             } catch (Exception e) {
                 if (!isCurrent(operationId)) return;
                 String msg = e.getMessage() != null ? e.getMessage() : "Loi khong xac dinh";
-                handler.post(() -> cb.onError(msg));
+                cb.onError(msg);
             }
-        }).start();
+        });
+    }
+
+    private boolean downloadAndFind(TorrentInfo info, File directory, int operationId)
+            throws Exception {
+        // remove() is asynchronous; wait for the previous registration before reusing
+        // the same info hash at a different temporary/retained path.
+        TorrentHandle previous = session.find(info.infoHash());
+        if (previous != null && previous.isValid()) session.remove(previous);
+        long removalDeadline = System.currentTimeMillis() + 5000;
+        while (session.find(info.infoHash()) != null && System.currentTimeMillis() < removalDeadline) {
+            if (!isCurrent(operationId)) return false;
+            Thread.sleep(80);
+        }
+        synchronized (CACHE_LOCK) {
+            if (!isCurrent(operationId)) return false;
+            if (session.find(info.infoHash()) != null) throw new IOException("Torrent cu chua dung, thu lai sau");
+            Priority[] priorities = new Priority[info.files().numFiles()];
+            for (int i = 0; i < priorities.length; i++) priorities[i] = Priority.IGNORE;
+            session.download(info, directory, null, priorities, null, TorrentFlags.SEQUENTIAL_DOWNLOAD);
+        }
+        long deadline = System.currentTimeMillis() + 10000;
+        TorrentHandle candidate = null;
+        while (candidate == null && System.currentTimeMillis() < deadline) {
+            candidate = session.find(info.infoHash());
+            if (candidate == null) Thread.sleep(100);
+        }
+        synchronized (CACHE_LOCK) {
+            if (!isCurrent(operationId)) {
+                if (candidate != null && candidate.isValid()) session.remove(candidate);
+                return false;
+            }
+            if (candidate == null) throw new IOException("Khong bat duoc torrent");
+            handle = candidate;
+            cachedInfo = info;
+            return true;
+        }
     }
 
     public void selectFile(int fileIndex, Callback cb) {
-        new Thread(() -> selectFileInternal(fileIndex, cb)).start();
+        final int operationId;
+        synchronized (CACHE_LOCK) {
+            if (cb != null) callback = cb;
+            operationId = lifecycleGeneration.get();
+        }
+        new Thread(() -> selectFileInternal(fileIndex, new ForwardingCallback(operationId), operationId)).start();
     }
 
-    private void selectFileInternal(int fileIndex, Callback cb) {
+    private void selectFileInternal(int fileIndex, Callback cb, int operationId) {
+        synchronized (CACHE_LOCK) {
+        if (!isCurrent(operationId) || !streamActive) return;
         if (handle == null || !handle.isValid() || cachedInfo == null) {
             handler.post(() -> cb.onError("Torrent chua san sang, thu lai sau"));
             return;
@@ -234,14 +280,18 @@ public class TorrentManager {
 
             selectedFileIndex = fileIndex;
             selectedVideoFile = new File(saveDir, fs.filePath(fileIndex));
+            if (!TorrentStorage.isDescendant(selectedVideoFile, saveDir)) {
+                throw new IOException("Duong dan video torrent khong hop le");
+            }
             readyCalled = false;
 
             prioritizeFileEnds(fileIndex);
-            startProxy(cb);
+            startProxy(cb, operationId);
 
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : "Loi chon file";
             handler.post(() -> cb.onError(msg));
+        }
         }
     }
 
@@ -295,33 +345,37 @@ public class TorrentManager {
         } catch (Exception ignored) {}
     }
 
-    private void startProxy(Callback cb) throws Exception {
+    private void startProxy(Callback cb, int operationId) throws Exception {
         if (proxyServer != null && !proxyServer.isClosed()) {
             try { proxyServer.close(); } catch (Exception ignored) {}
         }
         proxyServer = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
         proxyPort = proxyServer.getLocalPort();
         proxyRunning = true;
+        final ServerSocket server = proxyServer;
 
         new Thread(() -> {
-            while (proxyRunning) {
+            while (isCurrent(operationId) && proxyRunning) {
                 try {
-                    Socket client = proxyServer.accept();
+                    Socket client = server.accept();
                     client.setSoTimeout(60000);
-                    new Thread(() -> handleRequest(client)).start();
+                    new Thread(() -> handleRequest(client, operationId)).start();
                 } catch (Exception e) {
-                    if (!proxyRunning) break;
+                    if (!isCurrent(operationId) || !proxyRunning) break;
                 }
             }
         }).start();
 
-        startMonitor(cb);
+        startMonitor(cb, operationId);
     }
 
-    private void handleRequest(Socket socket) {
+    private void handleRequest(Socket socket, int operationId) {
         try (Socket s = socket;
              BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()));
              OutputStream out = s.getOutputStream()) {
+
+            if (!isCurrent(operationId)) return;
+            final TorrentHandle requestHandle = handle;
 
             String requestLine = in.readLine();
             if (requestLine == null) return;
@@ -360,20 +414,20 @@ public class TorrentManager {
                 out.write("HTTP/1.1 503 Not Ready\r\nContent-Length: 0\r\n\r\n".getBytes("UTF-8"));
                 return;
             }
-            if (pieceLen > 0 && handle != null && handle.isValid()) {
+            if (pieceLen > 0 && requestHandle != null && requestHandle.isValid()) {
                 long fileOffset = fs.fileOffset(fIdx);
                 int startPiece = (int) ((fileOffset + rangeStart) / pieceLen);
                 int endPieceOfFile = (int) ((fileOffset + fs.fileSize(fIdx) - 1) / pieceLen);
                 int reqEndPiece = Math.min(startPiece + 3, endPieceOfFile);
                 for (int i = startPiece; i <= reqEndPiece; i++) {
-                    try { handle.piecePriority(i, Priority.TOP_PRIORITY); } catch (Exception ignored) {}
+                    try { requestHandle.piecePriority(i, Priority.TOP_PRIORITY); } catch (Exception ignored) {}
                 }
                 // Tang thoi gian cho len 3 phut - tranh ngat giua video
                 // khi mang cham gay VLC hieu nham la het video
                 long deadline = System.currentTimeMillis() + 180000;
-                while (System.currentTimeMillis() < deadline && proxyRunning) {
-                    if (handle == null || !handle.isValid()) break;
-                    try { if (handle.havePiece(startPiece)) break; } catch (Exception ignored) { break; }
+                while (System.currentTimeMillis() < deadline && isCurrent(operationId) && proxyRunning) {
+                    if (!requestHandle.isValid()) break;
+                    try { if (requestHandle.havePiece(startPiece)) break; } catch (Exception ignored) { break; }
                     Thread.sleep(80);
                 }
             }
@@ -422,13 +476,13 @@ public class TorrentManager {
                 raf.seek(finalRangeStart);
                 byte[] buf = new byte[65536];
                 long left = finalContentLen;
-                while (proxyRunning && left > 0) {
-                    if (handle == null || !handle.isValid()) break;
+                while (isCurrent(operationId) && proxyRunning && left > 0) {
+                    if (requestHandle == null || !requestHandle.isValid()) break;
 
                     long positionInFile = finalContentLen - left + finalRangeStart;
                     long absoluteOffset = fs.fileOffset(fIdx) + positionInFile;
                     int piece = (int) (absoluteOffset / pieceLen);
-                    if (!waitForPiece(piece, 180000)) break;
+                    if (!waitForPiece(piece, 180000, operationId, requestHandle)) break;
 
                     long bytesToPieceEnd = pieceLen - (absoluteOffset % pieceLen);
                     int toRead = (int) Math.min(Math.min(buf.length, left), bytesToPieceEnd);
@@ -444,15 +498,14 @@ public class TorrentManager {
         } catch (Exception ignored) {}
     }
 
-    private boolean waitForPiece(int piece, long timeoutMs) throws InterruptedException {
-        TorrentHandle activeHandle = handle;
+    private boolean waitForPiece(int piece, long timeoutMs, int operationId,
+                                 TorrentHandle activeHandle) throws InterruptedException {
         if (activeHandle == null || !activeHandle.isValid()) return false;
         try { activeHandle.piecePriority(piece, Priority.TOP_PRIORITY); }
         catch (Exception ignored) {}
 
         long deadline = System.currentTimeMillis() + timeoutMs;
-        while (proxyRunning && System.currentTimeMillis() < deadline) {
-            activeHandle = handle;
+        while (isCurrent(operationId) && proxyRunning && System.currentTimeMillis() < deadline) {
             if (activeHandle == null || !activeHandle.isValid()) return false;
             try {
                 if (activeHandle.havePiece(piece)) return true;
@@ -464,11 +517,13 @@ public class TorrentManager {
         return false;
     }
 
-    private void startMonitor(Callback cb) {
+    private void startMonitor(Callback cb, int operationId) {
         if (monitorTimer != null) monitorTimer.cancel();
         monitorTimer = new Timer();
         monitorTimer.scheduleAtFixedRate(new TimerTask() {
             @Override public void run() {
+                synchronized (CACHE_LOCK) {
+                if (!isCurrent(operationId)) return;
                 if (handle == null || !handle.isValid()) return;
                 try {
                     TorrentStatus st = handle.status();
@@ -479,10 +534,14 @@ public class TorrentManager {
 
                     if (!lowStorageStopping && saveDir.getUsableSpace() > 0
                             && saveDir.getUsableSpace() < getReservedFreeSpace()) {
-                        lowStorageStopping = true;
-                        handler.post(() -> cb.onError(
-                            "Torrent da tu dung va don cache de bao ve bo nho trong"));
-                        TorrentManager.this.stopAndClearCache();
+                        synchronized (CACHE_LOCK) {
+                            if (!isCurrent(operationId)) return;
+                            lowStorageStopping = true;
+                            String message = autoCleanup
+                                ? "Torrent da tu dung va xoa du lieu tam de bao ve bo nho trong"
+                                : "Torrent da tu dung de bao ve bo nho trong; du lieu da tai van duoc giu lai";
+                            stopForStorage(message);
+                        }
                         return;
                     }
 
@@ -505,6 +564,7 @@ public class TorrentManager {
                         }
                     }
                 } catch (Exception ignored) {}
+                }
             }
         }, 500, 1000);
     }
@@ -525,18 +585,17 @@ public class TorrentManager {
         return list;
     }
 
-    private String extractHash(String magnet) {
-        try {
-            int s = magnet.indexOf("btih:") + 5;
-            if (s < 5) return "";
-            int e = magnet.indexOf("&", s);
-            String h = e < 0 ? magnet.substring(s) : magnet.substring(s, e);
-            return h.trim().toLowerCase();
-        } catch (Exception e) { return ""; }
+    public void stop() {
+        int stoppedId = stopInternal();
+        postCallback(stoppedId, Callback::onStopped);
     }
 
-    public void stop() {
+    private int stopInternal() {
+        synchronized (CACHE_LOCK) {
         lifecycleGeneration.incrementAndGet();
+        streamActive = false;
+        playbackSessionId = null;
+        if (activeInstance == this) activeInstance = null;
         proxyRunning = false;
         if (monitorTimer != null) { monitorTimer.cancel(); monitorTimer = null; }
         try { if (proxyServer != null && !proxyServer.isClosed()) proxyServer.close(); }
@@ -556,15 +615,41 @@ public class TorrentManager {
                 if (oldHandle.isValid()) session.remove(oldHandle);
             } catch (Exception ignored) {}
         }
+        return lifecycleGeneration.get();
+        }
     }
 
     public void stopAndClearCache() {
-        stop();
-        final int cleanupId = lifecycleGeneration.get();
-        if (activeInstance == this) activeInstance = null;
-        new Thread(() -> {
-            if (isCurrent(cleanupId)) clearCacheWithRetries(true);
-        }).start();
+        stopAndClearCache(null);
+    }
+
+    private void stopAndClearCache(String errorAfterCleanup) {
+        final long cleanupGeneration = autoCleanup ? temporaryGeneration
+            : TEMPORARY_OWNERSHIP.current(temporaryDirectory);
+        final int cleanupId = stopInternal();
+        final File cleanupDirectory = temporaryDirectory;
+        START_EXECUTOR.execute(() -> {
+            boolean cleared = clearCacheWithRetries(cleanupDirectory, true, cleanupId, cleanupGeneration, true);
+            synchronized (CACHE_LOCK) {
+                if (!TEMPORARY_OWNERSHIP.isCurrent(cleanupDirectory, cleanupGeneration)) return;
+            }
+            postCallback(cleanupId, target -> {
+                if (!cleared) target.onError("Torrent da dung; khong the xoa het du lieu tam");
+                else if (errorAfterCleanup != null) target.onError(errorAfterCleanup);
+                else target.onStopped();
+            });
+        });
+    }
+
+    private void stopForStorage(String message) {
+        if (autoCleanup) {
+            stopAndClearCache(message);
+        } else {
+            int stoppedId = stopInternal();
+            postCallback(stoppedId, target -> {
+                target.onError(message);
+            });
+        }
     }
 
     private boolean isCurrent(int operationId) {
@@ -572,50 +657,213 @@ public class TorrentManager {
     }
 
     public static void stopActiveAndCleanup(Context context) {
-        TorrentManager manager = activeInstance;
-        if (manager != null) manager.stopAndClearCache();
-        else cleanupOrphanedCache(context);
+        stopActive(context);
     }
 
-    public void destroy() {
-        stopAndClearCache();
-    }
-
-    private void clearCacheWithRetries(boolean recreateDirectory) {
+    public static void stopActive(Context context) {
         synchronized (CACHE_LOCK) {
-            for (int attempt = 0; attempt < 3 && saveDir.exists(); attempt++) {
-                deleteDir(saveDir);
-                if (saveDir.exists()) {
-                    try { Thread.sleep(150L * (attempt + 1)); }
-                    catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
-            if (recreateDirectory && !saveDir.exists()) saveDir.mkdirs();
+            TorrentManager manager = activeInstance;
+            if (manager != null) manager.destroy();
+            else cleanupOrphanedCache(context);
         }
     }
 
+    public static void finishPlayback(Context context, String sessionId) {
+        if (sessionId == null) return;
+        synchronized (CACHE_LOCK) {
+            TorrentManager manager = activeInstance;
+            if (manager != null && sessionId.equals(manager.playbackSessionId)) manager.destroy();
+        }
+    }
+
+    public String getPlaybackSessionId() {
+        return playbackSessionId;
+    }
+
+    public boolean isAutoCleanupEnabled() {
+        return autoCleanup;
+    }
+
+    public static TorrentManager getActiveManager() {
+        synchronized (CACHE_LOCK) {
+            return activeInstance != null && activeInstance.streamActive ? activeInstance : null;
+        }
+    }
+
+    public void destroy() {
+        synchronized (CACHE_LOCK) {
+            // A manager created only for browsing retained files owns no cache.
+            if (playbackSessionId == null) return;
+            if (autoCleanup) stopAndClearCache();
+            else stop();
+        }
+    }
+
+    private boolean clearCacheWithRetries(File directory, boolean recreateDirectory, int operationId,
+                                          long storageGeneration, boolean stoppedCleanup) {
+        boolean cleared = false;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            synchronized (CACHE_LOCK) {
+                if (!canModifyTemporaryDirectory(directory, operationId, storageGeneration, stoppedCleanup)) return false;
+                cleared = TorrentStorage.clearTemporaryDirectory(directory, retainedRoot);
+                if (cleared) break;
+            }
+            try { Thread.sleep(150L * (attempt + 1)); }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        synchronized (CACHE_LOCK) {
+            if (!canModifyTemporaryDirectory(directory, operationId, storageGeneration, stoppedCleanup)) return false;
+            if (recreateDirectory && !directory.exists()) directory.mkdirs();
+        }
+        return cleared;
+    }
+
+    private boolean canModifyTemporaryDirectory(File directory, int operationId,
+                                                long storageGeneration, boolean stoppedCleanup) {
+        // A retained replacement does not own temporary bytes. Only a newer
+        // temporary stream revokes old cleanup, independently of UI generations.
+        if ((!stoppedCleanup && !isCurrent(operationId)) || !sameFile(directory, temporaryDirectory)
+                || !TEMPORARY_OWNERSHIP.isCurrent(directory, storageGeneration)) return false;
+        TorrentManager active = activeInstance;
+        return active == null || (!stoppedCleanup && active == this) || !active.streamActive
+            || !active.autoCleanup || !sameFile(active.temporaryDirectory, directory);
+    }
+
+    public void attachCallback(Callback uiCallback) {
+        synchronized (CACHE_LOCK) {
+            callback = uiCallback;
+            Callback current = new ForwardingCallback(lifecycleGeneration.get());
+            if (!streamActive) {
+                current.onStopped();
+            } else if (cachedInfo != null && selectedFileIndex < 0) {
+                current.onFilesFound(listVideoFiles(cachedInfo));
+            } else if (readyCalled && proxyRunning) {
+                current.onReady("http://127.0.0.1:" + proxyPort + "/stream");
+            } else {
+                current.onStatusUpdate(lastStatus);
+            }
+        }
+    }
+
+    public void detachCallback(Callback uiCallback) {
+        synchronized (CACHE_LOCK) {
+            if (callback == uiCallback) callback = null;
+        }
+    }
+
+    private interface CallbackAction { void run(Callback target); }
+
+    private void postCallback(int operationId, CallbackAction action) {
+        handler.post(() -> {
+            Callback target;
+            synchronized (CACHE_LOCK) {
+                if (!isCurrent(operationId)) return;
+                target = callback;
+            }
+            if (target != null) action.run(target);
+        });
+    }
+
+    private final class ForwardingCallback implements Callback {
+        private final int operationId;
+        ForwardingCallback(int operationId) { this.operationId = operationId; }
+        @Override public void onProgress(int progress, float speed) {
+            postCallback(operationId, target -> target.onProgress(progress, speed));
+        }
+        @Override public void onReady(String url) {
+            postCallback(operationId, target -> target.onReady(url));
+        }
+        @Override public void onError(String error) {
+            postCallback(operationId, target -> target.onError(error));
+        }
+        @Override public void onStopped() { postCallback(operationId, Callback::onStopped); }
+        @Override public void onStatusUpdate(String status) {
+            if (isCurrent(operationId)) lastStatus = status;
+            postCallback(operationId, target -> target.onStatusUpdate(status));
+        }
+        @Override public void onFilesFound(List<VideoFileEntry> files) {
+            List<VideoFileEntry> snapshot = new ArrayList<>(files);
+            postCallback(operationId, target -> target.onFilesFound(snapshot));
+        }
+    }
+
+    public static File getRetainedDirectory(Context context) {
+        return new File(context.getFilesDir(), "torrent_downloads");
+    }
+
+    public static List<File> getStorageDirectories(Context context) {
+        List<File> roots = getTemporaryDirectories(context);
+        roots.add(getRetainedDirectory(context));
+        return roots;
+    }
+
+    private static List<File> getTemporaryDirectories(Context context) {
+        List<File> roots = new ArrayList<>();
+        roots.add(new File(context.getCacheDir(), "torrent_stream"));
+        File[] externalRoots = context.getExternalCacheDirs();
+        if (externalRoots != null) {
+            for (File external : externalRoots) {
+                if (external == null) continue;
+                File candidate = new File(external, "torrent_stream");
+                boolean duplicate = false;
+                for (File root : roots) if (sameFile(root, candidate)) duplicate = true;
+                if (!duplicate) roots.add(candidate);
+            }
+        }
+        return roots;
+    }
+
+    public static String getResumeSource(Context context, File video) {
+        if (video == null) return null;
+        try { return TorrentStorage.resumeSource(getRetainedDirectory(context), video); }
+        catch (IOException ignored) { return null; }
+    }
+
+    public static boolean deleteStoredFile(Context context, File video) {
+        if (video == null) return false;
+        synchronized (CACHE_LOCK) {
+            TorrentManager active = activeInstance;
+            try {
+                if (active != null && active.streamActive
+                        && TorrentStorage.isDescendant(video, active.saveDir)) return false;
+            } catch (IOException ignored) { return false; }
+            return TorrentStorage.deleteStoredFile(video, getStorageDirectories(context));
+        }
+    }
+
+    public static String prepareStoredPlayback(Context context, File video) {
+        synchronized (CACHE_LOCK) {
+            return STORED_PLAYBACK_TOKENS.prepare(video, getStorageDirectories(context));
+        }
+    }
+
+    public static boolean finishStoredPlayback(Context context, String token) {
+        synchronized (CACHE_LOCK) {
+            File video = STORED_PLAYBACK_TOKENS.take(token);
+            return video != null && deleteStoredFile(context, video);
+        }
+    }
+
+    public static void discardStoredPlayback(String token) {
+        STORED_PLAYBACK_TOKENS.take(token);
+    }
+
     public static void cleanupOrphanedCache(Context context) {
-        new Thread(() -> {
+        final Context appContext = context.getApplicationContext();
+        START_EXECUTOR.execute(() -> {
             synchronized (CACHE_LOCK) {
                 TorrentManager active = activeInstance;
-                File internal = new File(context.getCacheDir(), "torrent_stream");
-                if (active == null || !active.isStreaming()
-                        || !sameFile(active.saveDir, internal)) deleteDir(internal);
-                File[] externalRoots = context.getExternalCacheDirs();
-                if (externalRoots != null) {
-                    for (File root : externalRoots) {
-                        if (root == null) continue;
-                        File external = new File(root, "torrent_stream");
-                        if (!sameFile(external, internal)
-                                && (active == null || !active.isStreaming()
-                                || !sameFile(active.saveDir, external))) deleteDir(external);
+                for (File directory : getTemporaryDirectories(appContext)) {
+                    if (active == null || !active.streamActive || !active.autoCleanup
+                            || !sameFile(active.temporaryDirectory, directory)) {
+                        TorrentStorage.clearTemporaryDirectory(directory, getRetainedDirectory(appContext));
                     }
                 }
             }
-        }).start();
+        });
     }
 
     public static File getCacheDirectory(Context context) {
@@ -633,18 +881,7 @@ public class TorrentManager {
     }
 
     private static boolean sameFile(File first, File second) {
-        if (first == null || second == null) return false;
-        try { return first.getCanonicalFile().equals(second.getCanonicalFile()); }
-        catch (IOException ignored) { return first.getAbsolutePath().equals(second.getAbsolutePath()); }
-    }
-
-    private static void deleteDir(File dir) {
-        if (dir == null || !dir.exists()) return;
-        File[] files = dir.listFiles();
-        if (files != null) for (File f : files) {
-            if (f.isDirectory()) deleteDir(f); else f.delete();
-        }
-        dir.delete();
+        return TorrentStorage.sameFile(first, second);
     }
 
     public boolean isStreaming() {
