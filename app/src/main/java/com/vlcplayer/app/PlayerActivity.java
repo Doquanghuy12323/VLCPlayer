@@ -45,19 +45,19 @@ import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 import org.videolan.libvlc.util.VLCVideoLayout;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 public class PlayerActivity extends AppCompatActivity {
@@ -107,6 +107,24 @@ public class PlayerActivity extends AppCompatActivity {
     private float playbackSpeed = 1.0f;
 
     private String uriString, videoTitle;
+    private static final String SUBTITLE_SOURCE_PREF = "subtitle_translation_source";
+    private static final int MAX_SUBTITLE_BYTES = 4 * 1024 * 1024;
+    private final ExecutorService subtitleExecutor = Executors.newSingleThreadExecutor();
+    private volatile int subtitleOperationGeneration;
+    private int subtitleMediaGeneration;
+    private int subtitlePickerMediaGeneration;
+    private volatile HttpURLConnection subtitleDownloadConnection;
+    private volatile InputStream subtitleReadStream;
+    private Future<?> subtitleIoFuture;
+    private TranslationManager.SrtTranslationTask subtitleTranslationTask;
+    private ProgressDialog subtitleProgressDialog;
+    private String subtitlePickerVideoUri;
+    private TranslationManager translationManager;
+    private final ArrayList<File> attachedSubtitleFiles = new ArrayList<>();
+    private File selectedExternalSubtitleFile;
+    private boolean subtitleOffSelected;
+    private boolean discardAttachedSubtitlesOnNextMedia;
+    private int subtitleRestorePendingGeneration = -1;
     private HandyManager handyManager;
     private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
     private GestureDetector gestureDetector;
@@ -148,6 +166,10 @@ public class PlayerActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String[]> funscriptPicker =
         registerForActivityResult(new ActivityResultContracts.OpenDocument(),
             this::onFunscriptPicked);
+
+    private final ActivityResultLauncher<String[]> subtitlePicker =
+        registerForActivityResult(new ActivityResultContracts.OpenDocument(),
+            this::onSubtitlePicked);
 
     private final Runnable handyCorrectionSync = () -> {
         if (handyManager == null || mediaPlayer == null
@@ -211,6 +233,7 @@ public class PlayerActivity extends AppCompatActivity {
             | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
         setContentView(R.layout.activity_player);
         hideSystemUI();
+        pruneCachedSubtitleFiles();
 
         DisplayMetrics dm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(dm);
@@ -250,6 +273,7 @@ public class PlayerActivity extends AppCompatActivity {
         setupButtons();
         setupGestures();
         setupVLC();
+        translationManager = new TranslationManager(this);
         handyManager = new HandyManager(this);
 
         if (uriString != null) {
@@ -327,9 +351,8 @@ public class PlayerActivity extends AppCompatActivity {
             getString(R.string.player_pip),
             getString(R.string.player_aspect),
             getString(R.string.player_lock),
-            getString(R.string.player_translate),
-            getString(R.string.player_funscript),
-            getString(R.string.player_audio_track)
+            getString(R.string.player_audio_subtitles),
+            getString(R.string.player_funscript)
         };
         new AlertDialog.Builder(this)
             .setTitle(R.string.player_more)
@@ -341,9 +364,27 @@ public class PlayerActivity extends AppCompatActivity {
                     case 3: enterPiP(); break;
                     case 4: cycleAspectRatio(); break;
                     case 5: toggleLock(); break;
-                    case 6: openGeminiChat(); break;
+                    case 6: showAudioSubtitlesDialog(); break;
                     case 7: showFunscriptDialog(); break;
-                    case 8: showAudioTrackDialog(); break;
+                }
+            }).show();
+    }
+
+    private void showAudioSubtitlesDialog() {
+        String[] actions = {
+            getString(R.string.player_audio_track),
+            getString(R.string.player_subtitle_track),
+            getString(R.string.player_local_srt),
+            getString(R.string.player_translate)
+        };
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.player_audio_subtitles)
+            .setItems(actions, (dialog, which) -> {
+                switch (which) {
+                    case 0: showAudioTrackDialog(); break;
+                    case 1: showSubtitleTrackDialog(); break;
+                    case 2: pickLocalSrt(); break;
+                    case 3: showAiSubtitleDialog(); break;
                 }
             }).show();
     }
@@ -476,6 +517,7 @@ public class PlayerActivity extends AppCompatActivity {
                         handlingPlaybackError = false;
                         cancelPlaybackRetry();
                         restorePendingRecoveryPosition();
+                        restoreAttachedSubtitlesIfNeeded();
                         startPlaybackClockEstimate(getBestKnownPlaybackPosition());
                         btnPlayPause.setImageResource(android.R.drawable.ic_media_pause);
                         handler.postDelayed(() -> applyScaleMode(), 200);
@@ -882,6 +924,11 @@ public class PlayerActivity extends AppCompatActivity {
         userPaused = false;
         resumeAfterFocusLoss = false;
         boolean mediaChanged = pendingUri == null || !uri.equals(pendingUri);
+        boolean discardSubtitles = mediaChanged || discardAttachedSubtitlesOnNextMedia;
+        discardAttachedSubtitlesOnNextMedia = false;
+        subtitleMediaGeneration++;
+        cancelSubtitleOperation();
+        subtitleRestorePendingGeneration = -1;
         if (restoreSavedHistory) {
             lastKnownPlaybackPositionMs = 0L;
             lastKnownMediaDurationMs = -1L;
@@ -939,6 +986,9 @@ public class PlayerActivity extends AppCompatActivity {
             media.addOption(":codec=mediacodec_ndk,mediacodec,omxil,any");
             mediaPlayer.setMedia(media);
             media.release();
+            if (discardSubtitles) clearAttachedSubtitleFiles();
+            else if (!attachedSubtitleFiles.isEmpty() || subtitleOffSelected)
+                subtitleRestorePendingGeneration = subtitleMediaGeneration;
             if (requestAudioFocus()) mediaPlayer.play();
             else if (audioFocusRequested) resumeAfterFocusLoss = true;
             else Toast.makeText(this, "Không thể lấy quyền phát âm thanh", Toast.LENGTH_SHORT).show();
@@ -1071,82 +1121,206 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
 
-    private void openGeminiChat() {
-        TranslationManager tm = new TranslationManager(this);
-        String[] opts = {"Dich subtitle tu URL", "Doi ngon ngu (hien tai: " + tm.getTargetLanguageName() + ")"};
-        new AlertDialog.Builder(this).setTitle("Dich AI")
-            .setItems(opts, (d, which) -> { if (which == 0) showSrtUrlInput(); else showChangeLangDialog(); }).show();
+    private void showAiSubtitleDialog() {
+        String source = getSubtitleSourceLanguage();
+        String target = translationManager.getTargetLanguage();
+        String[] actions = {
+            getString(R.string.player_ai_source, languageName(source)),
+            getString(R.string.player_ai_target, languageName(target)),
+            getString(R.string.player_ai_url)
+        };
+        new AlertDialog.Builder(this).setTitle(R.string.player_translate)
+            .setItems(actions, (dialog, which) -> {
+                switch (which) {
+                    case 0: showSubtitleLanguageDialog(true); break;
+                    case 1: showSubtitleLanguageDialog(false); break;
+                    case 2: showSrtUrlInput(); break;
+                }
+            }).show();
     }
 
-    private void showChangeLangDialog() {
-        TranslationManager tm = new TranslationManager(this);
-        String[][] langs = TranslationManager.LANGUAGES;
-        String[] names = new String[langs.length];
-        String cur = tm.getTargetLanguage();
-        int curIdx = 0;
-        for (int i = 0; i < langs.length; i++) { names[i] = langs[i][0]; if (langs[i][1].equals(cur)) curIdx = i; }
-        final int[] sel = {curIdx};
-        new AlertDialog.Builder(this).setTitle("Chon ngon ngu")
-            .setSingleChoiceItems(names, curIdx, (d, w) -> sel[0] = w)
-            .setPositiveButton("Luu", (d, w) -> {
-                tm.setTargetLanguage(langs[sel[0]][1]);
-                Toast.makeText(this, "Da chon: " + langs[sel[0]][0], Toast.LENGTH_SHORT).show();
-            }).setNegativeButton("Huy", null).show();
+    private String getSubtitleSourceLanguage() {
+        return getPreferences(MODE_PRIVATE).getString(SUBTITLE_SOURCE_PREF, "en");
+    }
+
+    private String languageName(String code) {
+        Locale locale = Locale.forLanguageTag(code);
+        return locale.getDisplayLanguage(getResources().getConfiguration().locale);
+    }
+
+    private void showSubtitleLanguageDialog(boolean source) {
+        String[][] languages = TranslationManager.LANGUAGES;
+        String[] names = new String[languages.length];
+        String selectedCode = source ? getSubtitleSourceLanguage()
+            : translationManager.getTargetLanguage();
+        int currentIndex = -1;
+        for (int i = 0; i < languages.length; i++) {
+            names[i] = languageName(languages[i][1]);
+            if (languages[i][1].equals(selectedCode)) currentIndex = i;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle(source ? R.string.player_ai_source_title : R.string.player_ai_target_title)
+            .setSingleChoiceItems(names, currentIndex, (dialog, which) -> {
+                if (source) {
+                    getPreferences(MODE_PRIVATE).edit()
+                        .putString(SUBTITLE_SOURCE_PREF, languages[which][1]).apply();
+                } else {
+                    translationManager.setTargetLanguage(languages[which][1]);
+                }
+                dialog.dismiss();
+                showAiSubtitleDialog();
+            })
+            .setNegativeButton(R.string.player_ai_cancel, null).show();
     }
 
     private void showSrtUrlInput() {
-        EditText input = new EditText(this);
-        input.setHint("https://example.com/subtitle.srt");
-        new AlertDialog.Builder(this).setTitle("URL file SRT").setView(input)
-            .setPositiveButton("Dich", (d, w) -> {
-                String url = input.getText().toString().trim();
-                if (!url.isEmpty()) startSrtDownloadAndTranslate(url);
-            }).setNegativeButton("Huy", null).show();
-    }
-
-    private void startSrtDownloadAndTranslate(String url) {
-        ProgressDialog pd = new ProgressDialog(this);
-        pd.setMessage("Dang tai subtitle..."); pd.setCancelable(false); pd.show();
-        new Thread(() -> {
-            try {
-                HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-                conn.setConnectTimeout(15000);
-                conn.setReadTimeout(15000);
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0");
-                conn.setInstanceFollowRedirects(true);
-                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                StringBuilder sb = new StringBuilder();
-                String ln;
-                while ((ln = br.readLine()) != null) sb.append(ln).append("\n");
-                br.close();
-                final String srt = sb.toString();
-                runOnUiThread(() -> pd.setMessage("Dang dich..."));
-                TranslationManager tm = new TranslationManager(this);
-                tm.translateSrt(srt, "auto",
-                    msg -> runOnUiThread(() -> pd.setMessage(msg)),
-                    new TranslationManager.TranslateCallback() {
-                        @Override public void onSuccess(String t) {
-                            runOnUiThread(() -> { pd.dismiss(); saveSrtAndLoad(t); });
-                        }
-                        @Override public void onError(String e) {
-                            runOnUiThread(() -> { pd.dismiss(); Toast.makeText(PlayerActivity.this, e, Toast.LENGTH_SHORT).show(); });
-                        }
-                    });
-            } catch (Exception e) {
-                runOnUiThread(() -> { pd.dismiss(); Toast.makeText(this, "Loi tai: " + e.getMessage(), Toast.LENGTH_SHORT).show(); });
-            }
-        }).start();
-    }
-
-    private void saveSrtAndLoad(String srtContent) {
-        try {
-            File f = new File(getExternalFilesDir(null), "translated.srt");
-            FileWriter fw = new FileWriter(f); fw.write(srtContent); fw.close();
-            if (mediaPlayer != null) mediaPlayer.addSlave(Media.Slave.Type.Subtitle, Uri.fromFile(f).toString(), true);
-            Toast.makeText(this, "Da dich va load subtitle!", Toast.LENGTH_LONG).show();
-        } catch (Exception e) {
-            Toast.makeText(this, "Loi luu: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        String source = getSubtitleSourceLanguage();
+        String target = translationManager.getTargetLanguage();
+        if (source.equals(target)) {
+            Toast.makeText(this, R.string.player_ai_same_language, Toast.LENGTH_LONG).show();
+            return;
         }
+        EditText input = new EditText(this);
+        input.setHint(R.string.player_ai_url_hint);
+        input.setSingleLine(true);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+            | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.player_ai_url)
+            .setMessage(getString(R.string.player_ai_pair,
+                languageName(source), languageName(target)))
+            .setView(input)
+            .setPositiveButton(R.string.player_ai_translate, (dialog, which) ->
+                startSrtDownloadAndTranslate(input.getText().toString().trim(), source))
+            .setNegativeButton(R.string.player_ai_cancel, null).show();
+    }
+
+    private void startSrtDownloadAndTranslate(String url, String source) {
+        Uri parsed = Uri.parse(url);
+        String scheme = parsed.getScheme();
+        if (scheme == null || (!"http".equalsIgnoreCase(scheme)
+                && !"https".equalsIgnoreCase(scheme))) {
+            Toast.makeText(this, R.string.player_ai_url_invalid, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (source.equals(translationManager.getTargetLanguage())) {
+            Toast.makeText(this, R.string.player_ai_same_language, Toast.LENGTH_LONG).show();
+            return;
+        }
+        cancelSubtitleOperation();
+        final int generation = ++subtitleOperationGeneration;
+        final String videoUri = uriString;
+        ProgressDialog progress = new ProgressDialog(this);
+        progress.setMessage(getString(R.string.player_ai_downloading));
+        progress.setCancelable(true);
+        progress.setCanceledOnTouchOutside(false);
+        progress.setButton(android.content.DialogInterface.BUTTON_NEGATIVE,
+            getString(R.string.player_ai_cancel), (dialog, which) -> cancelSubtitleOperation());
+        progress.setOnCancelListener(dialog -> cancelSubtitleOperation());
+        subtitleProgressDialog = progress;
+        progress.show();
+
+        subtitleIoFuture = subtitleExecutor.submit(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(url).openConnection();
+                subtitleDownloadConnection = connection;
+                if (generation != subtitleOperationGeneration
+                        || Thread.currentThread().isInterrupted()) return;
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(15000);
+                connection.setRequestProperty("User-Agent", "VLCPlayer");
+                connection.setInstanceFollowRedirects(true);
+                int status = connection.getResponseCode();
+                if (status < 200 || status >= 300) {
+                    throw new IOException("HTTP " + status);
+                }
+                byte[] bytes;
+                try (InputStream input = connection.getInputStream()) {
+                    bytes = readSubtitleBytes(input);
+                }
+                validateSrt(bytes);
+                if (generation != subtitleOperationGeneration
+                        || Thread.currentThread().isInterrupted()) return;
+                String srt = new String(bytes, StandardCharsets.UTF_8);
+                runOnUiThread(() -> {
+                    if (!isCurrentSubtitleOperation(generation, videoUri)) return;
+                    progress.setMessage(getString(R.string.player_ai_translating));
+                    subtitleTranslationTask = translationManager.translateSrt(srt, source,
+                        message -> runOnUiThread(() -> {
+                            if (!isCurrentSubtitleOperation(generation, videoUri)) return;
+                            java.util.regex.Matcher percentage = java.util.regex.Pattern
+                                .compile("(\\d{1,3})%").matcher(message);
+                            if (percentage.find()) {
+                                progress.setMessage(getString(R.string.player_ai_progress,
+                                    Integer.parseInt(percentage.group(1))));
+                            } else progress.setMessage(getString(R.string.player_ai_translating));
+                        }), new TranslationManager.TranslateCallback() {
+                            @Override public void onSuccess(String translated) {
+                                runOnUiThread(() -> saveTranslatedSubtitle(
+                                    translated, generation, videoUri));
+                            }
+                            @Override public void onError(String error) {
+                                runOnUiThread(() -> {
+                                    if (!isCurrentSubtitleOperation(generation, videoUri)) return;
+                                    finishSubtitleOperation();
+                                    Toast.makeText(PlayerActivity.this,
+                                        getString(R.string.player_ai_translation_failed, error),
+                                        Toast.LENGTH_LONG).show();
+                                });
+                            }
+                        });
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (!isCurrentSubtitleOperation(generation, videoUri)) return;
+                    finishSubtitleOperation();
+                    Toast.makeText(this,
+                        getString(R.string.player_ai_download_failed, e.getMessage()),
+                        Toast.LENGTH_LONG).show();
+                });
+            } finally {
+                if (connection != null) connection.disconnect();
+                if (subtitleDownloadConnection == connection)
+                    subtitleDownloadConnection = null;
+            }
+        });
+    }
+
+    private void saveTranslatedSubtitle(String translated, int generation, String videoUri) {
+        if (!isCurrentSubtitleOperation(generation, videoUri)) return;
+        subtitleIoFuture = subtitleExecutor.submit(() -> {
+            File file = null;
+            try {
+                file = createSubtitleCacheFile();
+                byte[] bytes = translated.getBytes(StandardCharsets.UTF_8);
+                if (bytes.length > MAX_SUBTITLE_BYTES)
+                    throw new IOException(getString(R.string.player_subtitle_too_large));
+                try (FileOutputStream output = new FileOutputStream(file)) {
+                    output.write(bytes);
+                }
+                final File result = file;
+                runOnUiThread(() -> {
+                    if (!isCurrentSubtitleOperation(generation, videoUri)) {
+                        result.delete();
+                        return;
+                    }
+                    boolean attached = attachSubtitleFile(result);
+                    finishSubtitleOperation();
+                    if (attached) Toast.makeText(this,
+                        R.string.player_ai_translation_done, Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception e) {
+                if (file != null) file.delete();
+                runOnUiThread(() -> {
+                    if (!isCurrentSubtitleOperation(generation, videoUri)) return;
+                    finishSubtitleOperation();
+                    Toast.makeText(this,
+                        getString(R.string.player_subtitle_load_failed, e.getMessage()),
+                        Toast.LENGTH_LONG).show();
+                });
+            }
+        });
     }
 
     // Overlay trai (do sang) va phai (am luong)
@@ -1984,6 +2158,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     @Override protected void onStop() {
         super.onStop();
+        cancelSubtitleOperation();
         isInBackground = true;
         blockHandyPlayback();
         resumeAfterBackground = mediaPlayer != null && !userPaused
@@ -2016,6 +2191,8 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     @Override protected void onDestroy() {
+        cancelSubtitleOperation();
+        subtitleExecutor.shutdownNow();
         funscriptOperationGeneration++;
         if (funscriptDialog != null) funscriptDialog.dismiss();
         cancelPlaybackRecoveryCallbacks();
@@ -2027,6 +2204,7 @@ public class PlayerActivity extends AppCompatActivity {
         broadcastAudioSessionClose();
         handler.removeCallbacksAndMessages(null);
         if (mediaPlayer != null) mediaPlayer.release();
+        clearAttachedSubtitleFiles();
         if (libVLC != null) libVLC.release();
         if (!isChangingConfigurations()) finishTorrentPlayback();
         // Let the final history write queued by onStop complete before exit.
@@ -2172,34 +2350,287 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showAudioTrackDialog() {
         if (mediaPlayer == null) return;
-        org.videolan.libvlc.MediaPlayer.TrackDescription[] tracks = mediaPlayer.getAudioTracks();
+        MediaPlayer.TrackDescription[] tracks = mediaPlayer.getAudioTracks();
         if (tracks == null || tracks.length == 0) {
-            Toast.makeText(this, "Khong co audio track", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.player_audio_empty, Toast.LENGTH_SHORT).show();
             return;
         }
+        final String videoUri = uriString;
+        final int mediaGeneration = subtitleMediaGeneration;
+        int current = mediaPlayer.getAudioTrack();
+        int currentIndex = -1;
         String[] names = new String[tracks.length];
         for (int i = 0; i < tracks.length; i++) {
-            String tname = tracks[i].name;
-            if (tname == null || tname.isEmpty() || tname.equals("-1"))
-                tname = "Track " + (i + 1);
-            names[i] = (tracks[i].id == mediaPlayer.getAudioTrack() ? "▶ " : "   ") + tname;
+            String name = tracks[i].name;
+            names[i] = name == null || name.trim().isEmpty() || "-1".equals(name)
+                ? getString(R.string.player_track_fallback, i + 1) : name;
+            if (tracks[i].id == current) currentIndex = i;
         }
-        int current = mediaPlayer.getAudioTrack();
-        int currentIdx = 0;
-        for (int i = 0; i < tracks.length; i++) {
-            if (tracks[i].id == current) { currentIdx = i; break; }
-        }
-        final org.videolan.libvlc.MediaPlayer.TrackDescription[] finalTracks = tracks;
-        new androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Chon audio track")
-            .setSingleChoiceItems(names, currentIdx, (d, which) -> {
-                mediaPlayer.setAudioTrack(finalTracks[which].id);
-                Toast.makeText(this, "Da chon: " + names[which], Toast.LENGTH_SHORT).show();
-                d.dismiss();
-
-
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.player_audio_track)
+            .setSingleChoiceItems(names, currentIndex, (dialog, which) -> {
+                if (!isCurrentSubtitleMedia(videoUri, mediaGeneration)) {
+                    dialog.dismiss();
+                    Toast.makeText(this, R.string.player_media_changed,
+                        Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (tracks[which].id == current) {
+                    dialog.dismiss();
+                    return;
+                }
+                boolean selected;
+                try { selected = mediaPlayer.setAudioTrack(tracks[which].id); }
+                catch (Exception e) { selected = false; }
+                if (selected) dialog.dismiss();
+                else Toast.makeText(this, R.string.player_audio_select_failed,
+                    Toast.LENGTH_SHORT).show();
             })
-            .setNegativeButton("Huy", null).show();
+            .setNegativeButton(R.string.player_ai_cancel, null).show();
+    }
+
+    private void showSubtitleTrackDialog() {
+        if (mediaPlayer == null) return;
+        final String videoUri = uriString;
+        final int mediaGeneration = subtitleMediaGeneration;
+        MediaPlayer.TrackDescription[] tracks = mediaPlayer.getSpuTracks();
+        int current = mediaPlayer.getSpuTrack();
+        ArrayList<Integer> ids = new ArrayList<>();
+        ArrayList<String> names = new ArrayList<>();
+        ids.add(-1);
+        names.add(getString(R.string.player_subtitle_off));
+        int currentIndex = current == -1 ? 0 : -1;
+        if (tracks != null) {
+            for (MediaPlayer.TrackDescription track : tracks) {
+                if (track.id == -1) continue;
+                ids.add(track.id);
+                String name = track.name;
+                names.add(name == null || name.trim().isEmpty() || "-1".equals(name)
+                    ? getString(R.string.player_track_fallback, names.size()) : name);
+                if (track.id == current) currentIndex = ids.size() - 1;
+            }
+        }
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.player_subtitle_track)
+            .setSingleChoiceItems(names.toArray(new String[0]), currentIndex,
+                (dialog, which) -> {
+                    if (!isCurrentSubtitleMedia(videoUri, mediaGeneration)) {
+                        dialog.dismiss();
+                        Toast.makeText(this, R.string.player_media_changed,
+                            Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (ids.get(which) == current) {
+                        dialog.dismiss();
+                        return;
+                    }
+                    boolean selected;
+                    try { selected = mediaPlayer.setSpuTrack(ids.get(which)); }
+                    catch (Exception e) { selected = false; }
+                    if (selected) {
+                        subtitleOffSelected = ids.get(which) == -1;
+                        selectedExternalSubtitleFile = null;
+                        dialog.dismiss();
+                    } else Toast.makeText(this, R.string.player_subtitle_select_failed,
+                        Toast.LENGTH_SHORT).show();
+                })
+            .setNegativeButton(R.string.player_ai_cancel, null).show();
+    }
+
+    private void pickLocalSrt() {
+        subtitlePickerVideoUri = uriString;
+        subtitlePickerMediaGeneration = subtitleMediaGeneration;
+        subtitlePicker.launch(new String[]{"application/x-subrip", "text/plain", "*/*"});
+    }
+
+    private void onSubtitlePicked(Uri pickedUri) {
+        String videoUri = subtitlePickerVideoUri;
+        int mediaGeneration = subtitlePickerMediaGeneration;
+        subtitlePickerVideoUri = null;
+        if (pickedUri == null || videoUri == null) return;
+        if (!isCurrentSubtitleMedia(videoUri, mediaGeneration)) {
+            Toast.makeText(this, R.string.player_subtitle_video_changed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        cancelSubtitleOperation();
+        final int generation = ++subtitleOperationGeneration;
+        subtitleIoFuture = subtitleExecutor.submit(() -> {
+            File file = null;
+            try {
+                byte[] bytes;
+                try (InputStream input = getContentResolver().openInputStream(pickedUri)) {
+                    if (input == null)
+                        throw new IOException(getString(R.string.player_subtitle_open_failed));
+                    bytes = readSubtitleBytes(input);
+                }
+                validateSrt(bytes);
+                file = createSubtitleCacheFile();
+                try (FileOutputStream output = new FileOutputStream(file)) {
+                    output.write(bytes);
+                }
+                final File result = file;
+                runOnUiThread(() -> {
+                    if (!isCurrentSubtitleOperation(generation, videoUri)
+                            || mediaGeneration != subtitleMediaGeneration) {
+                        result.delete();
+                        return;
+                    }
+                    boolean attached = attachSubtitleFile(result);
+                    finishSubtitleOperation();
+                    if (attached) Toast.makeText(this,
+                        R.string.player_subtitle_loaded, Toast.LENGTH_SHORT).show();
+                });
+            } catch (Exception e) {
+                if (file != null) file.delete();
+                runOnUiThread(() -> {
+                    if (!isCurrentSubtitleOperation(generation, videoUri)) return;
+                    finishSubtitleOperation();
+                    Toast.makeText(this,
+                        getString(R.string.player_subtitle_load_failed, e.getMessage()),
+                        Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private byte[] readSubtitleBytes(InputStream input) throws IOException {
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        subtitleReadStream = input;
+        try {
+            while (true) {
+                if (Thread.currentThread().isInterrupted())
+                    throw new java.io.InterruptedIOException("Subtitle operation cancelled");
+                int count = input.read(buffer);
+                if (count == -1) break;
+                if (output.size() + count > MAX_SUBTITLE_BYTES)
+                    throw new IOException(getString(R.string.player_subtitle_too_large));
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
+        } finally {
+            if (subtitleReadStream == input) subtitleReadStream = null;
+        }
+    }
+
+    private void validateSrt(byte[] bytes) throws IOException {
+        if (!new String(bytes, StandardCharsets.UTF_8).contains("-->"))
+            throw new IOException(getString(R.string.player_subtitle_invalid));
+    }
+
+    private File createSubtitleCacheFile() throws IOException {
+        File directory = new File(getCacheDir(), "subtitles");
+        if (!directory.isDirectory() && !directory.mkdirs())
+            throw new IOException(getString(R.string.player_subtitle_cache_failed));
+        return File.createTempFile("subtitle_", ".srt", directory);
+    }
+
+    private void pruneCachedSubtitleFiles() {
+        File directory = new File(getCacheDir(), "subtitles");
+        File[] stale = directory.listFiles((dir, name) ->
+            name.startsWith("subtitle_") && name.endsWith(".srt"));
+        if (stale == null) return;
+        for (File file : stale) if (file.isFile()) file.delete();
+    }
+
+    private void clearAttachedSubtitleFiles() {
+        for (File file : attachedSubtitleFiles) file.delete();
+        attachedSubtitleFiles.clear();
+        selectedExternalSubtitleFile = null;
+        subtitleOffSelected = false;
+        subtitleRestorePendingGeneration = -1;
+    }
+
+    private void restoreAttachedSubtitlesIfNeeded() {
+        if (subtitleRestorePendingGeneration != subtitleMediaGeneration
+                || mediaPlayer == null || !mediaPlayer.isPlaying()) return;
+        subtitleRestorePendingGeneration = -1;
+        boolean restored = true;
+        for (File file : attachedSubtitleFiles) {
+            if (!file.isFile()) {
+                restored = false;
+                continue;
+            }
+            try {
+                boolean select = file.equals(selectedExternalSubtitleFile);
+                if (!mediaPlayer.addSlave(Media.Slave.Type.Subtitle,
+                        Uri.fromFile(file), select)) restored = false;
+            } catch (Exception e) {
+                restored = false;
+            }
+        }
+        if (subtitleOffSelected && mediaPlayer.getSpuTrack() != -1) {
+            try { if (!mediaPlayer.setSpuTrack(-1)) restored = false; }
+            catch (Exception e) { restored = false; }
+        }
+        if (!restored) Toast.makeText(this,
+            R.string.player_subtitle_restore_failed, Toast.LENGTH_LONG).show();
+    }
+
+    private boolean attachSubtitleFile(File file) {
+        boolean attached;
+        try {
+            attached = mediaPlayer != null && mediaPlayer.addSlave(
+                Media.Slave.Type.Subtitle, Uri.fromFile(file), true);
+        } catch (Exception e) {
+            attached = false;
+        }
+        if (!attached) {
+            file.delete();
+            Toast.makeText(this, getString(R.string.player_subtitle_load_failed,
+                getString(R.string.player_subtitle_select_failed)), Toast.LENGTH_LONG).show();
+        } else {
+            attachedSubtitleFiles.add(file);
+            selectedExternalSubtitleFile = file;
+            subtitleOffSelected = false;
+        }
+        return attached;
+    }
+
+    private boolean isCurrentSubtitleMedia(String videoUri, int mediaGeneration) {
+        return videoUri != null && videoUri.equals(uriString)
+            && mediaGeneration == subtitleMediaGeneration
+            && mediaPlayer != null && !isFinishing() && !isDestroyed();
+    }
+
+    private boolean isCurrentSubtitleOperation(int generation, String videoUri) {
+        return generation == subtitleOperationGeneration
+            && videoUri != null && videoUri.equals(uriString)
+            && mediaPlayer != null && !isFinishing() && !isDestroyed();
+    }
+
+    private void finishSubtitleOperation() {
+        subtitleOperationGeneration++;
+        subtitleTranslationTask = null;
+        subtitleIoFuture = null;
+        if (subtitleProgressDialog != null) {
+            subtitleProgressDialog.dismiss();
+            subtitleProgressDialog = null;
+        }
+    }
+
+    private void cancelSubtitleOperation() {
+        subtitleOperationGeneration++;
+        if (subtitleTranslationTask != null) {
+            subtitleTranslationTask.cancel();
+            subtitleTranslationTask = null;
+        }
+        if (subtitleIoFuture != null) {
+            subtitleIoFuture.cancel(true);
+            subtitleIoFuture = null;
+        }
+        if (subtitleDownloadConnection != null) {
+            subtitleDownloadConnection.disconnect();
+            subtitleDownloadConnection = null;
+        }
+        if (subtitleReadStream != null) {
+            try { subtitleReadStream.close(); } catch (IOException ignored) {}
+            subtitleReadStream = null;
+        }
+        if (subtitleProgressDialog != null) {
+            subtitleProgressDialog.dismiss();
+            subtitleProgressDialog = null;
+        }
     }
 
 
@@ -2211,6 +2642,9 @@ public class PlayerActivity extends AppCompatActivity {
             newUri = intent.getData().toString();
         }
         if (newUri == null || newUri.trim().isEmpty()) return;
+        cancelSubtitleOperation();
+        subtitleMediaGeneration++;
+        discardAttachedSubtitlesOnNextMedia = true;
         saveHistory();
         String previousSession = getIntent().getStringExtra(EXTRA_TORRENT_SESSION_ID);
         boolean sameSession = previousSession != null
