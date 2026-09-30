@@ -4,45 +4,97 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#313338">
+    android:background="@color/surface_darker">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content"
+        android:minHeight="56dp"
         android:gravity="center_vertical"
-        android:paddingHorizontal="12dp"
-        android:background="#2B2D31">
-        <ImageButton android:id="@+id/btn_back" android:layout_width="40dp"
-            android:layout_height="40dp" android:background="?selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_media_previous" app:tint="#FFFFFF"/>
+        android:paddingStart="8dp"
+        android:paddingEnd="16dp"
+        android:background="@color/surface_dark">
+        <ImageButton android:id="@+id/btn_back" android:layout_width="48dp"
+            android:layout_height="48dp" android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/lan_back"
+            android:src="@android:drawable/ic_media_previous" app:tint="@color/text_primary"/>
         <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-            android:layout_weight="1" android:text="Phát video qua LAN"
-            android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold"
+            android:layout_weight="1" android:text="@string/lan_title"
+            android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold"
             android:paddingStart="8dp"/>
     </LinearLayout>
 
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:padding="16dp">
-        <EditText android:id="@+id/et_video_path" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:hint="Chọn video trên điện thoại"
-            android:enabled="false" android:textColor="#FFFFFF" android:textColorHint="#B5BAC1"/>
-        <Button android:id="@+id/btn_pick_video" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:text="Chọn video"/>
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-            <Button android:id="@+id/btn_start_cast" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1"
-                android:layout_marginEnd="8dp" android:text="Bắt đầu phát LAN"/>
-            <Button android:id="@+id/btn_stop_cast" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1"
-                android:text="Dừng" android:enabled="false"/>
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="20dp">
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/lan_instructions" android:textSize="16sp"
+                android:textColor="@color/text_secondary"/>
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="24dp" android:text="@string/lan_selected_video"
+                android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_secondary"/>
+
+            <TextView android:id="@+id/et_video_path" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="48dp"
+                android:gravity="center_vertical" android:paddingTop="8dp" android:paddingBottom="8dp"
+                android:text="@string/lan_select_video" android:textSize="16sp"
+                android:textIsSelectable="true" android:textColor="@color/text_primary"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_pick_video" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="48dp"
+                android:layout_marginTop="8dp" android:text="@string/lan_select_video"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_start_cast" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="48dp"
+                android:layout_marginTop="12dp" android:enabled="false"
+                android:text="@string/lan_start"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_stop_cast" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="48dp"
+                android:layout_marginTop="8dp" android:enabled="false"
+                android:text="@string/lan_stop"/>
+
+            <ProgressBar android:id="@+id/progress_bar"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal" android:layout_marginTop="16dp"
+                android:indeterminate="true" android:contentDescription="@string/lan_status_preparing"
+                android:visibility="gone"/>
+
+            <TextView android:id="@+id/tv_status" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="24dp"
+                android:text="@string/lan_status_idle" android:textSize="18sp"
+                android:textStyle="bold" android:textColor="@color/text_primary"
+                android:accessibilityLiveRegion="polite"/>
+
+            <TextView android:id="@+id/tv_details" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                android:textColor="@color/text_secondary" android:textSize="16sp"/>
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="24dp" android:text="@string/lan_url_label"
+                android:textSize="14sp" android:textStyle="bold" android:textColor="@color/text_secondary"/>
+
+            <TextView android:id="@+id/tv_lan_url" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                android:textIsSelectable="true" android:textSize="16sp"
+                android:textColor="@color/text_primary" android:textDirection="ltr"
+                android:visibility="gone"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_copy_lan_url" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="48dp"
+                android:layout_marginTop="12dp" android:enabled="false"
+                android:text="@string/lan_copy_url"/>
         </LinearLayout>
-        <ProgressBar android:id="@+id/progress_bar" style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent" android:layout_height="8dp" android:visibility="gone"/>
-        <TextView android:id="@+id/tv_status" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textColor="#FFFFFF"
-            android:textSize="14sp" android:paddingTop="12dp" android:textIsSelectable="true"/>
-        <TextView android:id="@+id/tv_details" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textColor="#57F287"
-            android:textSize="13sp" android:paddingTop="8dp"/>
-    </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 </LinearLayout>

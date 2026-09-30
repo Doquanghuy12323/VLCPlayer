@@ -56,6 +56,19 @@ Torrent tải theo phần video đang đọc, nên file giữ lại có thể ch
 Chạm dữ liệu đã giữ để mở lại torrent gốc và tiếp tục tải qua proxy; cần mạng và
 nguồn torrent còn hoạt động. File chưa tải đủ không bảo đảm phát được ngoại tuyến.
 
+## Phát video qua LAN
+Mở **Công cụ → Phát video qua LAN**, chọn video, rồi nhấn **Bắt đầu chia sẻ**.
+Chọn file chỉ chuẩn bị thông tin video. Khi chia sẻ hoạt động, nhấn **Sao chép
+liên kết** và mở địa chỉ bằng VLC trên thiết bị cùng mạng LAN hoặc Wi-Fi.
+
+Phiên chia sẻ và liên kết được giữ khi xoay màn hình. Nhấn **Dừng** để kết thúc
+phiên; khôi phục màn hình đã dừng không tự chia sẻ lại. Nếu tiến trình ứng dụng
+đã kết thúc, video đã chọn được khôi phục để bạn bắt đầu một phiên mới.
+
+Ứng dụng đọc trực tiếp video từ trình chọn tệp, không tạo bản sao của video để
+chia sẻ. Màn hình hiển thị rõ trạng thái chuẩn bị, sẵn sàng, đang chia sẻ, đã dừng
+hoặc lỗi; liên kết chỉ sao chép được khi phiên chia sẻ đang hoạt động.
+
 ## Funscript và The Handy
 Trong player, mở **Thêm tùy chọn → Funscript & The Handy** để xem trạng thái
 thiết bị, script và đồng bộ. Chọn file `.funscript`/`.csv` hoặc nhập URL; nếu chưa
