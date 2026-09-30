@@ -11,6 +11,61 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"/>
 
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/manga_reader_state"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="64dp"
+        android:fillViewport="true"
+        android:padding="24dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/manga_state_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/manga_state_message"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:textColor="#B5BAC1"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/manga_retry"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:minHeight="48dp"
+                android:backgroundTint="#5865F2"
+                android:text="@string/manga_retry"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/manga_close"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:minHeight="48dp"
+                android:backgroundTint="#313338"
+                android:text="@string/manga_close"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
     <!-- Top bar -->
     <LinearLayout
         android:id="@+id/top_bar"
@@ -23,9 +78,10 @@
 
         <ImageButton
             android:id="@+id/btn_back"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/manga_back"
             android:src="@android:drawable/ic_media_previous"
             app:tint="#FFFFFF"/>
 
@@ -64,6 +120,8 @@
             android:id="@+id/seekBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:contentDescription="@string/manga_page_navigation"
             android:progressTint="#5865F2"
             android:thumbTint="#5865F2"/>
 
@@ -75,6 +133,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
+        android:contentDescription="@string/manga_loading"
         android:indeterminateTint="#5865F2"
         android:visibility="gone"/>
 

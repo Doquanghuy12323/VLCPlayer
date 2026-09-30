@@ -13,7 +13,6 @@
             <item android:id="@+id/action_lan_cast" android:title="@string/menu_lan_cast" />
             <item android:id="@+id/action_manga_local" android:title="@string/menu_manga_local" />
             <item android:id="@+id/action_manga_online" android:title="@string/menu_manga_online" />
-            <item android:id="@+id/action_ai" android:title="@string/menu_ai" />
             <item android:id="@+id/action_handy" android:title="@string/menu_handy" />
         </menu>
     </item>

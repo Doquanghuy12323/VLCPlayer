@@ -18,4 +18,19 @@
         android:layout_gravity="center"
         android:indeterminateTint="#5865F2"/>
 
+    <TextView
+        android:id="@+id/manga_page_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_margin="24dp"
+        android:minHeight="48dp"
+        android:padding="16dp"
+        android:background="#AA000000"
+        android:gravity="center"
+        android:text="@string/manga_page_error_retry"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
 </FrameLayout>

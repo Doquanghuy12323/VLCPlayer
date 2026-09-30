@@ -88,6 +88,7 @@ public class MainActivity extends AppCompatActivity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        clearRemovedChatData();
         TorrentManager.cleanupOrphanedCache(this);
         TranscodeManager.cleanupLegacyCache(this);
         new PrivacyManager(this).applyWindowSecurity(this);
@@ -127,6 +128,13 @@ public class MainActivity extends AppCompatActivity
         updateManager = new UpdateManager(this);
         updateManager.checkForUpdate(true);
         if (savedInstanceState == null) handleShareIntent(getIntent());
+    }
+
+    private void clearRemovedChatData() {
+        // Remove the old assistant API key when updating from a version with chat.
+        android.content.SharedPreferences retired =
+            getSharedPreferences("gemini_prefs", MODE_PRIVATE);
+        if (!retired.getAll().isEmpty()) retired.edit().clear().apply();
     }
 
     @Override
@@ -545,9 +553,6 @@ public class MainActivity extends AppCompatActivity
         } else if (id == R.id.action_update) {
             Toast.makeText(this, "Dang kiem tra cap nhat...", Toast.LENGTH_SHORT).show();
             if (updateManager != null) updateManager.checkForUpdate(false);
-            return true;
-        } else if (id == R.id.action_ai) {
-            startActivity(new android.content.Intent(this, GeminiChatActivity.class));
             return true;
         } else if (id == R.id.action_manga_local) {
             openMangaFilePicker();

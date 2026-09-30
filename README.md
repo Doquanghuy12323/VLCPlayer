@@ -10,7 +10,6 @@
 - 📁 Chọn file video thủ công qua file picker
 - 🧲 Stream torrent với chọn file và HTTP Range
 - 📚 Đọc truyện CBZ/ZIP và duyệt truyện online
-- 🤖 Trợ lý Gemini bằng API key lưu riêng trên thiết bị
 - 📡 Phát file video qua mạng LAN cho VLC trên máy tính
 - 🔐 Chế độ riêng tư chống chụp/quay màn hình
 - 🌙 Giao diện dark theme
@@ -69,8 +68,14 @@ Script nhập được kiểm tra trước khi thay file đã lưu và gắn v�
 hai video trùng tên có thể dùng script riêng. Script được tải lên dịch vụ tạm
 của Handy để thiết bị đọc.
 
-Gemini API key không còn được nhúng trong APK. Mở mục Trợ lý AI trong ứng dụng
-và nhập key của bạn khi được hỏi.
+## Đọc truyện
+Trình duyệt truyện có thanh địa chỉ và menu cho điều hướng, tải lại, dấu trang,
+thu phóng ảnh và chế độ toàn màn hình. Trang lỗi có nút **Thử lại**; trang đang
+đọc và lịch sử điều hướng được giữ khi xoay màn hình.
+
+Với file CBZ/ZIP, ứng dụng hiển thị trạng thái lỗi hoặc file không có ảnh để bạn
+thử lại hoặc đóng. Trang đang đọc được giữ khi màn hình tạo lại; mỗi phiên dùng
+thư mục tạm riêng để tránh xóa ảnh của phiên khác.
 
 ## 📦 Dependencies
 - `org.videolan.android:libvlc-all:3.6.0`

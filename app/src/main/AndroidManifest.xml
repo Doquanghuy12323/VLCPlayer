@@ -81,11 +81,6 @@
         <activity
             android:name=".MangaBrowserActivity"
             android:theme="@style/Theme.VLCPlayer"
-            android:screenOrientation="portrait"/>
-
-        <activity
-            android:name=".GeminiChatActivity"
-            android:theme="@style/Theme.VLCPlayer"
             android:windowSoftInputMode="adjustResize"/>
 
         <activity
