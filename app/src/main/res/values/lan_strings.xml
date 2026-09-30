@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lan_title">Phát video qua LAN</string>
+    <string name="lan_back">Quay lại</string>
+    <string name="lan_instructions">Chọn video, rồi nhấn Bắt đầu chia sẻ. Mở liên kết bằng VLC trên thiết bị cùng mạng LAN hoặc Wi-Fi.</string>
+    <string name="lan_selected_video">Video đã chọn</string>
+    <string name="lan_select_video">Chọn video</string>
+    <string name="lan_start">Bắt đầu chia sẻ</string>
+    <string name="lan_stop">Dừng</string>
+    <string name="lan_copy_url">Sao chép liên kết</string>
+    <string name="lan_url_label">Liên kết LAN</string>
+    <string name="lan_video_metadata">%1$s\n%2$s</string>
+    <string name="lan_size_unknown">Chưa xác định dung lượng</string>
+    <string name="lan_status_idle">Chưa chọn video</string>
+    <string name="lan_status_preparing">Đang đọc thông tin video…</string>
+    <string name="lan_status_ready">Sẵn sàng chia sẻ</string>
+    <string name="lan_status_starting">Đang bắt đầu chia sẻ…</string>
+    <string name="lan_status_running">Đang chia sẻ qua LAN</string>
+    <string name="lan_status_stopped">Đã dừng chia sẻ</string>
+    <string name="lan_status_error">Không thể chia sẻ video</string>
+    <string name="lan_details_ready">Nhấn Bắt đầu chia sẻ để tạo liên kết LAN.</string>
+    <string name="lan_details_running">Mở liên kết bằng VLC trên thiết bị cùng mạng LAN hoặc Wi-Fi.</string>
+    <string name="lan_details_stopped">Nhấn Bắt đầu chia sẻ để tạo liên kết mới.</string>
+    <string name="lan_client_connected">Thiết bị %1$s đang truy cập video.</string>
+    <string name="lan_client_disconnected">Kết nối với thiết bị đã ngắt. Máy chủ vẫn sẵn sàng.</string>
+    <string name="lan_error_source">Không đọc được video. File có thể đã bị xóa hoặc mất quyền truy cập. Hãy chọn lại video.</string>
+    <string name="lan_error_size">Không xác định được dung lượng video. Hãy chọn file đã tải về thiết bị hoặc thử lại.</string>
+    <string name="lan_error_network">Không tìm thấy mạng LAN hoặc Wi-Fi. Hãy kết nối mạng rồi thử lại.</string>
+    <string name="lan_error_address">Không dùng được địa chỉ mạng hiện tại. Hãy kiểm tra kết nối rồi thử lại.</string>
+    <string name="lan_error_server">Không khởi động được chia sẻ LAN. Hãy thử lại.</string>
+    <string name="lan_retry">Thử lại chia sẻ</string>
+    <string name="lan_copy_success">Đã sao chép liên kết LAN</string>
+    <string name="lan_copy_unavailable">Không sao chép được liên kết. Bạn có thể chọn và sao chép địa chỉ đang hiển thị.</string>
+</resources>

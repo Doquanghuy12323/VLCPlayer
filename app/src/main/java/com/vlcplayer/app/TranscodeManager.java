@@ -7,14 +7,21 @@ import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
-
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructPollfd;
 import java.io.BufferedReader;
+import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -23,10 +30,15 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.channels.FileChannel;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -34,25 +46,28 @@ import java.util.concurrent.TimeUnit;
 
 /** Streams a Storage Access Framework URI directly over LAN without copying it. */
 public class TranscodeManager {
+    public enum Error {
+        NO_VIDEO, SOURCE_UNAVAILABLE, UNKNOWN_SIZE, NO_LAN, INVALID_ADDRESS, SERVER_FAILURE
+    }
 
     public interface Callback {
         void onServerStarted(String lanUrl);
         void onClientConnected(String clientIp);
-        void onTranscodeLog(String logLine);
-        void onError(String error);
+        void onClientDisconnected();
+        void onError(Error error);
         void onServerStopped();
     }
 
-    private final Handler handler = new Handler(Looper.getMainLooper());
     private static final int MAX_CLIENTS = 4;
+    private final Handler handler = new Handler(Looper.getMainLooper());
     private final ThreadPoolExecutor clients = new ThreadPoolExecutor(0, MAX_CLIENTS,
-        30, TimeUnit.SECONDS, new SynchronousQueue<>());
-    private final Set<Socket> activeSockets = Collections.synchronizedSet(new HashSet<>());
+            30, TimeUnit.SECONDS, new SynchronousQueue<>());
+    private final ExecutorService preparation = Executors.newCachedThreadPool();
+    private final ExecutorService resourceCloser = Executors.newCachedThreadPool();
     private final Context appContext;
-    private volatile boolean running;
-    private volatile ServerSocket serverSocket;
-    private volatile long sessionId;
-    private Callback callback;
+    private volatile Session currentSession;
+    private long generation;
+    private boolean destroyed;
 
     public TranscodeManager(Context context) {
         appContext = context.getApplicationContext();
@@ -117,104 +132,154 @@ public class TranscodeManager {
         return null;
     }
 
-    public synchronized void startServer(Uri videoUri, String displayName,
-                                         long knownSize, Callback cb) {
-        stopServerInternal(false);
-        if (videoUri == null) {
-            cb.onError("Chua chon video");
+
+    /** Returns immediately; providers, source reads and LAN discovery run on a worker. */
+    public void startServer(Uri videoUri, String displayName, long knownSize, Callback callback) {
+        final Session session;
+        final Session previous;
+        synchronized (this) {
+            if (destroyed) return;
+            previous = currentSession;
+            String name = displayName == null || displayName.trim().isEmpty()
+                    ? "video" : displayName.trim();
+            session = new Session(++generation, videoUri, name, knownSize, callback);
+            currentSession = session;
+            if (previous != null) previous.cancelled = true;
+            session.task = preparation.submit(() -> prepareAndServe(session));
+        }
+        if (previous != null) closeSession(previous);
+    }
+
+    private void prepareAndServe(Session session) {
+        if (session.uri == null) {
+            failSession(session, Error.NO_VIDEO);
             return;
         }
-
-        long sourceSize = probeSize(videoUri, knownSize);
+        final long sourceSize;
+        try (SourceHandle source = openSource(session)) {
+            ensureCurrent(session);
+            long actualSize = source.descriptor.getStatSize();
+            sourceSize = actualSize > 0 ? actualSize : session.knownSize;
+            // A remembered size must never bypass opening and actually reading the URI.
+            if (source.read(new byte[1], 0, 1) < 0) {
+                failSession(session, Error.SOURCE_UNAVAILABLE);
+                return;
+            }
+            ensureCurrent(session);
+            // Pipes remain supported with sequential skipping for a requested byte range.
+            try { source.stream.getChannel().position(0); }
+            catch (IOException notSeekable) { /* Fall back to sequential reads per client. */ }
+        } catch (Exception unavailable) {
+            if (isCurrent(session)) failSession(session, Error.SOURCE_UNAVAILABLE);
+            return;
+        }
         if (sourceSize <= 0) {
-            cb.onError("Khong xac dinh duoc dung luong video");
+            failSession(session, Error.UNKNOWN_SIZE);
             return;
         }
-        String sourceName = displayName == null || displayName.trim().isEmpty()
-            ? "video" : displayName.trim();
-
+        if (!isCurrent(session)) return;
         String localIp = getLocalIpAddress();
+        if (!isCurrent(session)) return;
         if (localIp == null) {
-            cb.onError("Khong tim thay dia chi Wi-Fi/LAN");
+            failSession(session, Error.NO_LAN);
             return;
         }
         final InetAddress bindAddress;
         try {
             bindAddress = InetAddress.getByName(localIp);
-        } catch (Exception e) {
-            cb.onError("Dia chi LAN khong hop le");
+            if (!(bindAddress instanceof Inet4Address) || bindAddress.isLoopbackAddress()
+                    || bindAddress.isAnyLocalAddress()) throw new IOException("Invalid LAN address");
+        } catch (Exception invalid) {
+            failSession(session, Error.INVALID_ADDRESS);
             return;
         }
-        // An ASCII path survives URL normalization by players; the real file name
-        // stays local and is used only to select the response Content-Type.
         String expectedPath = "/stream/" + newSessionToken() + "/video"
-            + safeVideoExtension(sourceName);
-        callback = cb;
-        running = true;
-        long currentSession = ++sessionId;
-
-        new Thread(() -> {
-            ServerSocket listener = null;
-            try {
-                listener = new ServerSocket(0, MAX_CLIENTS, bindAddress);
-                synchronized (this) {
-                    if (!isSessionCurrent(currentSession)) return;
-                    serverSocket = listener;
-                }
-                String lanUrl = "http://" + localIp + ":"
-                    + listener.getLocalPort() + expectedPath;
-                handler.post(() -> {
-                    if (isSessionCurrent(currentSession)) cb.onServerStarted(lanUrl);
-                });
-
-                while (isSessionCurrent(currentSession)) {
-                    try {
-                        Socket socket = listener.accept();
-                        if (!isSessionCurrent(currentSession)) {
-                            socket.close();
-                            break;
-                        }
-                        activeSockets.add(socket);
-                        try {
-                            clients.execute(() -> {
-                                try {
-                                    serveClient(socket, videoUri, sourceName, sourceSize,
-                                        expectedPath, currentSession, cb);
-                                } finally {
-                                    activeSockets.remove(socket);
-                                }
-                            });
-                        } catch (RejectedExecutionException busy) {
-                            activeSockets.remove(socket);
-                            try { socket.close(); } catch (Exception ignored) {}
-                        }
-                    } catch (Exception e) {
-                        if (isSessionCurrent(currentSession)) {
-                            running = false;
-                            handler.post(() -> {
-                                if (sessionId == currentSession)
-                                    cb.onError("Loi may chu LAN: " + e.getMessage());
-                            });
-                        }
+                + safeVideoExtension(session.name);
+        ServerSocket listener = null;
+        try {
+            ensureCurrent(session);
+            listener = new ServerSocket(0, MAX_CLIENTS, bindAddress);
+            synchronized (session) {
+                if (!isCurrent(session)) return;
+                session.listener = listener;
+            }
+            String lanUrl = "http://" + localIp + ":" + listener.getLocalPort() + expectedPath;
+            handler.post(() -> {
+                if (isCurrent(session)) session.callback.onServerStarted(lanUrl);
+            });
+            while (isCurrent(session)) {
+                Socket socket = listener.accept();
+                synchronized (session) {
+                    if (!isCurrent(session)) {
+                        socket.close();
                         break;
                     }
+                    session.sockets.add(socket);
                 }
-            } catch (Exception e) {
-                if (isSessionCurrent(currentSession)) {
-                    running = false;
-                    handler.post(() -> cb.onError("Khong mo duoc may chu LAN: " + e.getMessage()));
-                }
-            } finally {
-                try { if (listener != null) listener.close(); } catch (Exception ignored) {}
-                synchronized (this) {
-                    if (serverSocket == listener) serverSocket = null;
+                try {
+                    clients.execute(() -> serveClient(socket, session, sourceSize, expectedPath));
+                } catch (RejectedExecutionException busy) {
+                    synchronized (session) { session.sockets.remove(socket); }
+                    closeQuietly(socket);
                 }
             }
-        }, "vlc-lan-server").start();
+        } catch (Exception serverFailure) {
+            if (isCurrent(session)) failSession(session, Error.SERVER_FAILURE);
+        } finally {
+            closeQuietly(listener);
+            synchronized (session) {
+                if (session.listener == listener) session.listener = null;
+            }
+        }
     }
 
-    private boolean isSessionCurrent(long id) {
-        return running && sessionId == id;
+    private boolean isCurrent(Session session) {
+        return currentSession == session && !session.cancelled;
+    }
+
+    private void ensureCurrent(Session session) throws InterruptedIOException {
+        if (!isCurrent(session) || Thread.currentThread().isInterrupted()) {
+            throw new InterruptedIOException("LAN sharing cancelled");
+        }
+    }
+
+    private SourceHandle openSource(Session session) throws IOException {
+        ensureCurrent(session);
+        SourceHandle source = new SourceHandle(session);
+        synchronized (session) {
+            ensureCurrent(session);
+            session.sources.add(source);
+        }
+        try {
+            ParcelFileDescriptor descriptor = appContext.getContentResolver()
+                    .openFileDescriptor(session.uri, "r", source.cancellation);
+            if (descriptor == null) throw new IOException("Cannot open source");
+            source.registerDescriptor(descriptor);
+            source.registerStream(new FileInputStream(descriptor.getFileDescriptor()));
+            ensureCurrent(session);
+            return source;
+        } catch (Exception failure) {
+            source.close();
+            if (failure instanceof IOException) throw (IOException) failure;
+            throw new IOException("Cannot read source", failure);
+        }
+    }
+
+    private void failSession(Session session, Error error) {
+        final long errorGeneration;
+        synchronized (this) {
+            if (!isCurrent(session) || destroyed) return;
+            session.cancelled = true;
+            currentSession = null;
+            errorGeneration = ++generation;
+        }
+        closeSession(session);
+        handler.post(() -> {
+            synchronized (TranscodeManager.this) {
+                if (destroyed || generation != errorGeneration || currentSession != null) return;
+                session.callback.onError(error);
+            }
+        });
     }
 
     private String newSessionToken() {
@@ -236,22 +301,12 @@ public class TranscodeManager {
         return "";
     }
 
-    private long probeSize(Uri uri, long knownSize) {
-        if (knownSize > 0) return knownSize;
-        try (ParcelFileDescriptor descriptor =
-                 appContext.getContentResolver().openFileDescriptor(uri, "r")) {
-            return descriptor == null ? -1 : descriptor.getStatSize();
-        } catch (Exception ignored) {
-            return -1;
-        }
-    }
 
-    private void serveClient(Socket socket, Uri videoUri, String displayName,
-                             long fileLength, String expectedPath, long currentSession,
-                             Callback cb) {
+    private void serveClient(Socket socket, Session session, long fileLength, String expectedPath) {
+        boolean connected = false;
         try (Socket client = socket;
              BufferedReader input = new BufferedReader(
-                 new InputStreamReader(client.getInputStream(), "ISO-8859-1"));
+                     new InputStreamReader(client.getInputStream(), "ISO-8859-1"));
              OutputStream output = client.getOutputStream()) {
             client.setSoTimeout(30000);
             String request = readLineLimited(input, 4096);
@@ -262,23 +317,18 @@ public class TranscodeManager {
                 sendEmpty(output, "400 Bad Request");
                 return;
             }
-            if (!isSessionCurrent(currentSession) || !expectedPath.equals(parts[1])) {
+            if (!isCurrent(session) || !expectedPath.equals(parts[1])) {
                 sendEmpty(output, "404 Not Found");
                 return;
             }
             boolean head = "HEAD".equals(parts[0]);
-            handler.post(() -> {
-                if (isSessionCurrent(currentSession))
-                    cb.onClientConnected(socket.getInetAddress().getHostAddress());
-            });
-
             long start = 0;
             long end = fileLength - 1;
             boolean partial = false;
             String line;
             int headerCount = 0;
             while ((line = readLineLimited(input, 8192)) != null && !line.isEmpty()) {
-                if (++headerCount > 64) throw new java.io.IOException("Too many HTTP headers");
+                if (++headerCount > 64) throw new IOException("Too many HTTP headers");
                 if (line.regionMatches(true, 0, "Range: bytes=", 0, 13)) {
                     String value = line.substring(13).trim();
                     int dash = value.indexOf('-');
@@ -293,8 +343,7 @@ public class TranscodeManager {
                             start = Math.max(0, fileLength - suffix);
                         } else {
                             start = Long.parseLong(value.substring(0, dash));
-                            if (dash + 1 < value.length())
-                                end = Long.parseLong(value.substring(dash + 1));
+                            if (dash + 1 < value.length()) end = Long.parseLong(value.substring(dash + 1));
                         }
                     } catch (NumberFormatException invalidRange) {
                         start = fileLength;
@@ -303,55 +352,98 @@ public class TranscodeManager {
                     partial = true;
                 }
             }
-
             if (start < 0 || start >= fileLength || end < start) {
                 output.write(("HTTP/1.1 416 Range Not Satisfiable\r\n"
-                    + "Content-Range: bytes */" + fileLength + "\r\n"
-                    + "Content-Length: 0\r\n\r\n").getBytes("UTF-8"));
+                        + "Content-Range: bytes */" + fileLength + "\r\n"
+                        + "Content-Length: 0\r\n\r\n").getBytes("UTF-8"));
                 return;
             }
             end = Math.min(end, fileLength - 1);
             long length = end - start + 1;
-            String mime = guessMime(displayName);
-            StringBuilder header = new StringBuilder(partial
-                ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
-            header.append("Content-Type: ").append(mime).append("\r\n")
-                .append("Accept-Ranges: bytes\r\n")
-                .append("Content-Length: ").append(length).append("\r\n");
-            if (partial) header.append("Content-Range: bytes ").append(start)
-                .append('-').append(end).append('/').append(fileLength).append("\r\n");
-            header.append("Connection: close\r\n\r\n");
-            output.write(header.toString().getBytes("UTF-8"));
-            if (head) return;
-
-            try (ParcelFileDescriptor descriptor =
-                     appContext.getContentResolver().openFileDescriptor(videoUri, "r")) {
-                if (descriptor == null) throw new java.io.IOException("Khong mo duoc video");
-                try (FileInputStream stream = new FileInputStream(descriptor.getFileDescriptor())) {
-                    FileChannel channel = stream.getChannel();
+            SourceHandle source;
+            try {
+                source = openSource(session);
+                long actualSize = source.descriptor.getStatSize();
+                if (actualSize >= 0 && actualSize != fileLength) {
+                    source.close();
+                    throw new IOException("Source size changed");
+                }
+            } catch (Exception unavailable) {
+                if (isCurrent(session)) {
+                    reportUnavailableSource(session, output);
+                }
+                return;
+            }
+            try (SourceHandle openedSource = source) {
+                if (!head) {
                     try {
-                        channel.position(start);
-                    } catch (Exception notSeekable) {
-                        skipFully(stream, start);
-                    }
-                    byte[] buffer = new byte[64 * 1024];
-                    long remaining = length;
-                    while (isSessionCurrent(currentSession) && remaining > 0) {
-                        int read = stream.read(buffer, 0, (int) Math.min(buffer.length, remaining));
-                        if (read < 0) break;
-                        output.write(buffer, 0, read);
-                        remaining -= read;
+                        FileChannel channel = source.stream.getChannel();
+                        try { channel.position(start); }
+                        catch (IOException notSeekable) { skipFully(source, start, session); }
+                    } catch (IOException unavailable) {
+                        if (isCurrent(session)) {
+                            reportUnavailableSource(session, output);
+                        }
+                        return;
                     }
                 }
+                synchronized (session) {
+                    ensureCurrent(session);
+                    session.connectedSockets.add(socket);
+                    connected = true;
+                }
+                publishClientStatus(session, socket);
+                StringBuilder header = new StringBuilder(partial
+                        ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
+                header.append("Content-Type: ").append(guessMime(session.name)).append("\r\n")
+                        .append("Accept-Ranges: bytes\r\n")
+                        .append("Content-Length: ").append(length).append("\r\n");
+                if (partial) header.append("Content-Range: bytes ").append(start)
+                        .append('-').append(end).append('/').append(fileLength).append("\r\n");
+                header.append("Connection: close\r\n\r\n");
+                output.write(header.toString().getBytes("UTF-8"));
+                if (head) return;
+                byte[] buffer = new byte[64 * 1024];
+                long remaining = length;
+                while (isCurrent(session) && remaining > 0) {
+                    final int count;
+                    try {
+                        count = source.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+                        if (count < 0) throw new IOException("Source ended before expected length");
+                    } catch (IOException unavailable) {
+                        if (isCurrent(session)) failSession(session, Error.SOURCE_UNAVAILABLE);
+                        return;
+                    }
+                    output.write(buffer, 0, count);
+                    remaining -= count;
+                }
             }
-        } catch (Exception e) {
-            if (isSessionCurrent(currentSession)) {
-                handler.post(() -> {
-                    if (isSessionCurrent(currentSession))
-                        cb.onTranscodeLog("Thiet bi khach da ngat ket noi");
-                });
+        } catch (Exception disconnected) {
+            // A closed client socket is independent of whether the source is still available.
+        } finally {
+            synchronized (session) {
+                session.sockets.remove(socket);
+                if (connected) session.connectedSockets.remove(socket);
             }
+            if (connected) publishClientStatus(session, null);
         }
+    }
+
+    private void publishClientStatus(Session session, Socket preferred) {
+        handler.post(() -> {
+            synchronized (session) {
+                if (!isCurrent(session)) return;
+                // Inspect the live set at delivery; queued HEAD/GET completion must not
+                // clear a newer request or display an IP whose request has already ended.
+                if (session.connectedSockets.isEmpty()) {
+                    session.callback.onClientDisconnected();
+                } else {
+                    Socket active = session.connectedSockets.contains(preferred)
+                            ? preferred : session.connectedSockets.iterator().next();
+                    session.callback.onClientConnected(active.getInetAddress().getHostAddress());
+                }
+            }
+        });
     }
 
     private String readLineLimited(BufferedReader input, int limit) throws java.io.IOException {
@@ -370,19 +462,22 @@ public class TranscodeManager {
             + "Connection: close\r\n\r\n").getBytes("ISO-8859-1"));
     }
 
-    private void skipFully(FileInputStream stream, long bytes) throws java.io.IOException {
+
+    private void skipFully(SourceHandle source, long bytes, Session session) throws IOException {
         long remaining = bytes;
         byte[] discard = new byte[64 * 1024];
         while (remaining > 0) {
-            long skipped = stream.skip(remaining);
-            if (skipped > 0) {
-                remaining -= skipped;
-                continue;
-            }
-            int read = stream.read(discard, 0, (int) Math.min(discard.length, remaining));
-            if (read < 0) throw new java.io.IOException("Khong the tua video nguon");
-            remaining -= read;
+            ensureCurrent(session);
+            int count = source.read(discard, 0, (int) Math.min(discard.length, remaining));
+            if (count < 0) throw new IOException("Cannot seek source");
+            remaining -= count;
         }
+    }
+
+    private void reportUnavailableSource(Session session, OutputStream output) {
+        try { sendEmpty(output, "503 Service Unavailable"); }
+        catch (IOException disconnected) { /* Source failure still stops the share. */ }
+        failSession(session, Error.SOURCE_UNAVAILABLE);
     }
 
     private String guessMime(String name) {
@@ -395,29 +490,176 @@ public class TranscodeManager {
         return "application/octet-stream";
     }
 
-    public synchronized void stopServer() {
-        stopServerInternal(true);
+
+    public void stopServer() {
+        final Session stopped;
+        final long stoppedGeneration;
+        synchronized (this) {
+            stopped = currentSession;
+            currentSession = null;
+            stoppedGeneration = ++generation;
+            if (stopped != null) stopped.cancelled = true;
+        }
+        if (stopped == null) return;
+        closeSession(stopped);
+        handler.post(() -> {
+            synchronized (TranscodeManager.this) {
+                if (destroyed || generation != stoppedGeneration || currentSession != null) return;
+                stopped.callback.onServerStopped();
+            }
+        });
     }
 
-    private synchronized void stopServerInternal(boolean notify) {
-        boolean wasRunning = running;
-        running = false;
-        sessionId++;
-        try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) {}
-        serverSocket = null;
-        synchronized (activeSockets) {
-            for (Socket socket : activeSockets) {
-                try { socket.close(); } catch (Exception ignored) {}
-            }
-            activeSockets.clear();
+    /** Invalidates before scheduling IO closure, so old work cannot publish into a new session. */
+    private void closeSession(Session session) {
+        final ServerSocket listener;
+        final List<Socket> sockets;
+        final List<SourceHandle> sources;
+        synchronized (session) {
+            session.cancelled = true;
+            listener = session.listener;
+            session.listener = null;
+            sockets = new ArrayList<>(session.sockets);
+            sources = new ArrayList<>(session.sources);
         }
-        Callback oldCallback = callback;
-        if (notify && wasRunning && oldCallback != null) handler.post(oldCallback::onServerStopped);
+        if (session.task != null) session.task.cancel(true);
+        if (listener != null) closeOffMain(() -> closeQuietly(listener));
+        for (Socket socket : sockets) closeOffMain(() -> closeQuietly(socket));
+        for (SourceHandle source : sources) closeOffMain(source::close);
+    }
+
+    private void closeOffMain(Runnable close) {
+        try {
+            resourceCloser.execute(close);
+        } catch (RejectedExecutionException alreadyDestroyed) {
+            // An error worker can finish just after destroy shuts down the closer pool.
+            new Thread(close, "vlc-lan-close").start();
+        }
+    }
+
+    private static void closeQuietly(Closeable resource) {
+        if (resource == null) return;
+        try { resource.close(); } catch (Exception ignored) {}
     }
 
     public void destroy() {
-        stopServer();
+        final Session stopped;
+        synchronized (this) {
+            if (destroyed) return;
+            destroyed = true;
+            generation++;
+            stopped = currentSession;
+            currentSession = null;
+            if (stopped != null) stopped.cancelled = true;
+        }
+        if (stopped != null) closeSession(stopped);
+        preparation.shutdownNow();
         clients.shutdownNow();
+        resourceCloser.shutdown();
         handler.removeCallbacksAndMessages(null);
+    }
+
+    private static final class Session {
+        final long generation;
+        final Uri uri;
+        final String name;
+        final long knownSize;
+        final Callback callback;
+        final Set<Socket> sockets = new HashSet<>();
+        final Set<SourceHandle> sources = new HashSet<>();
+        final Set<Socket> connectedSockets = new HashSet<>();
+        volatile boolean cancelled;
+        volatile Future<?> task;
+        ServerSocket listener;
+
+        Session(long generation, Uri uri, String name, long knownSize, Callback callback) {
+            this.generation = generation;
+            this.uri = uri;
+            this.name = name;
+            this.knownSize = knownSize;
+            this.callback = callback;
+        }
+    }
+
+    private static final class SourceHandle implements Closeable {
+        final Session session;
+        final CancellationSignal cancellation = new CancellationSignal();
+        volatile ParcelFileDescriptor descriptor;
+        volatile FileInputStream stream;
+        private volatile boolean closed;
+
+        SourceHandle(Session session) { this.session = session; }
+
+        void registerDescriptor(ParcelFileDescriptor value) throws IOException {
+            synchronized (this) {
+                if (!closed && !session.cancelled) {
+                    descriptor = value;
+                    return;
+                }
+            }
+            closeQuietly(value);
+            throw new InterruptedIOException("LAN source cancelled");
+        }
+
+        void registerStream(FileInputStream value) throws IOException {
+            synchronized (this) {
+                if (!closed && !session.cancelled) {
+                    stream = value;
+                    return;
+                }
+            }
+            closeQuietly(value);
+            throw new InterruptedIOException("LAN source cancelled");
+        }
+
+        int read(byte[] buffer, int offset, int count) throws IOException {
+            StructPollfd poll = new StructPollfd();
+            poll.fd = descriptor.getFileDescriptor();
+            poll.events = (short) OsConstants.POLLIN;
+            StructPollfd[] descriptors = new StructPollfd[]{poll};
+            while (true) {
+                checkCancelled();
+                try {
+                    // Android 5–9 descriptor close does not necessarily interrupt a
+                    // native pipe read. Bound the wait before this handle's sole reader.
+                    int ready = Os.poll(descriptors, 250);
+                    checkCancelled();
+                    if (ready == 0) continue;
+                    if ((poll.revents & (OsConstants.POLLERR | OsConstants.POLLNVAL)) != 0) {
+                        throw new IOException("Source descriptor unavailable");
+                    }
+                    if ((poll.revents & (OsConstants.POLLIN | OsConstants.POLLHUP)) == 0) continue;
+                    int result = Os.read(poll.fd, buffer, offset, count);
+                    return result == 0 ? -1 : result;
+                } catch (ErrnoException error) {
+                    checkCancelled();
+                    if (error.errno == OsConstants.EINTR || error.errno == OsConstants.EAGAIN) continue;
+                    throw new IOException("Cannot read source", error);
+                }
+            }
+        }
+
+        private void checkCancelled() throws InterruptedIOException {
+            if (closed || session.cancelled || Thread.currentThread().isInterrupted()) {
+                throw new InterruptedIOException("LAN source cancelled");
+            }
+        }
+
+        @Override public void close() {
+            ParcelFileDescriptor oldDescriptor;
+            FileInputStream oldStream;
+            synchronized (this) {
+                if (closed) return;
+                closed = true;
+                oldDescriptor = descriptor;
+                oldStream = stream;
+            }
+            // Poll-based reads also observe cancellation on Android versions whose
+            // descriptor close does not signal a thread blocked in native IO.
+            closeQuietly(oldDescriptor);
+            closeQuietly(oldStream);
+            try { cancellation.cancel(); } catch (Exception ignored) {}
+            synchronized (session) { session.sources.remove(this); }
+        }
     }
 }

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lan_title">Share video over LAN</string>
+    <string name="lan_back">Go back</string>
+    <string name="lan_instructions">Choose a video, then tap Start sharing. Open the link in VLC on a device connected to the same LAN or Wi-Fi network.</string>
+    <string name="lan_selected_video">Selected video</string>
+    <string name="lan_select_video">Choose video</string>
+    <string name="lan_start">Start sharing</string>
+    <string name="lan_stop">Stop</string>
+    <string name="lan_copy_url">Copy link</string>
+    <string name="lan_url_label">LAN link</string>
+    <string name="lan_video_metadata">%1$s\n%2$s</string>
+    <string name="lan_size_unknown">Size unknown</string>
+    <string name="lan_status_idle">No video selected</string>
+    <string name="lan_status_preparing">Reading video information…</string>
+    <string name="lan_status_ready">Ready to share</string>
+    <string name="lan_status_starting">Starting sharing…</string>
+    <string name="lan_status_running">Sharing over LAN</string>
+    <string name="lan_status_stopped">Sharing stopped</string>
+    <string name="lan_status_error">Could not share video</string>
+    <string name="lan_details_ready">Tap Start sharing to create a LAN link.</string>
+    <string name="lan_details_running">Open the link in VLC on a device connected to the same LAN or Wi-Fi network.</string>
+    <string name="lan_details_stopped">Tap Start sharing to create a new link.</string>
+    <string name="lan_client_connected">Device %1$s is accessing the video.</string>
+    <string name="lan_client_disconnected">The device disconnected. The server is still available.</string>
+    <string name="lan_error_source">The video cannot be read. It may have been deleted or access may have been removed. Choose the video again.</string>
+    <string name="lan_error_size">The video size could not be determined. Choose a file downloaded to this device or try again.</string>
+    <string name="lan_error_network">No LAN or Wi-Fi network was found. Connect to a network and try again.</string>
+    <string name="lan_error_address">The current network address cannot be used. Check your connection and try again.</string>
+    <string name="lan_error_server">LAN sharing could not start. Try again.</string>
+    <string name="lan_retry">Try sharing again</string>
+    <string name="lan_copy_success">LAN link copied</string>
+    <string name="lan_copy_unavailable">The link could not be copied. You can select and copy the displayed address.</string>
+</resources>
