@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_partial_access_message">Only videos you have allowed are shown.</string>
+    <string name="library_select_more">Select more videos</string>
+    <string name="library_partial_empty_title">No accessible videos yet</string>
+    <string name="library_partial_empty_message">Select more videos for your library or open a video on your device.</string>
+    <string name="library_video_unavailable">The video was deleted or access is no longer available. Select it again.</string>
+</resources>

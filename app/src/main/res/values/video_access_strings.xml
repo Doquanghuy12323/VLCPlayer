@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="library_partial_access_message">Chỉ hiển thị những video bạn đã cho phép truy cập.</string>
+    <string name="library_select_more">Chọn thêm video</string>
+    <string name="library_partial_empty_title">Chưa có video được phép xem</string>
+    <string name="library_partial_empty_message">Chọn thêm video cho thư viện hoặc mở từng video trên máy.</string>
+    <string name="library_video_unavailable">Video đã bị xóa hoặc không còn quyền truy cập. Hãy chọn lại video.</string>
+</resources>

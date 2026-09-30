@@ -12,6 +12,7 @@ import android.media.audiofx.AudioEffect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.util.DisplayMetrics;
@@ -84,6 +85,13 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean audioFocusRequested;
     private boolean audioFocusHeld;
     private boolean activityResumed;
+    private final ExecutorService videoAccessExecutor = Executors.newSingleThreadExecutor();
+    private Future<?> videoAccessFuture;
+    private CancellationSignal videoAccessCancellation;
+    private int videoAccessGeneration;
+    private boolean verifyContentAccessOnResume;
+    private boolean checkingContentAccess;
+    private boolean contentAccessFailure;
 
     private View nightOverlay;
     private boolean nightMode = false;
@@ -558,6 +566,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void handlePlaybackEndReached() {
+        if (contentAccessFailure || isFinishing() || isDestroyed()) return;
         blockHandyPlayback();
         long position = getBestKnownPlaybackPosition();
         lastKnownPlaybackPositionMs = position;
@@ -921,6 +930,9 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void playMedia(String uri, boolean restoreSavedHistory) {
+        if (contentAccessFailure || isFinishing() || isDestroyed()) return;
+        cancelVideoAccessValidation();
+        verifyContentAccessOnResume = false;
         userPaused = false;
         resumeAfterFocusLoss = false;
         boolean mediaChanged = pendingUri == null || !uri.equals(pendingUri);
@@ -969,13 +981,16 @@ public class PlayerActivity extends AppCompatActivity {
             Uri u = Uri.parse(uri);
             Media media;
             if ("content".equals(u.getScheme())) {
-                android.os.ParcelFileDescriptor oldPfd = currentPfd;
-                currentPfd = getContentResolver().openFileDescriptor(u, "r");
-                if (currentPfd == null) {
-                    if (oldPfd != null) try { oldPfd.close(); } catch (Exception ignored) {}
-                    return;
+                ParcelFileDescriptor newPfd = getContentResolver().openFileDescriptor(u, "r");
+                if (newPfd == null) throw new IOException("Video descriptor unavailable");
+                try {
+                    media = new Media(libVLC, newPfd.getFileDescriptor());
+                } catch (Exception e) {
+                    try { newPfd.close(); } catch (IOException ignored) {}
+                    throw e;
                 }
-                media = new Media(libVLC, currentPfd.getFileDescriptor());
+                ParcelFileDescriptor oldPfd = currentPfd;
+                currentPfd = newPfd;
                 if (oldPfd != null) try { oldPfd.close(); } catch (Exception ignored) {}
             } else {
                 closePfd();
@@ -998,6 +1013,11 @@ public class PlayerActivity extends AppCompatActivity {
                 mediaPlayer.attachViews(videoLayout, null, false, false);
             });
         } catch (Exception e) {
+            if ("content".equals(Uri.parse(uri).getScheme())) {
+                android.util.Log.w("PlayerActivity", "Content video cannot be opened", e);
+                finishForUnavailableContent();
+                return;
+            }
             Toast.makeText(this, "Loi: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
         if (handyManager != null && handyManager.isConnected()) {
@@ -1022,7 +1042,7 @@ public class PlayerActivity extends AppCompatActivity {
 
 
     private void saveHistory() {
-        if (uriString == null) return;
+        if (uriString == null || contentAccessFailure) return;
         final String historyUri = uriString;
         final String historyTitle = videoTitle != null ? videoTitle : "Video";
         final long duration = getBestKnownMediaDuration();
@@ -1445,6 +1465,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void togglePlayPause() {
+        if (checkingContentAccess || contentAccessFailure) return;
         if (mediaPlayer == null) return;
         if (mediaPlayer.isPlaying()) {
             userPaused = true;
@@ -2129,30 +2150,120 @@ public class PlayerActivity extends AppCompatActivity {
         if (audioSessionId != android.media.audiofx.AudioEffect.ERROR_BAD_VALUE) {
             handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
         }
-        if (mediaPlayer != null && videoLayout != null) {
-            videoLayout.post(() -> {
-                if (!activityResumed || !isInBackground) return;
-                try {
-                    boolean shouldResume = resumeAfterBackground && !userPaused;
-                    mediaPlayer.attachViews(videoLayout, null, false, filtersEnabled);
-                    if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
-                    isInBackground = false;
-                    resumeAfterBackground = false;
-                    prepareScriptAfterConnection();
-                    if (shouldResume && requestAudioFocus()) {
-                        mediaPlayer.play();
-                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
-                        handler.postDelayed(() -> broadcastAudioSessionOpen(), 1500);
-                    }
-                } catch (Exception e) {
-                    android.util.Log.w("PlayerActivity", "Could not restore playback", e);
-                }
-            });
+        if (mediaPlayer != null && videoLayout != null && !contentAccessFailure) {
+            if (verifyContentAccessOnResume && uriString != null
+                    && "content".equals(Uri.parse(uriString).getScheme())) {
+                validateContentBeforeResume();
+            } else {
+                restorePlaybackAfterBackground();
+            }
         }
+    }
+
+    private void validateContentBeforeResume() {
+        cancelVideoAccessValidation();
+        final int generation = videoAccessGeneration;
+        final int mediaGeneration = subtitleMediaGeneration;
+        final String checkedUri = uriString;
+        final CancellationSignal cancellation = new CancellationSignal();
+        videoAccessCancellation = cancellation;
+        checkingContentAccess = true;
+        // An existing VLC descriptor can keep working after its URI grant is revoked.
+        // Check a fresh descriptor before restoring video or Handy from background.
+        if (mediaPlayer.isPlaying()) {
+            resumeAfterBackground = !userPaused;
+            lastPosition = getBestKnownPlaybackPosition();
+            freezePlaybackClockEstimate();
+            mediaPlayer.pause();
+        }
+        isInBackground = true;
+        blockHandyPlayback();
+        if (handyManager != null) handyManager.stopPlayback(null);
+        abandonAudioFocus();
+        videoAccessFuture = videoAccessExecutor.submit(() -> {
+            boolean readable;
+            try (ParcelFileDescriptor descriptor = getContentResolver()
+                    .openFileDescriptor(Uri.parse(checkedUri), "r", cancellation)) {
+                readable = descriptor != null;
+            } catch (Exception ignored) {
+                readable = false;
+            }
+            final boolean canRead = readable;
+            handler.post(() -> {
+                if (isDestroyed() || isFinishing() || !activityResumed
+                        || generation != videoAccessGeneration || cancellation.isCanceled()
+                        || mediaGeneration != subtitleMediaGeneration
+                        || !checkedUri.equals(uriString)) return;
+                videoAccessFuture = null;
+                videoAccessCancellation = null;
+                checkingContentAccess = false;
+                if (!canRead) {
+                    finishForUnavailableContent();
+                    return;
+                }
+                verifyContentAccessOnResume = false;
+                restorePlaybackAfterBackground();
+            });
+        });
+    }
+
+    private void restorePlaybackAfterBackground() {
+        final int generation = videoAccessGeneration;
+        final int mediaGeneration = subtitleMediaGeneration;
+        videoLayout.post(() -> {
+            if (!activityResumed || !isInBackground || isFinishing() || contentAccessFailure
+                    || generation != videoAccessGeneration
+                    || mediaGeneration != subtitleMediaGeneration) return;
+            try {
+                boolean shouldResume = resumeAfterBackground && !userPaused;
+                mediaPlayer.attachViews(videoLayout, null, false, filtersEnabled);
+                if (lastPosition > 0) mediaPlayer.setTime(lastPosition);
+                isInBackground = false;
+                resumeAfterBackground = false;
+                prepareScriptAfterConnection();
+                if (shouldResume && requestAudioFocus()) {
+                    mediaPlayer.play();
+                    handler.postDelayed(() -> broadcastAudioSessionOpen(), 500);
+                    handler.postDelayed(() -> broadcastAudioSessionOpen(), 1500);
+                }
+            } catch (Exception e) {
+                android.util.Log.w("PlayerActivity", "Could not restore playback", e);
+            }
+        });
+    }
+
+    private void cancelVideoAccessValidation() {
+        videoAccessGeneration++;
+        if (videoAccessCancellation != null) videoAccessCancellation.cancel();
+        if (videoAccessFuture != null) videoAccessFuture.cancel(true);
+        videoAccessCancellation = null;
+        videoAccessFuture = null;
+        checkingContentAccess = false;
+    }
+
+    private void finishForUnavailableContent() {
+        if (contentAccessFailure || isFinishing() || isDestroyed()) return;
+        contentAccessFailure = true;
+        userPaused = true;
+        resumeAfterBackground = false;
+        resumeAfterFocusLoss = false;
+        pendingUri = null;
+        cancelVideoAccessValidation();
+        cancelPlaybackRecoveryCallbacks();
+        cancelSubtitleOperation();
+        blockHandyPlayback();
+        if (handyManager != null) handyManager.stopPlayback(null);
+        try { if (mediaPlayer != null) mediaPlayer.stop(); } catch (Exception ignored) {}
+        abandonAudioFocus();
+        closePfd();
+        Toast.makeText(this, R.string.library_video_unavailable, Toast.LENGTH_LONG).show();
+        finish();
     }
 
     @Override protected void onPause() {
         activityResumed = false;
+        verifyContentAccessOnResume = true;
+        cancelVideoAccessValidation();
         super.onPause();
     }
 
@@ -2162,7 +2273,7 @@ public class PlayerActivity extends AppCompatActivity {
         isInBackground = true;
         blockHandyPlayback();
         resumeAfterBackground = mediaPlayer != null && !userPaused
-            && (mediaPlayer.isPlaying() || resumeAfterFocusLoss);
+            && (mediaPlayer.isPlaying() || resumeAfterFocusLoss || resumeAfterBackground);
         resumeAfterFocusLoss = false;
         saveHistory();
         cancelPlaybackRecoveryCallbacks();
@@ -2191,6 +2302,8 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     @Override protected void onDestroy() {
+        cancelVideoAccessValidation();
+        videoAccessExecutor.shutdownNow();
         cancelSubtitleOperation();
         subtitleExecutor.shutdownNow();
         funscriptOperationGeneration++;
