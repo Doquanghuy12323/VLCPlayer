@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="manga_back">Go back</string>
+    <string name="manga_loading">Opening comic</string>
+    <string name="manga_retry">Retry</string>
+    <string name="manga_close">Close comic</string>
+    <string name="manga_load_error_title">Could not open comic</string>
+    <string name="manga_load_error_message">The CBZ file could not be read. Check file access and the comic file. Files must contain at most 2,000 pages and no more than 500 MB of unpacked data.</string>
+    <string name="manga_empty_title">No comic pages found</string>
+    <string name="manga_empty_message">This CBZ file contains no JPG, PNG, WebP or GIF images. Choose another comic file or try opening it again.</string>
+    <string name="manga_page_counter">%1$d / %2$d</string>
+    <string name="manga_page_description">Page %1$d</string>
+    <string name="manga_page_navigation">Choose comic page</string>
+    <string name="manga_page_error_retry">Could not load this page. Tap to retry.</string>
+</resources>

@@ -4,97 +4,64 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#1E1F22">
+    android:focusableInTouchMode="true"
+    android:background="@color/surface_darker">
 
     <LinearLayout
         android:id="@+id/address_bar"
         android:layout_width="match_parent"
-        android:layout_height="52dp"
+        android:layout_height="wrap_content"
+        android:minHeight="56dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingHorizontal="8dp"
-        android:background="#2B2D31">
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:background="@color/surface_dark">
 
         <ImageButton
             android:id="@+id/btn_back"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_previous"
-            app:tint="#FFFFFF"/>
-
-        <ImageButton
-            android:id="@+id/btn_nav_back"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:background="?selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_media_rew"
-            app:tint="#B5BAC1"/>
-
-        <ImageButton
-            android:id="@+id/btn_nav_fwd"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:background="?selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_media_ff"
-            app:tint="#B5BAC1"/>
+            android:contentDescription="@string/manga_browser_close"
+            app:tint="@color/text_primary"/>
 
         <EditText
             android:id="@+id/et_url"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
             android:layout_weight="1"
-            android:layout_marginHorizontal="6dp"
-            android:background="#313338"
-            android:paddingHorizontal="10dp"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
+            android:background="@color/bg_dark"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
             android:singleLine="true"
+            android:saveEnabled="false"
             android:imeOptions="actionGo"
             android:inputType="textUri"
-            android:hint="Nhap URL..."
-            android:textColorHint="#80848E"/>
+            android:hint="@string/manga_browser_url_hint"
+            android:textColorHint="@color/text_secondary"/>
 
         <ImageButton
             android:id="@+id/btn_go"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:background="?selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_play"
-            app:tint="#5865F2"/>
+            android:contentDescription="@string/manga_browser_go"
+            app:tint="@color/text_primary"/>
 
         <ImageButton
-            android:id="@+id/btn_refresh"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:id="@+id/btn_browser_menu"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:background="?selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_menu_rotate"
-            app:tint="#B5BAC1"/>
-
-        <ImageButton
-            android:id="@+id/btn_bookmark"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:background="?selectableItemBackgroundBorderless"
-            android:src="@android:drawable/btn_star_big_off"
-            app:tint="#FFD700"/>
-
-        <ImageButton
-            android:id="@+id/btn_bookmark_list"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:background="?selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_menu_agenda"
-            app:tint="#B5BAC1"/>
-
-        <ImageButton
-            android:id="@+id/btn_fullscreen"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:background="?selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_menu_zoom"
-            app:tint="#5865F2"/>
-
+            android:src="@android:drawable/ic_menu_more"
+            android:contentDescription="@string/manga_browser_menu"
+            app:tint="@color/text_primary"/>
     </LinearLayout>
 
     <ProgressBar
@@ -102,13 +69,84 @@
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
         android:layout_height="3dp"
-        android:progressTint="#5865F2"
+        android:progressTint="@color/accent"
+        android:contentDescription="@string/manga_browser_loading"
         android:visibility="gone"/>
 
-    <WebView
-        android:id="@+id/webView"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"/>
+        android:layout_weight="1">
 
+        <WebView
+            android:id="@+id/webView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/browser_error"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:background="@color/surface_darker"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
+                android:paddingTop="64dp"
+                android:paddingBottom="24dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="@string/manga_browser_error_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:text="@string/manga_browser_error_message"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="16sp"/>
+
+                <TextView
+                    android:id="@+id/browser_error_url"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:textIsSelectable="true"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_browser_retry"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:layout_marginTop="20dp"
+                    android:text="@string/manga_browser_retry"/>
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_exit_fullscreen"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="8dp"
+            android:text="@string/manga_browser_exit_fullscreen"
+            android:visibility="gone"/>
+    </FrameLayout>
 </LinearLayout>

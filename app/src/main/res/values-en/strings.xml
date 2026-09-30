@@ -28,7 +28,6 @@
     <string name="menu_lan_cast">Stream video over LAN</string>
     <string name="menu_manga_local">Read local comics</string>
     <string name="menu_manga_online">Read online comics</string>
-    <string name="menu_ai">AI assistant (Gemini)</string>
     <string name="menu_handy">The Handy</string>
     <string name="menu_settings">Settings</string>
     <string name="menu_privacy">Privacy mode</string>

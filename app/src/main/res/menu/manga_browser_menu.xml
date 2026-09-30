@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/browser_nav_back" android:title="@string/manga_browser_previous"/>
+    <item android:id="@+id/browser_nav_forward" android:title="@string/manga_browser_next"/>
+    <item android:id="@+id/browser_reload" android:title="@string/manga_browser_reload"/>
+    <item android:id="@+id/browser_bookmark" android:title="@string/manga_browser_save_bookmark"/>
+    <item android:id="@+id/browser_bookmark_list" android:title="@string/manga_browser_bookmarks"/>
+    <item android:id="@+id/browser_fit_image" android:title="@string/manga_browser_fit_image"/>
+    <item android:id="@+id/browser_fullscreen" android:title="@string/manga_browser_fullscreen"/>
+</menu>

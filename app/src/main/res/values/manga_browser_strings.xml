@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="manga_browser_close">Đóng trình duyệt</string>
+    <string name="manga_browser_close_dialog">Đóng</string>
+    <string name="manga_browser_url_hint">Nhập địa chỉ web</string>
+    <string name="manga_browser_go">Mở địa chỉ web</string>
+    <string name="manga_browser_menu">Tùy chọn trình duyệt</string>
+    <string name="manga_browser_loading">Đang tải trang</string>
+    <string name="manga_browser_previous">Trang trước</string>
+    <string name="manga_browser_next">Trang tiếp theo</string>
+    <string name="manga_browser_reload">Tải lại trang</string>
+    <string name="manga_browser_save_bookmark">Lưu trang hiện tại</string>
+    <string name="manga_browser_bookmarks">Trang đã lưu</string>
+    <string name="manga_browser_fit_image">Vừa ảnh với màn hình</string>
+    <string name="manga_browser_fullscreen">Toàn màn hình</string>
+    <string name="manga_browser_exit_fullscreen">Thoát toàn màn hình</string>
+    <string name="manga_browser_error_title">Không tải được trang</string>
+    <string name="manga_browser_error_message">Kiểm tra kết nối mạng hoặc địa chỉ trang rồi thử lại.</string>
+    <string name="manga_browser_retry">Thử lại</string>
+    <string name="manga_browser_invalid_url">Nhập địa chỉ web hợp lệ bắt đầu bằng http:// hoặc https://.</string>
+    <string name="manga_browser_saved">Đã lưu trang</string>
+    <string name="manga_browser_already_saved">Trang này đã được lưu</string>
+    <string name="manga_browser_no_bookmarks">Chưa có trang đã lưu</string>
+    <string name="manga_browser_clear_bookmarks">Xóa tất cả</string>
+    <string name="manga_browser_bookmarks_cleared">Đã xóa các trang đã lưu</string>
+</resources>
