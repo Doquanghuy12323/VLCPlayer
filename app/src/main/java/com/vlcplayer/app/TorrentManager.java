@@ -3,6 +3,7 @@ package com.vlcplayer.app;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import org.libtorrent4j.SessionManager;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
@@ -69,12 +70,19 @@ public class TorrentManager {
     private volatile boolean streamActive;
     private long temporaryGeneration;
     private volatile String playbackSessionId;
+    private String streamSource;
     private volatile Callback callback;
-    private volatile String lastStatus = "Khoi dong...";
+    private volatile String lastStatus;
+    private volatile String lastError;
+    private final Context appContext;
+    private Context localizedContext;
+    private String localizedLanguage;
     private static final Object CACHE_LOCK = new Object();
     private final AtomicInteger lifecycleGeneration = new AtomicInteger();
 
     public TorrentManager(Context ctx) {
+        appContext = ctx.getApplicationContext();
+        lastStatus = text(R.string.torrent_manager_starting);
         temporaryDirectory = getCacheDirectory(ctx);
         retainedRoot = getRetainedDirectory(ctx);
         saveDir = temporaryDirectory;
@@ -100,13 +108,15 @@ public class TorrentManager {
             temporaryGeneration = cleanupAfterPlayback ? TEMPORARY_OWNERSHIP.claim(temporaryDirectory) : 0;
             callback = uiCallback;
             playbackSessionId = sessionId;
+            streamSource = source;
             streamActive = true;
             activeInstance = this;
             readyCalled = false;
             lowStorageStopping = false;
+            lastError = null;
         }
         final Callback cb = new ForwardingCallback(operationId);
-        cb.onStatusUpdate("Khoi dong...");
+        cb.onStatusUpdate(text(R.string.torrent_manager_starting));
 
         // Native metadata/add operations are serialized so cancelled workers cannot
         // install an old handle after a replacement stream has started.
@@ -123,12 +133,12 @@ public class TorrentManager {
                     if (cleanupAfterPlayback) {
                         if (!clearCacheWithRetries(operationDir, false, operationId, temporaryGeneration, false)
                                 && isCurrent(operationId)) {
-                            throw new IOException("Khong don duoc du lieu torrent tam, thu lai sau");
+                            throw new UiException(R.string.torrent_manager_temporary_cleanup_failed);
                         }
                     }
                     if (!isCurrent(operationId)) return;
                     if (!operationDir.exists() && !operationDir.mkdirs()) {
-                        throw new IOException("Khong tao duoc thu muc torrent");
+                        throw new UiException(R.string.torrent_manager_directory_failed);
                     }
                     ensureStorageAvailable();
                     if (!cleanupAfterPlayback) TorrentStorage.rememberSource(operationDir, source);
@@ -139,12 +149,12 @@ public class TorrentManager {
                 if (local != null) {
                     File f = local;
                     if (!f.exists()) {
-                        cb.onError("File khong tim thay");
+                        cb.onError(text(R.string.torrent_manager_source_missing));
                         return;
                     }
                     ti = new TorrentInfo(f);
                 } else if (source.startsWith("http://") || source.startsWith("https://")) {
-                    cb.onStatusUpdate("Dang tai file .torrent...");
+                    cb.onStatusUpdate(text(R.string.torrent_manager_downloading_metadata_file));
                     File torrentFile = new File(operationDir, "remote-" + sessionId + ".torrent");
                     HttpURLConnection conn = (HttpURLConnection) new URL(source).openConnection();
                     conn.setConnectTimeout(15000);
@@ -153,7 +163,7 @@ public class TorrentManager {
                     try {
                         int responseCode = conn.getResponseCode();
                         if (responseCode < 200 || responseCode >= 300) {
-                            throw new IOException("HTTP " + responseCode + " khi tai torrent");
+                            throw new UiException(R.string.torrent_manager_http_error, responseCode);
                         }
                         try (InputStream input = conn.getInputStream();
                              OutputStream output = new FileOutputStream(torrentFile)) {
@@ -179,16 +189,16 @@ public class TorrentManager {
                             + "&tr=udp://9.rarbg.to:2920/announce"
                             + "&tr=udp://tracker.coppersurfer.tk:6969/announce";
                     }
-                    cb.onStatusUpdate("Tim metadata...");
+                    cb.onStatusUpdate(text(R.string.torrent_manager_finding_metadata));
                     byte[] data = session.fetchMagnet(magnet, 30, operationDir);
                     if (!isCurrent(operationId)) return;
                     if (data == null) {
-                        cb.onError("Khong tim duoc metadata. Kiem tra ket noi mang");
+                        cb.onError(text(R.string.torrent_manager_metadata_missing));
                         return;
                     }
                     ti = new TorrentInfo(data);
                 } else {
-                    cb.onError("Link khong hop le");
+                    cb.onError(text(R.string.torrent_manager_invalid_source));
                     return;
                 }
 
@@ -196,7 +206,7 @@ public class TorrentManager {
 
                 List<VideoFileEntry> videos = listVideoFiles(ti);
                 if (videos.isEmpty()) {
-                    cb.onError("Torrent nay khong chua file video");
+                    cb.onError(text(R.string.torrent_manager_no_video));
                     return;
                 }
 
@@ -208,8 +218,7 @@ public class TorrentManager {
 
             } catch (Exception e) {
                 if (!isCurrent(operationId)) return;
-                String msg = e.getMessage() != null ? e.getMessage() : "Loi khong xac dinh";
-                cb.onError(msg);
+                cb.onError(userError(e, R.string.torrent_manager_start_failed));
             }
         });
     }
@@ -227,7 +236,9 @@ public class TorrentManager {
         }
         synchronized (CACHE_LOCK) {
             if (!isCurrent(operationId)) return false;
-            if (session.find(info.infoHash()) != null) throw new IOException("Torrent cu chua dung, thu lai sau");
+            if (session.find(info.infoHash()) != null) {
+                throw new UiException(R.string.torrent_manager_previous_stopping);
+            }
             Priority[] priorities = new Priority[info.files().numFiles()];
             for (int i = 0; i < priorities.length; i++) priorities[i] = Priority.IGNORE;
             session.download(info, directory, null, priorities, null, TorrentFlags.SEQUENTIAL_DOWNLOAD);
@@ -243,7 +254,7 @@ public class TorrentManager {
                 if (candidate != null && candidate.isValid()) session.remove(candidate);
                 return false;
             }
-            if (candidate == null) throw new IOException("Khong bat duoc torrent");
+            if (candidate == null) throw new UiException(R.string.torrent_manager_handle_missing);
             handle = candidate;
             cachedInfo = info;
             return true;
@@ -263,7 +274,7 @@ public class TorrentManager {
         synchronized (CACHE_LOCK) {
         if (!isCurrent(operationId) || !streamActive) return;
         if (handle == null || !handle.isValid() || cachedInfo == null) {
-            handler.post(() -> cb.onError("Torrent chua san sang, thu lai sau"));
+            handler.post(() -> cb.onError(text(R.string.torrent_manager_not_ready)));
             return;
         }
         try {
@@ -281,7 +292,7 @@ public class TorrentManager {
             selectedFileIndex = fileIndex;
             selectedVideoFile = new File(saveDir, fs.filePath(fileIndex));
             if (!TorrentStorage.isDescendant(selectedVideoFile, saveDir)) {
-                throw new IOException("Duong dan video torrent khong hop le");
+                throw new UiException(R.string.torrent_manager_invalid_video_path);
             }
             readyCalled = false;
 
@@ -289,7 +300,7 @@ public class TorrentManager {
             startProxy(cb, operationId);
 
         } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage() : "Loi chon file";
+            String msg = userError(e, R.string.torrent_manager_selection_failed);
             handler.post(() -> cb.onError(msg));
         }
         }
@@ -308,8 +319,7 @@ public class TorrentManager {
         long usable = saveDir.getUsableSpace();
         long reserve = getReservedFreeSpace();
         if (usable > 0 && usable < reserve + STARTUP_HEADROOM_BYTES) {
-            throw new IOException("Khong du bo nho an toan de phat torrent; app luon giu lai "
-                + formatBytes(reserve) + " trong");
+            throw new UiException(R.string.torrent_manager_low_storage, formatBytes(reserve));
         }
     }
 
@@ -530,16 +540,16 @@ public class TorrentManager {
                     int pct = (int) (st.progress() * 100);
                     float dlKb = st.downloadRate() / 1024f;
                     int peers = st.numPeers();
-                    String state = st.state().toString();
+                    String state = localizedState(st.state());
 
                     if (!lowStorageStopping && saveDir.getUsableSpace() > 0
                             && saveDir.getUsableSpace() < getReservedFreeSpace()) {
                         synchronized (CACHE_LOCK) {
                             if (!isCurrent(operationId)) return;
                             lowStorageStopping = true;
-                            String message = autoCleanup
-                                ? "Torrent da tu dung va xoa du lieu tam de bao ve bo nho trong"
-                                : "Torrent da tu dung de bao ve bo nho trong; du lieu da tai van duoc giu lai";
+                            String message = text(autoCleanup
+                                ? R.string.torrent_manager_stopped_low_storage_deleted
+                                : R.string.torrent_manager_stopped_low_storage_kept);
                             stopForStorage(message);
                         }
                         return;
@@ -547,8 +557,8 @@ public class TorrentManager {
 
                     handler.post(() -> {
                         cb.onProgress(pct, dlKb);
-                        cb.onStatusUpdate(state + " | " + pct + "% | "
-                            + (int) dlKb + " KB/s | Peers: " + peers);
+                        cb.onStatusUpdate(text(R.string.torrent_manager_progress,
+                            state, pct, (int) dlKb, peers));
                     });
 
                     if (!readyCalled && cachedInfo != null && selectedFileIndex >= 0) {
@@ -595,12 +605,14 @@ public class TorrentManager {
         lifecycleGeneration.incrementAndGet();
         streamActive = false;
         playbackSessionId = null;
+        streamSource = null;
         if (activeInstance == this) activeInstance = null;
         proxyRunning = false;
         if (monitorTimer != null) { monitorTimer.cancel(); monitorTimer = null; }
         try { if (proxyServer != null && !proxyServer.isClosed()) proxyServer.close(); }
         catch (Exception ignored) {}
         readyCalled = false;
+        lastError = null;
 
         // Fix: PHAI xoa handle cu, neu khong startStream() se tuong
         // da co handle va bo qua vong lap tim handle torrent moi
@@ -634,7 +646,7 @@ public class TorrentManager {
                 if (!TEMPORARY_OWNERSHIP.isCurrent(cleanupDirectory, cleanupGeneration)) return;
             }
             postCallback(cleanupId, target -> {
-                if (!cleared) target.onError("Torrent da dung; khong the xoa het du lieu tam");
+                if (!cleared) target.onError(text(R.string.torrent_manager_cleanup_incomplete));
                 else if (errorAfterCleanup != null) target.onError(errorAfterCleanup);
                 else target.onStopped();
             });
@@ -678,6 +690,25 @@ public class TorrentManager {
 
     public String getPlaybackSessionId() {
         return playbackSessionId;
+    }
+
+    /** Validates a pending handoff against the exact live torrent and proxy session. */
+    public String getReadyUrl(String expectedSessionId) {
+        synchronized (CACHE_LOCK) {
+            if (expectedSessionId == null || !expectedSessionId.equals(playbackSessionId)
+                    || activeInstance != this || !streamActive || !readyCalled || !proxyRunning
+                    || proxyServer == null || proxyServer.isClosed() || lastError != null) return null;
+            return "http://127.0.0.1:" + proxyPort + "/stream";
+        }
+    }
+
+    /** The original source belongs to this live session, including a retained startup error. */
+    public String getStreamSource(String expectedSessionId) {
+        synchronized (CACHE_LOCK) {
+            if (expectedSessionId == null || !expectedSessionId.equals(playbackSessionId)
+                    || activeInstance != this || !streamActive) return null;
+            return streamSource;
+        }
     }
 
     public boolean isAutoCleanupEnabled() {
@@ -738,6 +769,10 @@ public class TorrentManager {
             Callback current = new ForwardingCallback(lifecycleGeneration.get());
             if (!streamActive) {
                 current.onStopped();
+            } else if (lastError != null) {
+                // A failed startup can happen while a rotating activity has detached.
+                // Replaying its error lets the replacement UI offer Retry instead of hanging.
+                current.onError(lastError);
             } else if (cachedInfo != null && selectedFileIndex < 0) {
                 current.onFilesFound(listVideoFiles(cachedInfo));
             } else if (readyCalled && proxyRunning) {
@@ -777,16 +812,72 @@ public class TorrentManager {
             postCallback(operationId, target -> target.onReady(url));
         }
         @Override public void onError(String error) {
+            synchronized (CACHE_LOCK) {
+                if (!isCurrent(operationId)) return;
+                lastError = error;
+            }
             postCallback(operationId, target -> target.onError(error));
         }
         @Override public void onStopped() { postCallback(operationId, Callback::onStopped); }
         @Override public void onStatusUpdate(String status) {
-            if (isCurrent(operationId)) lastStatus = status;
+            synchronized (CACHE_LOCK) {
+                if (!isCurrent(operationId)) return;
+                lastStatus = status;
+            }
             postCallback(operationId, target -> target.onStatusUpdate(status));
         }
         @Override public void onFilesFound(List<VideoFileEntry> files) {
             List<VideoFileEntry> snapshot = new ArrayList<>(files);
             postCallback(operationId, target -> target.onFilesFound(snapshot));
+        }
+    }
+
+    private synchronized String text(int resource, Object... arguments) {
+        String language = AppLanguageManager.getSavedLanguage(appContext);
+        if (localizedContext == null || !language.equals(localizedLanguage)) {
+            localizedContext = AppLanguageManager.applyLanguage(appContext);
+            localizedLanguage = language;
+        }
+        return arguments.length == 0 ? localizedContext.getString(resource)
+            : localizedContext.getString(resource, arguments);
+    }
+
+    private String userError(Exception error, int fallbackResource) {
+        if (error instanceof UiException) {
+            UiException known = (UiException) error;
+            return text(known.resource, known.arguments);
+        }
+        Log.w("TorrentManager", "Torrent operation failed", error);
+        return text(fallbackResource);
+    }
+
+    private String localizedState(TorrentStatus.State state) {
+        if (state == null) return text(R.string.torrent_manager_state_active);
+        switch (state) {
+            case CHECKING_FILES:
+            case CHECKING_RESUME_DATA:
+                return text(R.string.torrent_manager_state_checking);
+            case DOWNLOADING_METADATA:
+                return text(R.string.torrent_manager_state_metadata);
+            case DOWNLOADING:
+                return text(R.string.torrent_manager_state_downloading);
+            case FINISHED:
+                return text(R.string.torrent_manager_state_finished);
+            case SEEDING:
+                return text(R.string.torrent_manager_state_seeding);
+            default:
+                return text(R.string.torrent_manager_state_active);
+        }
+    }
+
+    private static final class UiException extends IOException {
+        final int resource;
+        final Object[] arguments;
+
+        UiException(int resource, Object... arguments) {
+            super("Torrent operation: " + resource);
+            this.resource = resource;
+            this.arguments = arguments;
         }
     }
 

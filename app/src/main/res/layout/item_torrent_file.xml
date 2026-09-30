@@ -20,7 +20,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFFFFF"
-            android:textSize="13sp"
+            android:textSize="16sp"
             android:maxLines="2"
             android:ellipsize="end"/>
 
@@ -29,17 +29,18 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#B5BAC1"
-            android:textSize="12sp"
+            android:textSize="14sp"
             android:paddingTop="2dp"/>
 
     </LinearLayout>
 
     <ImageButton
         android:id="@+id/btn_delete"
-        android:layout_width="36dp"
-        android:layout_height="36dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:background="?selectableItemBackgroundBorderless"
         android:src="@android:drawable/ic_menu_delete"
+        android:contentDescription="@string/torrent_delete_confirm"
         app:tint="#ED4245"/>
 
 </LinearLayout>
