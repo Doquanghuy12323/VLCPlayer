@@ -8,8 +8,11 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.OperationCanceledException;
+import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
@@ -34,9 +37,12 @@ import com.bumptech.glide.Glide;
 import com.vlcplayer.app.db.AppDatabase;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class MainActivity extends AppCompatActivity
     implements VideoAdapter.OnVideoClickListener {
@@ -44,6 +50,8 @@ public class MainActivity extends AppCompatActivity
     private static final int REQ_PERMISSION = 100;
     private static final int REQ_VIDEO_DOCUMENT = 2002;
     private static final String PREF_PERMISSION_REQUESTED = "video_permission_requested";
+    private static final String PREF_SELECTION_PERMISSION_REQUESTED =
+        "video_selection_permission_requested";
 
     private enum LibraryState { LOADING, CONTENT, EMPTY, PERMISSION, ERROR }
 
@@ -55,12 +63,21 @@ public class MainActivity extends AppCompatActivity
     private TextView stateMessage;
     private Button statePrimary;
     private Button stateSecondary;
+    private View accessNotice;
+    private TextView accessMessage;
+    private Button accessSelect;
     private final List<VideoItem> videoList = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private UpdateManager updateManager;
-    private int scanGeneration;
-    private boolean returningFromSettings;
+    private volatile int scanGeneration;
+    private boolean scanInProgress;
+    private CancellationSignal scanCancellation;
+    private Future<?> scanTask;
+    private VideoAccessPolicy.Access scanningAccess;
+    private boolean permissionRequestInProgress;
+    private boolean openingVideo;
+    private boolean activityResumed;
     private boolean privacyToggleInProgress;
 
     @Override
@@ -86,6 +103,12 @@ public class MainActivity extends AppCompatActivity
         stateMessage = findViewById(R.id.state_message);
         statePrimary = findViewById(R.id.state_primary);
         stateSecondary = findViewById(R.id.state_secondary);
+        accessNotice = findViewById(R.id.library_access_notice);
+        accessMessage = findViewById(R.id.library_access_message);
+        accessSelect = findViewById(R.id.library_access_select);
+        accessMessage.setText(R.string.library_partial_access_message);
+        accessSelect.setText(R.string.library_select_more);
+        accessSelect.setOnClickListener(v -> requestVideoPermission());
 
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setHasFixedSize(true);
@@ -141,18 +164,26 @@ public class MainActivity extends AppCompatActivity
     @Override
     protected void onResume() {
         super.onResume();
+        activityResumed = true;
         // Khi quay lai tu PlayerActivity, dọn Glide memory
         Glide.get(this).clearMemory();
-        if (returningFromSettings) {
-            returningFromSettings = false;
-            if (hasVideoPermission()) loadVideos();
-            else showLibraryState(LibraryState.PERMISSION);
-        }
+        // Selection and grants can change while this activity is away, including in Settings.
+        // Initial onCreate/permission-result scans are coalesced until they complete.
+        refreshLibrary(false);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        activityResumed = false;
+        // A scan started before a permission picker must never publish its old selection.
+        cancelVideoScan();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        cancelVideoScan();
         if (adapter != null) adapter.clearCache();
         if (updateManager != null) updateManager.destroy();
         executor.shutdown();
@@ -174,13 +205,11 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void checkPermissionsAndLoad() {
-        if (hasVideoPermission()) {
-            loadVideos();
-        } else {
-            showLibraryState(LibraryState.PERMISSION);
-            if (!getPreferences(MODE_PRIVATE).getBoolean(PREF_PERMISSION_REQUESTED, false)) {
-                requestVideoPermission();
-            }
+        refreshLibrary(true);
+        if (getVideoAccess() == VideoAccessPolicy.Access.DENIED
+                && !getPreferences(MODE_PRIVATE)
+                    .getBoolean(PREF_PERMISSION_REQUESTED, false)) {
+            requestVideoPermission();
         }
     }
 
@@ -191,29 +220,54 @@ public class MainActivity extends AppCompatActivity
     }
 
     private boolean hasVideoPermission() {
-        return ContextCompat.checkSelfPermission(this, videoPermission())
+        return getVideoAccess() != VideoAccessPolicy.Access.DENIED;
+    }
+
+    private VideoAccessPolicy.Access getVideoAccess() {
+        return VideoAccessPolicy.resolve(Build.VERSION.SDK_INT,
+            Build.VERSION.SDK_INT >= 33
+                && isPermissionGranted(Manifest.permission.READ_MEDIA_VIDEO),
+            Build.VERSION.SDK_INT >= 34
+                && isPermissionGranted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED),
+            isPermissionGranted(Manifest.permission.READ_EXTERNAL_STORAGE));
+    }
+
+    private boolean isPermissionGranted(String permission) {
+        return ContextCompat.checkSelfPermission(this, permission)
             == PackageManager.PERMISSION_GRANTED;
     }
 
+    private boolean needsVideoPermissionSettings() {
+        return VideoAccessPolicy.shouldOpenSettings(Build.VERSION.SDK_INT, getVideoAccess(),
+            getPreferences(MODE_PRIVATE).getBoolean(PREF_PERMISSION_REQUESTED, false),
+            getPreferences(MODE_PRIVATE)
+                .getBoolean(PREF_SELECTION_PERMISSION_REQUESTED, false),
+            ActivityCompat.shouldShowRequestPermissionRationale(this, videoPermission()),
+            Build.VERSION.SDK_INT >= 34 && ActivityCompat.shouldShowRequestPermissionRationale(
+                this, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED));
+    }
+
     private void requestVideoPermission() {
-        if (hasVideoPermission()) {
+        if (permissionRequestInProgress) return;
+        if (getVideoAccess() == VideoAccessPolicy.Access.FULL) {
             loadVideos();
             return;
         }
-        String permission = videoPermission();
-        boolean wasRequested = getPreferences(MODE_PRIVATE)
-            .getBoolean(PREF_PERMISSION_REQUESTED, false);
-        if (wasRequested && !ActivityCompat.shouldShowRequestPermissionRationale(
-                this, permission)) {
-            returningFromSettings = true;
+        if (needsVideoPermissionSettings()) {
             Intent settings = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 Uri.parse("package:" + getPackageName()));
             startActivity(settings);
             return;
         }
+        cancelVideoScan();
+        permissionRequestInProgress = true;
         getPreferences(MODE_PRIVATE).edit()
             .putBoolean(PREF_PERMISSION_REQUESTED, true).apply();
-        ActivityCompat.requestPermissions(this, new String[]{permission}, REQ_PERMISSION);
+        String[] permissions = Build.VERSION.SDK_INT >= 34
+            ? new String[]{Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED}
+            : new String[]{videoPermission()};
+        ActivityCompat.requestPermissions(this, permissions, REQ_PERMISSION);
     }
 
     @Override
@@ -221,19 +275,44 @@ public class MainActivity extends AppCompatActivity
             @NonNull String[] perms, @NonNull int[] results) {
         super.onRequestPermissionsResult(req, perms, results);
         if (req != REQ_PERMISSION) return;
-        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
-            loadVideos();
-        else showLibraryState(LibraryState.PERMISSION);
+        permissionRequestInProgress = false;
+        // An interrupted request can return empty arrays; it is not a permanent denial.
+        if (Build.VERSION.SDK_INT >= 34 && results.length > 0
+                && results.length == perms.length) {
+            for (String permission : perms) {
+                if (Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED.equals(permission)) {
+                    getPreferences(MODE_PRIVATE).edit()
+                        .putBoolean(PREF_SELECTION_PERMISSION_REQUESTED, true).apply();
+                    break;
+                }
+            }
+        }
+        // A partial grant leaves READ_MEDIA_VIDEO denied: inspect both actual grants.
+        refreshLibrary(true);
     }
 
     private void loadVideos() {
-        if (!hasVideoPermission()) {
+        refreshLibrary(true);
+    }
+
+    private void refreshLibrary(boolean force) {
+        if (isDestroyed() || permissionRequestInProgress) return;
+        VideoAccessPolicy.Access access = getVideoAccess();
+        if (!force && scanInProgress && scanningAccess == access) return;
+        cancelVideoScan();
+        clearLibraryRows();
+        if (access == VideoAccessPolicy.Access.DENIED) {
+            removeLibraryQueueItems(null);
             showLibraryState(LibraryState.PERMISSION);
             return;
         }
         showLibraryState(LibraryState.LOADING);
         final int generation = ++scanGeneration;
-        executor.execute(() -> {
+        final CancellationSignal cancellation = new CancellationSignal();
+        scanCancellation = cancellation;
+        scanInProgress = true;
+        scanningAccess = access;
+        scanTask = executor.submit(() -> {
             List<VideoItem> items = new ArrayList<>();
             boolean failed = false;
             String[] proj = {
@@ -246,13 +325,15 @@ public class MainActivity extends AppCompatActivity
             String sort = MediaStore.Video.Media.DATE_ADDED + " DESC";
             try (Cursor c = getContentResolver().query(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    proj, null, null, sort)) {
+                    proj, null, null, sort, cancellation)) {
                 if (c != null) {
                     int iId   = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
                     int iName = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
                     int iDur  = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
                     int iSize = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
+                    int iPath = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATA);
                     while (c.moveToNext()) {
+                        cancellation.throwIfCanceled();
                         long id  = c.getLong(iId);
                         Uri uri  = Uri.withAppendedPath(
                             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
@@ -262,31 +343,84 @@ public class MainActivity extends AppCompatActivity
                             c.getString(iName),
                             c.getLong(iDur),
                             c.getLong(iSize),
-                            c.getString(c.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media.DATA)),
+                            c.getString(iPath),
                             uri));
                     }
                 } else failed = true;
+            } catch (OperationCanceledException ignored) {
+                return;
             } catch (Exception e) {
                 android.util.Log.e("MainActivity", "Could not scan videos", e);
                 failed = true;
             }
             final boolean scanFailed = failed;
             handler.post(() -> {
-                if (isDestroyed() || generation != scanGeneration) return;
+                if (isDestroyed() || generation != scanGeneration
+                        || cancellation.isCanceled()) return;
+                scanInProgress = false;
+                scanCancellation = null;
+                scanTask = null;
+                if (getVideoAccess() != access) {
+                    refreshLibrary(true);
+                    return;
+                }
                 if (scanFailed) {
+                    // A partial scan cannot establish which previous selections remain
+                    // readable. Drop only the library queue rather than keep stale URIs.
+                    if (access == VideoAccessPolicy.Access.PARTIAL) {
+                        removeLibraryQueueItems(null);
+                    }
                     showLibraryState(hasVideoPermission()
                         ? LibraryState.ERROR : LibraryState.PERMISSION);
                     return;
                 }
                 videoList.clear();
                 videoList.addAll(items);
+                Set<Uri> available = new HashSet<>();
+                for (VideoItem item : items) available.add(item.getUri());
+                removeLibraryQueueItems(available);
                 adapter.notifyDataSetChanged();
                 showLibraryState(items.isEmpty() ? LibraryState.EMPTY : LibraryState.CONTENT);
             });
         });
     }
 
+    private void cancelVideoScan() {
+        ++scanGeneration;
+        if (scanCancellation != null) scanCancellation.cancel();
+        if (scanTask != null) scanTask.cancel(true);
+        scanCancellation = null;
+        scanTask = null;
+        scanInProgress = false;
+        scanningAccess = null;
+    }
+
+    private void clearLibraryRows() {
+        videoList.clear();
+        adapter.clearCache();
+        adapter.notifyDataSetChanged();
+    }
+
+    private void removeLibraryQueueItems(Set<Uri> available) {
+        PlaylistManager playlist = PlaylistManager.get();
+        List<VideoItem> kept = new ArrayList<>();
+        VideoItem current = playlist.getCurrent();
+        String libraryPrefix = MediaStore.Video.Media.EXTERNAL_CONTENT_URI + "/";
+        for (VideoItem item : playlist.getQueue()) {
+            boolean fromLibrary = item.getUri().toString().startsWith(libraryPrefix);
+            if (!fromLibrary || (available != null && available.contains(item.getUri()))) {
+                kept.add(item);
+            }
+        }
+        if (kept.size() == playlist.size()) return;
+        playlist.setQueue(kept, Math.max(0, kept.indexOf(current)));
+    }
+
     private void showLibraryState(LibraryState state) {
+        boolean partial = getVideoAccess() == VideoAccessPolicy.Access.PARTIAL;
+        accessNotice.setVisibility(partial
+            && (state == LibraryState.CONTENT || state == LibraryState.ERROR)
+            ? View.VISIBLE : View.GONE);
         recyclerView.setVisibility(state == LibraryState.CONTENT ? View.VISIBLE : View.GONE);
         libraryState.setVisibility(state == LibraryState.CONTENT ? View.GONE : View.VISIBLE);
         progressBar.setVisibility(state == LibraryState.LOADING ? View.VISIBLE : View.GONE);
@@ -300,18 +434,22 @@ public class MainActivity extends AppCompatActivity
                 stateMessage.setText(R.string.library_loading_message);
                 break;
             case EMPTY:
-                stateTitle.setText(R.string.library_empty_title);
-                stateMessage.setText(R.string.library_empty_message);
-                setStateActions(R.string.open_local_video, v -> openLocalVideo(),
-                    R.string.library_retry, v -> loadVideos());
+                stateTitle.setText(partial ? R.string.library_partial_empty_title
+                    : R.string.library_empty_title);
+                stateMessage.setText(partial ? R.string.library_partial_empty_message
+                    : R.string.library_empty_message);
+                if (partial) {
+                    setStateActions(R.string.library_select_more, v -> requestVideoPermission(),
+                        R.string.open_local_video, v -> openLocalVideo());
+                } else {
+                    setStateActions(R.string.open_local_video, v -> openLocalVideo(),
+                        R.string.library_retry, v -> loadVideos());
+                }
                 break;
             case PERMISSION:
                 stateTitle.setText(R.string.library_permission_title);
                 stateMessage.setText(R.string.library_permission_message);
-                boolean needsSettings = getPreferences(MODE_PRIVATE)
-                    .getBoolean(PREF_PERMISSION_REQUESTED, false)
-                    && !ActivityCompat.shouldShowRequestPermissionRationale(
-                        this, videoPermission());
+                boolean needsSettings = needsVideoPermissionSettings();
                 setStateActions(needsSettings ? R.string.library_permission_settings
                         : R.string.library_permission_grant,
                     v -> requestVideoPermission(),
@@ -340,13 +478,44 @@ public class MainActivity extends AppCompatActivity
 
     @Override
     public void onVideoClick(VideoItem video) {
-        PlaylistManager.get().setQueue(videoList,
-            videoList.indexOf(video));
-        Intent i = new Intent(this, PlayerActivity.class);
-        i.putExtra(PlayerActivity.EXTRA_URI, video.getUri().toString());
-        i.putExtra(PlayerActivity.EXTRA_TITLE, video.getName());
-        i.putExtra(PlayerActivity.EXTRA_USE_PLAYLIST, true);
-        startActivity(i);
+        if (openingVideo) return;
+        if (!hasVideoPermission() || !videoList.contains(video)) {
+            showUnavailableVideo();
+            return;
+        }
+        openingVideo = true;
+        final int generation = scanGeneration;
+        executor.execute(() -> {
+            boolean readable;
+            try (ParcelFileDescriptor descriptor = getContentResolver()
+                    .openFileDescriptor(video.getUri(), "r")) {
+                readable = descriptor != null;
+            } catch (Exception ignored) {
+                readable = false;
+            }
+            final boolean canRead = readable;
+            handler.post(() -> {
+                openingVideo = false;
+                if (isDestroyed() || isFinishing() || !activityResumed
+                        || generation != scanGeneration) return;
+                int index = videoList.indexOf(video);
+                if (!canRead || !hasVideoPermission() || index < 0) {
+                    showUnavailableVideo();
+                    return;
+                }
+                PlaylistManager.get().setQueue(videoList, index);
+                Intent i = new Intent(this, PlayerActivity.class);
+                i.putExtra(PlayerActivity.EXTRA_URI, video.getUri().toString());
+                i.putExtra(PlayerActivity.EXTRA_TITLE, video.getName());
+                i.putExtra(PlayerActivity.EXTRA_USE_PLAYLIST, true);
+                startActivity(i);
+            });
+        });
+    }
+
+    private void showUnavailableVideo() {
+        Toast.makeText(this, R.string.library_video_unavailable, Toast.LENGTH_LONG).show();
+        refreshLibrary(true);
     }
 
     @Override

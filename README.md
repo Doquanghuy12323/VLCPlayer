@@ -39,6 +39,14 @@ vào **Releases** sau khi các bước kiểm tra thành công.
 Các secret cần cho bước phát hành: `KEYSTORE_BASE64`, `KEY_ALIAS`,
 `KEY_PASSWORD`, `STORE_PASSWORD`. Pull request không sử dụng các secret này.
 
+## Quyền truy cập thư viện video
+Trên Android 14 trở lên, bạn có thể cho phép ứng dụng đọc toàn bộ video hoặc chỉ
+một số video đã chọn. Khi chỉ cấp quyền một phần, thư viện hiển thị thông báo và
+nút **Chọn thêm video** để mở lại trình chọn của Android. Danh sách được cập nhật
+khi quay về ứng dụng để phản ánh quyền và các video còn truy cập được.
+
+Nếu từ chối quyền thư viện, mục **Mở → Video trên máy** vẫn cho phép mở từng file.
+
 ## Lưu dữ liệu torrent
 Trong màn Torrent, **Tự xóa dữ liệu khi đóng video** được ghi nhớ cho các phiên mới.
 Bật để dừng tải và dọn dữ liệu tạm khi đóng video; tắt để dừng tải nhưng giữ dữ liệu
