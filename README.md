@@ -47,6 +47,15 @@ khi quay về ứng dụng để phản ánh quyền và các video còn truy c�
 Nếu từ chối quyền thư viện, mục **Mở → Video trên máy** vẫn cho phép mở từng file.
 
 ## Lưu dữ liệu torrent
+Mở màn Torrent, nhập liên kết magnet hoặc chọn tệp `.torrent`, rồi chọn video
+nếu torrent có nhiều video. Video sẵn sàng sẽ mở tự động khi màn Torrent đang
+hiển thị; nếu bạn chuyển sang ứng dụng khác, khi quay lại hãy nhấn **Xem video**.
+Phiên đã dừng hoặc tiến trình đã kết thúc không khôi phục liên kết phát cũ.
+
+Lỗi nhập tệp và tải torrent được giữ trên màn hình, kèm nút **Thử lại**. Có thể
+chọn tệp khác hoặc sửa liên kết để bắt đầu lại. Xóa dữ liệu đã lưu yêu cầu xác
+nhận tên file; danh sách chỉ cập nhật sau khi thao tác xóa thành công.
+
 Trong màn Torrent, **Tự xóa dữ liệu khi đóng video** được ghi nhớ cho các phiên mới.
 Bật để dừng tải và dọn dữ liệu tạm khi đóng video; tắt để dừng tải nhưng giữ dữ liệu
 trong thư mục riêng của ứng dụng. Dữ liệu được giữ không bị xóa khi mở torrent khác
