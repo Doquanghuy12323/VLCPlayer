@@ -69,10 +69,24 @@ class UpdateReleaseTest(unittest.TestCase):
 
     def release(self):
         manifest = self.manifest()
-        return {"draft": True, "tag_name": "v1790784054", "assets": [
+        pending = "untagged-c14f035e559ff4e5b72b"
+        prefix = "https://github.com/Doquanghuy12323/VLCPlayer/releases/"
+        return {"draft": True, "tag_name": "v1790784054",
+                "html_url": prefix + "tag/" + pending, "assets": [
             {"name": "app-release.apk", "state": "uploaded", "size": manifest["sizeBytes"],
-             "browser_download_url": manifest["apkUrl"]},
-            {"name": "update.json", "state": "uploaded", "size": 1000}]}
+             "browser_download_url": prefix + "download/" + pending + "/app-release.apk"},
+            {"name": "update.json", "state": "uploaded", "size": 1000,
+             "browser_download_url": prefix + "download/" + pending + "/update.json"}]}
+
+    def published_release(self):
+        release = self.release()
+        release.update(draft=False, published_at="2026-10-03T12:00:00Z",
+                       html_url=self.manifest()["releaseUrl"])
+        for asset in release["assets"]:
+            asset["browser_download_url"] = (
+                "https://github.com/Doquanghuy12323/VLCPlayer/releases/download/"
+                "v1790784054/" + asset["name"])
+        return release
 
     def test_accepts_complete_draft_only(self):
         validate_assets(self.release(), self.manifest())
@@ -86,6 +100,19 @@ class UpdateReleaseTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_assets(release, self.manifest())
 
+    def test_published_release_requires_canonical_urls_and_uploaded_assets(self):
+        validate_assets(self.published_release(), self.manifest(), published=True)
+        for alteration in (lambda release: release.update(html_url=self.release()["html_url"]),
+                           lambda release: release["assets"][0].update(
+                               browser_download_url=self.release()["assets"][0]["browser_download_url"]),
+                           lambda release: release["assets"][1].update(
+                               browser_download_url=self.release()["assets"][1]["browser_download_url"]),
+                           lambda release: release["assets"][1].update(state="new")):
+            release = self.published_release()
+            alteration(release)
+            with self.assertRaises(ValueError):
+                validate_assets(release, self.manifest(), published=True)
+
     def test_damaged_download_keeps_release_unpublished(self):
         manifest_path = Path(self.directory.name) / "update.json"
         manifest_path.write_text(json.dumps(self.manifest()), encoding="utf-8")
@@ -95,6 +122,7 @@ class UpdateReleaseTest(unittest.TestCase):
                                notes_file=notes_path, commit="a" * 40)
         release = self.release()
         release["target_commitish"] = args.commit
+        release["assets"][1]["size"] = manifest_path.stat().st_size
         calls = []
 
         def fake_gh(*arguments):
@@ -114,6 +142,42 @@ class UpdateReleaseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Downloaded release assets"):
                 publish_release(args)
         self.assertFalse(any(call[:2] == ("release", "edit") for call in calls))
+
+    def test_temporary_draft_urls_publish_only_after_verified_downloads(self):
+        manifest_path = Path(self.directory.name) / "update.json"
+        manifest_path.write_text(json.dumps(self.manifest()), encoding="utf-8")
+        notes_path = Path(self.directory.name) / "notes.md"
+        notes_path.write_text("Release notes", encoding="utf-8")
+        args = SimpleNamespace(apk=self.apk, manifest=manifest_path,
+                               notes_file=notes_path, commit="a" * 40)
+        draft = self.release()
+        published = self.published_release()
+        for release in (draft, published):
+            release["target_commitish"] = args.commit
+            release["assets"][1]["size"] = manifest_path.stat().st_size
+        downloaded_verified = False
+        is_published = False
+
+        def fake_gh(*arguments):
+            nonlocal downloaded_verified, is_published
+            if arguments[:2] == ("release", "view"):
+                return '{"apiUrl": "https://api.github.com/repos/Doquanghuy12323/VLCPlayer/releases/123"}'
+            if arguments[0] == "api":
+                self.assertTrue(arguments[1].endswith("/releases/123"))
+                return json.dumps(published if is_published else draft)
+            if arguments[:2] == ("release", "download"):
+                downloaded = Path(arguments[arguments.index("--dir") + 1])
+                (downloaded / "app-release.apk").write_bytes(self.apk.read_bytes())
+                (downloaded / "update.json").write_bytes(manifest_path.read_bytes())
+                downloaded_verified = True
+            if arguments[:2] == ("release", "edit"):
+                self.assertTrue(downloaded_verified)
+                is_published = True
+            return ""
+
+        with patch("publish_update_release.gh", side_effect=fake_gh), patch("builtins.print"):
+            publish_release(args)
+        self.assertTrue(is_published)
 
 
 if __name__ == "__main__":
