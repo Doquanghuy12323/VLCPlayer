@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Nội dung thay đổi; để trống để lấy các commit mới'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -20,6 +25,8 @@ jobs:
           distribution: 'temurin'
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
+      - name: Test release metadata and publication checks
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Lint, test and build debug APK
         run: ./gradlew lintDebug testDebugUnitTest assembleDebug --stacktrace
       - name: Upload debug APK
@@ -34,8 +41,13 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    concurrency:
+      group: vlcplayer-signed-release
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
@@ -62,10 +74,26 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.code }}
-          name: VLC Player ${{ steps.version.outputs.name }}
-          body: Build from commit ${{ github.sha }}
-          files: app/build/outputs/apk/release/app-release.apk
+      - name: Verify signed APK and create updater metadata
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          python3 scripts/create_update_manifest.py \
+            --apk app/build/outputs/apk/release/app-release.apk \
+            --aapt "$ANDROID_HOME/build-tools/34.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/34.0.0/apksigner" \
+            --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
+            --commit "$RELEASE_COMMIT" --notes-file release-notes.md \
+            --output app/build/outputs/apk/release/update.json
+      - name: Upload and verify draft assets, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          python3 scripts/publish_update_release.py \
+            --apk app/build/outputs/apk/release/app-release.apk \
+            --manifest app/build/outputs/apk/release/update.json \
+            --notes-file release-notes.md --commit "$RELEASE_COMMIT"

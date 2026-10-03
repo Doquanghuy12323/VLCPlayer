@@ -79,6 +79,8 @@ public class MainActivity extends AppCompatActivity
     private boolean openingVideo;
     private boolean activityResumed;
     private boolean privacyToggleInProgress;
+    private AlertDialog updateDialog;
+    private final UpdateManager.Listener updateListener = snapshot -> maybeShowUpdatePrompt();
 
     @Override
     protected void attachBaseContext(Context base) {
@@ -125,8 +127,7 @@ public class MainActivity extends AppCompatActivity
         fab.setOnClickListener(v -> showOpenChoices());
 
         checkPermissionsAndLoad();
-        updateManager = new UpdateManager(this);
-        updateManager.checkForUpdate(true);
+        updateManager = UpdateManager.get(this);
         if (savedInstanceState == null) handleShareIntent(getIntent());
     }
 
@@ -178,12 +179,20 @@ public class MainActivity extends AppCompatActivity
         // Selection and grants can change while this activity is away, including in Settings.
         // Initial onCreate/permission-result scans are coalesced until they complete.
         refreshLibrary(false);
+        updateManager.addListener(updateListener);
+        updateManager.reconcile();
+        updateManager.checkAutomatically();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         activityResumed = false;
+        if (updateManager != null) updateManager.removeListener(updateListener);
+        if (updateDialog != null) {
+            updateDialog.dismiss();
+            updateDialog = null;
+        }
         // A scan started before a permission picker must never publish its old selection.
         cancelVideoScan();
     }
@@ -193,8 +202,37 @@ public class MainActivity extends AppCompatActivity
         super.onDestroy();
         cancelVideoScan();
         if (adapter != null) adapter.clearCache();
-        if (updateManager != null) updateManager.destroy();
         executor.shutdown();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) maybeShowUpdatePrompt();
+    }
+
+    private void maybeShowUpdatePrompt() {
+        // Only the visible library offers an update. Permission dialogs, the player and
+        // other screens continue without an installer or update dialog appearing over them.
+        if (updateManager == null || !activityResumed || isFinishing() || isDestroyed()
+                || !hasWindowFocus() || permissionRequestInProgress || openingVideo
+                || updateDialog != null || !updateManager.canPromptAutomatically()) return;
+        UpdateManager.Snapshot snapshot = updateManager.snapshot();
+        if (snapshot.release == null || !snapshot.updateAvailable
+                || (snapshot.state != UpdateManager.State.AVAILABLE
+                    && snapshot.state != UpdateManager.State.READY)) return;
+        updateDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.update_prompt_title)
+                .setMessage(getString(R.string.update_prompt_message, snapshot.release.versionName))
+                .setPositiveButton(R.string.update_prompt_view,
+                    (dialog, which) -> startActivity(new Intent(this, UpdateActivity.class)))
+                .setNegativeButton(R.string.update_snooze,
+                    (dialog, which) -> updateManager.snooze())
+                .create();
+        updateDialog.setOnCancelListener(dialog -> updateManager.snooze());
+        updateDialog.setOnDismissListener(dialog -> updateDialog = null);
+        updateDialog.show();
+        updateManager.markPromptShown();
     }
 
     @Override
@@ -297,6 +335,7 @@ public class MainActivity extends AppCompatActivity
         }
         // A partial grant leaves READ_MEDIA_VIDEO denied: inspect both actual grants.
         refreshLibrary(true);
+        maybeShowUpdatePrompt();
     }
 
     private void loadVideos() {
@@ -551,8 +590,7 @@ public class MainActivity extends AppCompatActivity
             cleanApp();
             return true;
         } else if (id == R.id.action_update) {
-            Toast.makeText(this, "Dang kiem tra cap nhat...", Toast.LENGTH_SHORT).show();
-            if (updateManager != null) updateManager.checkForUpdate(false);
+            startActivity(new Intent(this, UpdateActivity.class));
             return true;
         } else if (id == R.id.action_manga_local) {
             openMangaFilePicker();

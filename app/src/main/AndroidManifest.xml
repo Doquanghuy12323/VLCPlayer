@@ -88,6 +88,13 @@
             android:theme="@style/Theme.VLCPlayer"/>
 
         <activity
+            android:name=".UpdateActivity"
+            android:theme="@style/Theme.VLCPlayer"
+            android:exported="false" />
+
+        <receiver android:name=".UpdateInstallReceiver" android:exported="false" />
+
+        <activity
             android:name=".TorrentActivity"
             android:theme="@style/Theme.VLCPlayer"
             android:exported="true"
