@@ -15,22 +15,46 @@ def gh(*arguments):
     return subprocess.run(["gh", *arguments], text=True, capture_output=True, check=True).stdout
 
 
-def validate_assets(release, manifest):
-    if not release.get("draft"):
-        raise ValueError("Asset verification requires an unpublished draft release")
-    if release.get("tag_name") != f"v{manifest['versionCode']}":
+def validate_assets(release, manifest, published=False, metadata_size=None):
+    tag = f"v{manifest['versionCode']}"
+    if release.get("tag_name") != tag:
         raise ValueError("Release tag does not match the signed APK")
+    if published:
+        if release.get("draft") or not release.get("published_at"):
+            raise ValueError("Release publication was not confirmed")
+        if release.get("html_url") != manifest["releaseUrl"]:
+            raise ValueError("Published release URL differs from updater metadata")
+        asset_tag = tag
+    else:
+        if not release.get("draft"):
+            raise ValueError("Asset verification requires an unpublished draft release")
+        # GitHub uses a temporary tag in draft URLs until the tag is published.
+        # Match that exact pending tag on the draft and both assets, in this repo.
+        match = re.fullmatch(
+            rf"https://github\.com/{re.escape(REPOSITORY)}/releases/tag/"
+            r"(v[0-9]+|untagged-[0-9a-f]+)", release.get("html_url", ""))
+        if not match or (match.group(1).startswith("v") and match.group(1) != tag):
+            raise ValueError("Draft release URL does not identify this repository and release")
+        asset_tag = match.group(1)
     assets = release.get("assets", [])
     if len(assets) != 2 or {asset.get("name") for asset in assets} != {APK_NAME, "update.json"}:
-        raise ValueError("The draft must contain exactly app-release.apk and update.json")
+        raise ValueError("The release must contain exactly app-release.apk and update.json")
     for asset in assets:
         if asset.get("state") != "uploaded" or asset.get("size", 0) <= 0:
             raise ValueError("A release asset has not finished uploading")
+        expected_url = (f"https://github.com/{REPOSITORY}/releases/download/"
+                        f"{asset_tag}/{asset['name']}")
+        if asset.get("browser_download_url") != expected_url:
+            raise ValueError("Uploaded asset URL differs from its release")
         if asset["name"] == APK_NAME:
             if asset["size"] != manifest["sizeBytes"]:
                 raise ValueError("Uploaded APK size differs from the signed build")
-            if asset.get("browser_download_url") != manifest["apkUrl"]:
-                raise ValueError("Uploaded APK URL differs from updater metadata")
+            if published and expected_url != manifest["apkUrl"]:
+                raise ValueError("Published APK URL differs from updater metadata")
+            if asset.get("digest") and asset["digest"] != f"sha256:{manifest['sha256']}":
+                raise ValueError("Uploaded APK digest differs from the signed build")
+        elif metadata_size is not None and asset["size"] != metadata_size:
+            raise ValueError("Uploaded metadata size differs from the verified local file")
 
 
 def publish_release(args):
@@ -51,7 +75,7 @@ def publish_release(args):
         raise ValueError("Could not identify the new draft release")
     release_api = api_url[len("https://api.github.com/"):]
     release = json.loads(gh("api", release_api))
-    validate_assets(release, manifest)
+    validate_assets(release, manifest, metadata_size=args.manifest.stat().st_size)
     if release.get("target_commitish") != args.commit:
         raise ValueError("Draft release targets an unexpected commit")
     with tempfile.TemporaryDirectory(prefix="vlcplayer-release-") as downloaded:
@@ -65,8 +89,10 @@ def publish_release(args):
             raise ValueError("Downloaded release assets differ from the verified local build")
     gh("release", "edit", tag, "--repo", REPOSITORY, "--draft=false", "--latest")
     published = json.loads(gh("api", release_api))
-    if published.get("draft") or not published.get("published_at"):
-        raise ValueError("Release publication was not confirmed")
+    validate_assets(published, manifest, published=True,
+                    metadata_size=args.manifest.stat().st_size)
+    if published.get("target_commitish") != args.commit:
+        raise ValueError("Published release targets an unexpected commit")
     print(f"Published {manifest['releaseUrl']} after verifying both downloaded assets")
 
 
