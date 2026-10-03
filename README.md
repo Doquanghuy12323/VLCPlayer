@@ -38,6 +38,28 @@ vào **Releases** sau khi các bước kiểm tra thành công.
 Các secret cần cho bước phát hành: `KEYSTORE_BASE64`, `KEY_ALIAS`,
 `KEY_PASSWORD`, `STORE_PASSWORD`. Pull request không sử dụng các secret này.
 
+Workflow kiểm tra APK đã ký bằng Android SDK, tạo `update.json` từ package,
+phiên bản, minSdk, dung lượng và SHA-256 của file thực tế. Release được tạo dạng
+nháp; chỉ công bố sau khi tải lên và tải lại để đối chiếu cả APK lẫn metadata.
+Có thể nhập nội dung thay đổi trong trường `release_notes` khi chạy workflow.
+
+## Cập nhật ứng dụng
+Mở **Cài đặt → Kiểm tra cập nhật** để xem phiên bản hiện tại, bản mới, nội dung
+thay đổi và dung lượng tải. Chọn **Tải bản cập nhật**, theo dõi tiến độ rồi chọn
+**Cài đặt** vào thời điểm thuận tiện. Tải file không tự mở trình cài khi đang xem
+video. **Nhắc lại ngày mai** hoãn lời nhắc; vẫn có thể kiểm tra thủ công.
+
+DownloadManager tiếp tục tải khi rời màn hình. Ứng dụng lưu lượt tải và kiểm tra
+lại trạng thái khi mở lại, tránh tạo lượt tải trùng. APK được đối chiếu SHA-256,
+package, phiên bản và chữ ký tương thích với bản đang cài trước khi chuyển cho
+trình cài đặt Android. Sau khi cấp quyền cài ứng dụng, luồng cài tiếp tục bằng
+file đã tải. Nếu hủy cài đặt, có thể cài lại từ màn hình cập nhật.
+
+Khi mở bản mới, ứng dụng xác nhận phiên bản đã cài rồi dọn file cập nhật của
+phiên đó. `app-release.apk` và tag số `v<versionCode>` được giữ để các bản cũ
+nhận được bản nâng cấp đầu tiên. Bản debug có package riêng và không nhận APK
+release của ứng dụng chính.
+
 ## Quyền truy cập thư viện video
 Trên Android 14 trở lên, bạn có thể cho phép ứng dụng đọc toàn bộ video hoặc chỉ
 một số video đã chọn. Khi chỉ cấp quyền một phần, thư viện hiển thị thông báo và
