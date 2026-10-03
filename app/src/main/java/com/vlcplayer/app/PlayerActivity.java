@@ -168,6 +168,7 @@ public class PlayerActivity extends AppCompatActivity {
     private long pendingRecoveryPositionMs = -1L;
     private long lastKnownPlaybackPositionMs;
     private long lastKnownMediaDurationMs = -1L;
+    private long maximumObservedNativePositionMs;
     private long playbackClockBasePositionMs;
     private long playbackClockStartedElapsedMs = -1L;
 
@@ -211,6 +212,7 @@ public class PlayerActivity extends AppCompatActivity {
             if (mediaPlayer != null) {
                 long pos = mediaPlayer.getTime();
                 long len = mediaPlayer.getLength();
+                recordNativePlaybackPosition(pos);
                 if (pos >= 0) lastKnownPlaybackPositionMs = pos;
                 if (len > 0) lastKnownMediaDurationMs = len;
                 long effectivePosition = getBestKnownPlaybackPosition();
@@ -568,6 +570,11 @@ public class PlayerActivity extends AppCompatActivity {
     private void handlePlaybackEndReached() {
         if (contentAccessFailure || isFinishing() || isDestroyed()) return;
         blockHandyPlayback();
+        recordNativePlaybackPosition(getRawPlaybackPosition());
+        long nativeDuration = mediaPlayer == null ? -1L : mediaPlayer.getLength();
+        boolean unknownTorrentStartupEnd = TorrentPlaybackStartupPolicy.shouldRecoverUnknownStartupEnd(
+            isCurrentLiveTorrentStream(uriString), nativeDuration, lastKnownMediaDurationMs,
+            maximumObservedNativePositionMs);
         long position = getBestKnownPlaybackPosition();
         lastKnownPlaybackPositionMs = position;
         playbackClockBasePositionMs = position;
@@ -585,10 +592,10 @@ public class PlayerActivity extends AppCompatActivity {
                 "MediaPlayer reached end: position=" + position
                     + "ms duration=" + duration + "ms remaining=" + remaining + "ms");
         }
-        if (prematureNetworkEnd) {
+        if (prematureNetworkEnd || unknownTorrentStartupEnd) {
             android.util.Log.w("VLCRecovery",
                 "Network stream ended prematurely; treating it as a recoverable error");
-            handlePlaybackError();
+            handlePlaybackError(unknownTorrentStartupEnd);
             return;
         }
 
@@ -610,6 +617,10 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void handlePlaybackError() {
+        handlePlaybackError(false);
+    }
+
+    private void handlePlaybackError(boolean restartAtBeginning) {
         if (handlingPlaybackError || isFinishing() || isDestroyed() || isInBackground) return;
 
         handlingPlaybackError = true;
@@ -620,7 +631,7 @@ public class PlayerActivity extends AppCompatActivity {
         btnPlayPause.setImageResource(android.R.drawable.ic_media_play);
 
         final String failedUri = uriString;
-        long failedPosition = getBestKnownPlaybackPosition();
+        long failedPosition = restartAtBeginning ? 0L : getBestKnownPlaybackPosition();
         lastKnownPlaybackPositionMs = failedPosition;
         playbackClockBasePositionMs = failedPosition;
         playbackClockStartedElapsedMs = -1L;
@@ -673,6 +684,19 @@ public class PlayerActivity extends AppCompatActivity {
         if (value == null || value.trim().isEmpty()) return false;
         String scheme = Uri.parse(value).getScheme();
         return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+    }
+
+    private boolean isCurrentLiveTorrentStream(String value) {
+        String requestedSession = getIntent().getStringExtra(EXTRA_TORRENT_SESSION_ID);
+        TorrentManager manager = TorrentManager.getActiveManager();
+        return manager != null && TorrentPlaybackStartupPolicy.matchesLiveStream(
+            requestedSession, manager.getPlaybackSessionId(), value,
+            manager.getReadyUrl(requestedSession));
+    }
+
+    private void recordNativePlaybackPosition(long positionMs) {
+        if (positionMs > maximumObservedNativePositionMs)
+            maximumObservedNativePositionMs = positionMs;
     }
 
     private long getBestKnownPlaybackPosition() {
@@ -944,6 +968,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (restoreSavedHistory) {
             lastKnownPlaybackPositionMs = 0L;
             lastKnownMediaDurationMs = -1L;
+            maximumObservedNativePositionMs = 0L;
             playbackClockBasePositionMs = 0L;
             playbackClockStartedElapsedMs = -1L;
             if (seekBar != null) {
@@ -1023,7 +1048,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (handyManager != null && handyManager.isConnected()) {
             handler.postDelayed(this::autoPrepareHandyForCurrentVideo, 300);
         }
-        if (restoreSavedHistory) {
+        if (restoreSavedHistory && !isCurrentLiveTorrentStream(uri)) {
             dbExecutor.execute(() -> {
                 if (!uri.equals(pendingUri)) return;
                 HistoryItem history = AppDatabase.get(this).dao().getHistoryByUri(uri);

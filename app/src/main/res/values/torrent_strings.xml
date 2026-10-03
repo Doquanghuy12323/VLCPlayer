@@ -55,6 +55,8 @@
     <string name="torrent_manager_not_ready">Torrent chưa sẵn sàng. Hãy thử lại sau giây lát.</string>
     <string name="torrent_manager_invalid_video_path">Không mở được video đã chọn trong torrent.</string>
     <string name="torrent_manager_selection_failed">Không chuẩn bị được video đã chọn. Hãy thử lại.</string>
+    <string name="torrent_manager_stream_storage_failed">Không đọc được dữ liệu video trong bộ nhớ. Hãy thử tải lại torrent.</string>
+    <string name="torrent_manager_stream_unavailable">Chưa nhận đủ dữ liệu để tiếp tục phát video. Hãy kiểm tra mạng và nguồn torrent rồi thử lại.</string>
     <string name="torrent_manager_low_storage">Không đủ dung lượng. Hãy để trống ít nhất khoảng %1$s rồi thử lại.</string>
     <string name="torrent_manager_stopped_low_storage_deleted">Đã dừng vì thiếu dung lượng và dọn dữ liệu tạm.</string>
     <string name="torrent_manager_stopped_low_storage_kept">Đã dừng vì thiếu dung lượng. Dữ liệu đã tải được giữ lại.</string>

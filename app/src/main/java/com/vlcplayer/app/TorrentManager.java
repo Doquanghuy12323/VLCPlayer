@@ -3,6 +3,7 @@ package com.vlcplayer.app;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import org.libtorrent4j.SessionManager;
 import org.libtorrent4j.TorrentHandle;
@@ -11,6 +12,13 @@ import org.libtorrent4j.TorrentStatus;
 import org.libtorrent4j.TorrentFlags;
 import org.libtorrent4j.Priority;
 import org.libtorrent4j.FileStorage;
+import org.libtorrent4j.AlertListener;
+import org.libtorrent4j.PieceIndexBitfield;
+import org.libtorrent4j.alerts.Alert;
+import org.libtorrent4j.alerts.AlertType;
+import org.libtorrent4j.alerts.FileErrorAlert;
+import org.libtorrent4j.alerts.FilePrioAlert;
+import org.libtorrent4j.alerts.TorrentAlert;
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
@@ -18,14 +26,24 @@ import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class TorrentManager {
 
     private static final long GIB = 1024L * 1024L * 1024L;
     private static final long STARTUP_HEADROOM_BYTES = 128L * 1024L * 1024L;
+    private static final long PIECE_WAIT_TIMEOUT_MS = 180000;
+    private static final int MAX_PROXY_CLIENTS = 12;
     private static volatile TorrentManager activeInstance;
     private static final ExecutorService START_EXECUTOR = Executors.newSingleThreadExecutor();
     private static final TorrentStorage.DeletionTokens STORED_PLAYBACK_TOKENS =
@@ -79,6 +97,14 @@ public class TorrentManager {
     private String localizedLanguage;
     private static final Object CACHE_LOCK = new Object();
     private final AtomicInteger lifecycleGeneration = new AtomicInteger();
+    private final AtomicInteger selectionGeneration = new AtomicInteger();
+    private volatile TorrentStreamPolicy streamPolicy;
+    private final Object proxyClientsLock = new Object();
+    private final Set<Socket> proxyClients = new HashSet<>();
+    private final Object piecePlanLock = new Object();
+    private final Map<Socket, Set<Integer>> requestWindows = new HashMap<>();
+    private final Set<Integer> prioritizedPieces = new HashSet<>();
+    private final Set<Integer> urgentPieces = new HashSet<>();
 
     public TorrentManager(Context ctx) {
         appContext = ctx.getApplicationContext();
@@ -263,56 +289,158 @@ public class TorrentManager {
 
     public void selectFile(int fileIndex, Callback cb) {
         final int operationId;
+        final int selectionId;
         synchronized (CACHE_LOCK) {
             if (cb != null) callback = cb;
             operationId = lifecycleGeneration.get();
+            selectionId = selectionGeneration.incrementAndGet();
         }
-        new Thread(() -> selectFileInternal(fileIndex, new ForwardingCallback(operationId), operationId)).start();
+        START_EXECUTOR.execute(() -> selectFileInternal(fileIndex,
+            new ForwardingCallback(operationId), operationId, selectionId));
     }
 
     private void selectFileInternal(int fileIndex, Callback cb, int operationId) {
-        synchronized (CACHE_LOCK) {
-        if (!isCurrent(operationId) || !streamActive) return;
-        if (handle == null || !handle.isValid() || cachedInfo == null) {
-            handler.post(() -> cb.onError(text(R.string.torrent_manager_not_ready)));
-            return;
-        }
-        try {
-            ensureStorageAvailable();
-            FileStorage fs = cachedInfo.files();
-            int numFiles = fs.numFiles();
-            Priority[] priorities = new Priority[numFiles];
-            for (int i = 0; i < numFiles; i++) {
-                // Khong tai lien tuc toan bo file. HTTP proxy se chi mo khoa
-                // nhung piece VLC dang doc va mot cua so nho phia truoc.
-                priorities[i] = Priority.IGNORE;
-            }
-            handle.prioritizeFiles(priorities);
+        selectFileInternal(fileIndex, cb, operationId, selectionGeneration.incrementAndGet());
+    }
 
+    private void selectFileInternal(int fileIndex, Callback cb, int operationId, int selectionId) {
+        TorrentHandle selectedHandle = null;
+        TorrentInfo info = null;
+        try {
+        synchronized (CACHE_LOCK) {
+            if (!isSelectionCurrent(operationId, selectionId) || !streamActive) return;
+            if (handle == null || !handle.isValid() || cachedInfo == null) {
+                throw new UiException(R.string.torrent_manager_not_ready);
+            }
+            ensureStorageAvailable();
+            info = cachedInfo;
+            FileStorage fs = info.files();
+            if (fileIndex < 0 || fileIndex >= fs.numFiles()) {
+                throw new UiException(R.string.torrent_manager_invalid_video_path);
+            }
             selectedFileIndex = fileIndex;
             selectedVideoFile = new File(saveDir, fs.filePath(fileIndex));
             if (!TorrentStorage.isDescendant(selectedVideoFile, saveDir)) {
                 throw new UiException(R.string.torrent_manager_invalid_video_path);
             }
             readyCalled = false;
+            streamPolicy = null;
+            selectedHandle = handle;
+            closeProxy();
+            // Keep file-priority changes from briefly enabling a full-file download.
+            selectedHandle.unsetFlags(TorrentFlags.AUTO_MANAGED);
+        }
 
-            prioritizeFileEnds(fileIndex);
-            startProxy(cb, operationId);
+        // A nonzero FILE priority makes native storage write the actual video,
+        // instead of keeping downloaded pieces in the hidden .parts file.
+        // File priorities reset piece priorities asynchronously: wait for the
+        // disk acknowledgement before installing our bounded piece windows.
+        if (!awaitStorageReady(selectedHandle, operationId, selectionId, cb)) return;
+        selectedHandle.pause();
+        if (!prepareSelectedFile(selectedHandle, info, fileIndex, operationId, selectionId)) return;
+        TorrentStreamPolicy policy = new TorrentStreamPolicy(info.files().fileOffset(fileIndex),
+            info.files().fileSize(fileIndex), info.pieceLength());
+        synchronized (CACHE_LOCK) {
+            if (!isSelectionCurrent(operationId, selectionId) || handle != selectedHandle) return;
+            synchronized (piecePlanLock) {
+                requestWindows.clear();
+                prioritizedPieces.clear();
+                urgentPieces.clear();
+                Priority[] pieces = new Priority[info.numPieces()];
+                java.util.Arrays.fill(pieces, Priority.IGNORE);
+                selectedHandle.clearPieceDeadlines();
+                selectedHandle.prioritizePieces(pieces);
+                streamPolicy = policy;
+                applyPiecePlan(operationId, selectionId, selectedHandle);
+            }
+            selectedHandle.resume();
+            startProxy(cb, operationId, selectionId);
+        }
 
         } catch (Exception e) {
+            if (!isSelectionCurrent(operationId, selectionId)) return;
             String msg = userError(e, R.string.torrent_manager_selection_failed);
-            handler.post(() -> cb.onError(msg));
-        }
+            cb.onError(msg);
         }
     }
 
-    private void ignoreAllFiles(TorrentInfo info) {
-        if (handle == null || !handle.isValid() || info == null) return;
+    private boolean prepareSelectedFile(TorrentHandle selectedHandle, TorrentInfo info,
+                                        int fileIndex, int operationId, int selectionId)
+            throws Exception {
+        Semaphore completed = new Semaphore(0);
+        AtomicReference<String> failure = new AtomicReference<>();
+        Priority[] priorities = new Priority[info.files().numFiles()];
+        java.util.Arrays.fill(priorities, Priority.IGNORE);
+        priorities[fileIndex] = Priority.DEFAULT;
+        AlertListener listener = new AlertListener() {
+            @Override public int[] types() {
+                return new int[] {AlertType.FILE_PRIO.swig(), AlertType.FILE_ERROR.swig()};
+            }
+            @Override public void alert(Alert<?> alert) {
+                // Native alert objects are valid only during this callback.
+                if (!isSelectionCurrent(operationId, selectionId) || handle != selectedHandle
+                        || !(alert instanceof TorrentAlert)
+                        || !selectedHandle.equals(((TorrentAlert<?>) alert).handle())) return;
+                if (alert instanceof FileErrorAlert) {
+                    failure.set(((FileErrorAlert) alert).error().getMessage());
+                    completed.release();
+                } else if (alert instanceof FilePrioAlert) {
+                    FilePrioAlert applied = (FilePrioAlert) alert;
+                    if (applied.error().isError()) failure.set(applied.error().getMessage());
+                    completed.release();
+                }
+            }
+        };
+        session.addListener(listener);
         try {
-            Priority[] priorities = new Priority[info.files().numFiles()];
-            for (int i = 0; i < priorities.length; i++) priorities[i] = Priority.IGNORE;
-            handle.prioritizeFiles(priorities);
-        } catch (Exception ignored) {}
+            synchronized (CACHE_LOCK) {
+                if (!isSelectionCurrent(operationId, selectionId) || handle != selectedHandle) return false;
+                selectedHandle.prioritizeFiles(priorities);
+            }
+            long deadline = SystemClock.elapsedRealtime() + 15000;
+            while (isSelectionCurrent(operationId, selectionId) && handle == selectedHandle) {
+                if (completed.tryAcquire(80, TimeUnit.MILLISECONDS)) {
+                    if (failure.get() != null) {
+                        Log.w("TorrentManager", "Selected file priority failed: " + failure.get());
+                        throw new UiException(R.string.torrent_manager_stream_storage_failed);
+                    }
+                    if (!java.util.Arrays.equals(priorities, selectedHandle.filePriorities())) {
+                        // An initial all-IGNORE acknowledgement can already be queued.
+                        // Only the completed selected-file migration acknowledges this request.
+                        continue;
+                    }
+                    return true;
+                }
+                if (SystemClock.elapsedRealtime() >= deadline) {
+                    throw new UiException(R.string.torrent_manager_selection_failed);
+                }
+            }
+            return false;
+        } finally {
+            session.removeListener(listener);
+        }
+    }
+
+    private boolean awaitStorageReady(TorrentHandle selectedHandle, int operationId,
+                                      int selectionId, Callback cb) throws Exception {
+        selectedHandle.resume();
+        long deadline = SystemClock.elapsedRealtime() + PIECE_WAIT_TIMEOUT_MS;
+        while (isSelectionCurrent(operationId, selectionId) && handle == selectedHandle) {
+            TorrentStatus status = selectedHandle.status(true);
+            if (status.errorCode().isError()) {
+                Log.w("TorrentManager", "Torrent storage startup failed: " + status.errorCode().getMessage());
+                throw new UiException(R.string.torrent_manager_stream_storage_failed);
+            }
+            TorrentStatus.State state = status.state();
+            if (state == TorrentStatus.State.DOWNLOADING || state == TorrentStatus.State.FINISHED
+                    || state == TorrentStatus.State.SEEDING) return true;
+            cb.onStatusUpdate(localizedState(state));
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                throw new UiException(R.string.torrent_manager_selection_failed);
+            }
+            Thread.sleep(100);
+        }
+        return false;
     }
 
     private void ensureStorageAvailable() throws IOException {
@@ -332,211 +460,356 @@ public class TorrentManager {
         return String.format(java.util.Locale.US, "%.1f GB", bytes / (double) GIB);
     }
 
-    private void prioritizeFileEnds(int fileIndex) {
-        if (handle == null || !handle.isValid() || cachedInfo == null) return;
-        try {
-            FileStorage fs = cachedInfo.files();
-            long fileOffset = fs.fileOffset(fileIndex);
-            long fileSize = fs.fileSize(fileIndex);
-            int pieceLen = cachedInfo.pieceLength();
-            if (pieceLen <= 0) return;
-
-            int startPiece = (int) (fileOffset / pieceLen);
-            int endPiece = (int) ((fileOffset + fileSize - 1) / pieceLen);
-
-            int headCount = Math.min(8, endPiece - startPiece + 1);
-            for (int i = 0; i < headCount; i++) {
-                handle.piecePriority(startPiece + i, Priority.TOP_PRIORITY);
+    /** Called with piecePlanLock. Only changed pieces cross JNI, once per piece boundary. */
+    private void applyPiecePlan(int operationId, int selectionId, TorrentHandle selectedHandle) {
+        if (!isSelectionCurrent(operationId, selectionId) || handle != selectedHandle
+                || streamPolicy == null || !selectedHandle.isValid()) return;
+        TreeMap<Integer, Integer> desired = new TreeMap<>();
+        Set<Integer> urgent = new HashSet<>();
+        if (!readyCalled) {
+            int tailFirst = streamPolicy.pieceAt(Math.max(0,
+                streamPolicy.fileSize - TorrentStreamPolicy.TAIL_BYTES));
+            for (int piece : streamPolicy.startupPieces()) {
+                int distance = piece - streamPolicy.firstPiece;
+                if (piece >= tailFirst) distance = Math.min(distance, piece - tailFirst);
+                desired.put(piece, (int) Math.min(30000L, distance * 25L));
             }
-            int tailCount = Math.min(2, endPiece - startPiece + 1);
-            for (int i = 0; i < tailCount; i++) {
-                handle.piecePriority(endPiece - i, Priority.TOP_PRIORITY);
+            urgent.add(streamPolicy.firstPiece);
+            urgent.add(tailFirst);
+        }
+        for (Set<Integer> window : requestWindows.values()) {
+            int distance = 0;
+            for (int piece : window) {
+                int deadline = Math.min(30000, distance * 25);
+                Integer existing = desired.get(piece);
+                if (existing == null || deadline < existing) desired.put(piece, deadline);
+                if (distance++ == 0) urgent.add(piece);
             }
-        } catch (Exception ignored) {}
+        }
+        for (int piece : new HashSet<>(prioritizedPieces)) {
+            if (!desired.containsKey(piece)) {
+                selectedHandle.resetPieceDeadline(piece);
+                selectedHandle.piecePriority(piece, Priority.IGNORE);
+                prioritizedPieces.remove(piece);
+            }
+        }
+        for (Map.Entry<Integer, Integer> entry : desired.entrySet()) {
+            if (prioritizedPieces.add(entry.getKey())) {
+                selectedHandle.piecePriority(entry.getKey(), Priority.TOP_PRIORITY);
+                selectedHandle.setPieceDeadline(entry.getKey(), entry.getValue());
+            }
+        }
+        for (int piece : urgent) {
+            if (!urgentPieces.contains(piece)) selectedHandle.setPieceDeadline(piece, 0);
+        }
+        urgentPieces.clear();
+        urgentPieces.addAll(urgent);
     }
 
-    private void startProxy(Callback cb, int operationId) throws Exception {
-        if (proxyServer != null && !proxyServer.isClosed()) {
-            try { proxyServer.close(); } catch (Exception ignored) {}
+    private void setRequestWindow(Socket socket, TorrentStreamPolicy policy, long position,
+                                  long requestEnd, int operationId, int selectionId,
+                                  TorrentHandle selectedHandle) {
+        synchronized (piecePlanLock) {
+            if (!isRequestCurrent(operationId, selectionId, selectedHandle)) return;
+            Set<Integer> window = policy.requestPieces(position, requestEnd);
+            if (window.equals(requestWindows.get(socket))) return;
+            requestWindows.put(socket, window);
+            applyPiecePlan(operationId, selectionId, selectedHandle);
         }
+    }
+
+    private void removeRequestWindow(Socket socket, int operationId, int selectionId,
+                                     TorrentHandle selectedHandle) {
+        synchronized (piecePlanLock) {
+            if (!isSelectionCurrent(operationId, selectionId) || handle != selectedHandle) return;
+            if (requestWindows.remove(socket) != null) {
+                applyPiecePlan(operationId, selectionId, selectedHandle);
+            }
+        }
+    }
+
+    private boolean isSelectionCurrent(int operationId, int selectionId) {
+        return isCurrent(operationId) && selectionGeneration.get() == selectionId;
+    }
+
+    private boolean isRequestCurrent(int operationId, int selectionId, TorrentHandle selectedHandle) {
+        return isSelectionCurrent(operationId, selectionId) && proxyRunning && handle == selectedHandle;
+    }
+
+    private void closeProxy() {
+        proxyRunning = false;
+        if (monitorTimer != null) { monitorTimer.cancel(); monitorTimer = null; }
+        try { if (proxyServer != null) proxyServer.close(); }
+        catch (IOException ignored) {}
+        synchronized (proxyClientsLock) {
+            for (Socket socket : proxyClients) {
+                try { socket.close(); } catch (IOException ignored) {}
+            }
+            proxyClients.clear();
+        }
+        synchronized (piecePlanLock) {
+            requestWindows.clear();
+            prioritizedPieces.clear();
+            urgentPieces.clear();
+        }
+    }
+
+    private void startProxy(Callback cb, int operationId, int selectionId) throws Exception {
         proxyServer = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
         proxyPort = proxyServer.getLocalPort();
         proxyRunning = true;
         final ServerSocket server = proxyServer;
 
         new Thread(() -> {
-            while (isCurrent(operationId) && proxyRunning) {
+            while (isSelectionCurrent(operationId, selectionId) && proxyRunning && proxyServer == server) {
                 try {
                     Socket client = server.accept();
+                    synchronized (proxyClientsLock) {
+                        if (!isSelectionCurrent(operationId, selectionId) || !proxyRunning
+                                || proxyClients.size() >= MAX_PROXY_CLIENTS) {
+                            client.close();
+                            continue;
+                        }
+                        proxyClients.add(client);
+                    }
                     client.setSoTimeout(60000);
-                    new Thread(() -> handleRequest(client, operationId)).start();
+                    new Thread(() -> handleRequest(client, operationId, selectionId),
+                        "TorrentHttpClient").start();
                 } catch (Exception e) {
-                    if (!isCurrent(operationId) || !proxyRunning) break;
+                    if (!isSelectionCurrent(operationId, selectionId) || !proxyRunning
+                            || server.isClosed()) break;
+                    Log.w("TorrentManager", "Torrent proxy accept failed", e);
                 }
             }
-        }).start();
+        }, "TorrentHttpServer").start();
 
-        startMonitor(cb, operationId);
+        startMonitor(cb, operationId, selectionId);
     }
 
-    private void handleRequest(Socket socket, int operationId) {
+    private void handleRequest(Socket socket, int operationId, int selectionId) {
+        TorrentHandle requestHandle = null;
         try (Socket s = socket;
-             BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()));
+             BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), "US-ASCII"));
              OutputStream out = s.getOutputStream()) {
-
-            if (!isCurrent(operationId)) return;
-            final TorrentHandle requestHandle = handle;
-
+            final File video;
+            final TorrentStreamPolicy policy;
+            synchronized (CACHE_LOCK) {
+                if (!isSelectionCurrent(operationId, selectionId)) return;
+                requestHandle = handle;
+                video = selectedVideoFile;
+                policy = streamPolicy;
+            }
             String requestLine = in.readLine();
             if (requestLine == null) return;
             boolean headOnly = requestLine.startsWith("HEAD ");
-
-            long rangeStart = 0;
-            long rangeEnd = -1;
+            if (!headOnly && !requestLine.startsWith("GET ")) {
+                out.write("HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, HEAD\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".getBytes("US-ASCII"));
+                return;
+            }
+            String rangeHeader = null;
+            int headerSize = 0;
             String line;
             while ((line = in.readLine()) != null && !line.isEmpty()) {
-                if (line.toLowerCase().startsWith("range: bytes=")) {
-                    String rv = line.substring(13).trim();
-                    int dash = rv.indexOf("-");
-                    if (dash >= 0) {
-                        try { rangeStart = Long.parseLong(rv.substring(0, dash).trim()); }
-                        catch (Exception ignored) {}
-                        try {
-                            String endStr = rv.substring(dash + 1).trim();
-                            if (!endStr.isEmpty()) rangeEnd = Long.parseLong(endStr);
-                        } catch (Exception ignored) {}
+                headerSize += line.length();
+                if (headerSize > 16384) return;
+                int colon = line.indexOf(':');
+                if (colon > 0 && "range".equalsIgnoreCase(line.substring(0, colon).trim())) {
+                    // Duplicate/multiple byte ranges are unsupported, never misreported as a single range.
+                    String value = line.substring(colon + 1).trim();
+                    rangeHeader = rangeHeader == null ? value : rangeHeader + "," + value;
+                }
+            }
+            if (video == null || policy == null
+                    || !isRequestCurrent(operationId, selectionId, requestHandle)) {
+                writeUnavailable(out);
+                return;
+            }
+            // Validate byte ranges before calculating indexes or touching native piece APIs.
+            TorrentHttpRange.Result range = TorrentHttpRange.parse(rangeHeader, policy.fileSize, headOnly);
+            if (!range.satisfiable()) {
+                String invalid = "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                    + "Content-Range: bytes */" + policy.fileSize + "\r\n"
+                    + "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                out.write(invalid.getBytes("US-ASCII"));
+                return;
+            }
+            String headers = responseHeaders(video, policy.fileSize, range);
+            if (headOnly) {
+                out.write(headers.getBytes("US-ASCII"));
+                return;
+            }
+            serveVideo(socket, out, video, policy, range, headers, operationId, selectionId, requestHandle);
+        } catch (IOException clientClosed) {
+            // VLC closes old connections normally when probing, seeking or cancelling playback.
+            Log.d("TorrentManager", "Torrent HTTP client disconnected");
+        } catch (Exception unexpected) {
+            if (isSelectionCurrent(operationId, selectionId)) {
+                Log.w("TorrentManager", "Torrent HTTP request failed", unexpected);
+            }
+        } finally {
+            removeRequestWindow(socket, operationId, selectionId, requestHandle);
+            synchronized (proxyClientsLock) { proxyClients.remove(socket); }
+        }
+    }
+
+    private static String responseHeaders(File video, long fileSize, TorrentHttpRange.Result range) {
+        String name = video.getName().toLowerCase(java.util.Locale.ROOT);
+        String mime = name.endsWith(".mkv") ? "video/x-matroska"
+            : name.endsWith(".mp4") || name.endsWith(".mov") ? "video/mp4"
+            : name.endsWith(".avi") ? "video/x-msvideo"
+            : name.endsWith(".webm") ? "video/webm" : "application/octet-stream";
+        String contentRange = range.statusCode == 206
+            ? "Content-Range: bytes " + range.start + "-" + range.end + "/" + fileSize + "\r\n" : "";
+        return "HTTP/1.1 " + (range.statusCode == 206 ? "206 Partial Content" : "200 OK") + "\r\n"
+            + "Content-Type: " + mime + "\r\n" + contentRange
+            + "Content-Length: " + range.length + "\r\n"
+            + "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n";
+    }
+
+    private static void writeUnavailable(OutputStream out) throws IOException {
+        out.write("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nRetry-After: 2\r\nConnection: close\r\n\r\n".getBytes("US-ASCII"));
+    }
+
+    private void serveVideo(Socket socket, OutputStream out, File video, TorrentStreamPolicy policy,
+                            TorrentHttpRange.Result range, String headers, int operationId,
+                            int selectionId, TorrentHandle requestHandle) throws IOException {
+        boolean headersSent = false;
+        byte[] buffer = new byte[65536];
+        try (VerifiedFileReader reader = new VerifiedFileReader(video, socket, policy, range.end,
+                operationId, selectionId, requestHandle)) {
+            long position = range.start;
+            long remaining = range.length;
+            // First verified bytes and the physical file must exist before promising a body.
+            int read = reader.read(position, remaining, buffer);
+            out.write(headers.getBytes("US-ASCII"));
+            headersSent = true;
+            while (read > 0) {
+                out.write(buffer, 0, read);
+                position += read;
+                remaining -= read;
+                if (remaining == 0) break;
+                read = reader.read(position, remaining, buffer);
+            }
+        } catch (StreamFailure failure) {
+            if (!isRequestCurrent(operationId, selectionId, requestHandle) || socket.isClosed()) return;
+            Log.w("TorrentManager", "Torrent verified read failed", failure);
+            if (!headersSent) writeUnavailable(out);
+            // A missing network piece is retryable and can belong to an old seek connection.
+            // Only an actual native/physical storage failure invalidates live readiness.
+            if (failure.resource == R.string.torrent_manager_stream_storage_failed) {
+                new ForwardingCallback(operationId).onError(text(failure.resource));
+            }
+        } catch (StreamCancelled cancelled) {
+            // Closing/replacing the exact session terminates its connections without a playback error.
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private final class VerifiedFileReader implements Closeable {
+        private final RandomAccessFile file;
+        private final Socket socket;
+        private final TorrentStreamPolicy policy;
+        private final long requestEnd;
+        private final int operationId;
+        private final int selectionId;
+        private final TorrentHandle requestHandle;
+        private int verifiedPiece = -1;
+
+        VerifiedFileReader(File video, Socket socket, TorrentStreamPolicy policy, long requestEnd,
+                           int operationId, int selectionId, TorrentHandle requestHandle)
+                throws StreamFailure {
+            this.socket = socket;
+            this.policy = policy;
+            this.requestEnd = requestEnd;
+            this.operationId = operationId;
+            this.selectionId = selectionId;
+            this.requestHandle = requestHandle;
+            try { file = new RandomAccessFile(video, "r"); }
+            catch (IOException failure) {
+                throw new StreamFailure(R.string.torrent_manager_stream_storage_failed, failure);
+            }
+        }
+
+        int read(long position, long remaining, byte[] buffer)
+                throws StreamFailure, StreamCancelled, InterruptedException {
+            if (!isRequestCurrent(operationId, selectionId, requestHandle) || socket.isClosed()) {
+                throw new StreamCancelled();
+            }
+            int piece = policy.pieceAt(position);
+            if (piece != verifiedPiece) {
+                setRequestWindow(socket, policy, position, requestEnd, operationId, selectionId, requestHandle);
+                long deadline = SystemClock.elapsedRealtime() + PIECE_WAIT_TIMEOUT_MS;
+                while (true) {
+                    if (!isRequestCurrent(operationId, selectionId, requestHandle) || socket.isClosed()) {
+                        throw new StreamCancelled();
                     }
-                }
-            }
-
-            File video = selectedVideoFile;
-            TorrentInfo ti = cachedInfo;
-            int fIdx = selectedFileIndex;
-
-            if (video == null || ti == null || fIdx < 0) {
-                out.write("HTTP/1.1 503 Not Ready\r\nContent-Length: 0\r\n\r\n".getBytes());
-                return;
-            }
-
-            FileStorage fs = ti.files();
-            int pieceLen = ti.pieceLength();
-            if (pieceLen <= 0) {
-                out.write("HTTP/1.1 503 Not Ready\r\nContent-Length: 0\r\n\r\n".getBytes("UTF-8"));
-                return;
-            }
-            if (pieceLen > 0 && requestHandle != null && requestHandle.isValid()) {
-                long fileOffset = fs.fileOffset(fIdx);
-                int startPiece = (int) ((fileOffset + rangeStart) / pieceLen);
-                int endPieceOfFile = (int) ((fileOffset + fs.fileSize(fIdx) - 1) / pieceLen);
-                int reqEndPiece = Math.min(startPiece + 3, endPieceOfFile);
-                for (int i = startPiece; i <= reqEndPiece; i++) {
-                    try { requestHandle.piecePriority(i, Priority.TOP_PRIORITY); } catch (Exception ignored) {}
-                }
-                // Tang thoi gian cho len 3 phut - tranh ngat giua video
-                // khi mang cham gay VLC hieu nham la het video
-                long deadline = System.currentTimeMillis() + 180000;
-                while (System.currentTimeMillis() < deadline && isCurrent(operationId) && proxyRunning) {
-                    if (!requestHandle.isValid()) break;
-                    try { if (requestHandle.havePiece(startPiece)) break; } catch (Exception ignored) { break; }
+                    try {
+                        if (requestHandle.isValid() && requestHandle.havePiece(piece)) break;
+                    } catch (Exception failure) {
+                        throw new StreamFailure(R.string.torrent_manager_stream_storage_failed, failure);
+                    }
+                    if (SystemClock.elapsedRealtime() >= deadline) {
+                        throw new StreamFailure(R.string.torrent_manager_stream_unavailable, null);
+                    }
                     Thread.sleep(80);
                 }
+                verifiedPiece = piece;
             }
-
-            long fileLen = fs.fileSize(fIdx);
-
-            if (rangeStart < 0 || rangeStart >= fileLen || rangeEnd < -1) {
-                String invalid = "HTTP/1.1 416 Range Not Satisfiable\r\n"
-                    + "Content-Range: bytes */" + fileLen + "\r\n"
-                    + "Content-Length: 0\r\n\r\n";
-                out.write(invalid.getBytes("UTF-8"));
-                return;
-            }
-
-            if (rangeEnd < 0 || rangeEnd >= fileLen) rangeEnd = fileLen - 1;
-            long contentLen = rangeEnd - rangeStart + 1;
-
-            String name = video.getName().toLowerCase();
-            String mime = name.endsWith(".mkv") ? "video/x-matroska"
-                : name.endsWith(".mp4") ? "video/mp4"
-                : name.endsWith(".avi") ? "video/x-msvideo"
-                : name.endsWith(".webm") ? "video/webm"
-                : "video/octet-stream";
-
-            String respHeader;
-            if (rangeStart == 0 && rangeEnd == fileLen - 1) {
-                respHeader = "HTTP/1.1 200 OK\r\n"
-                    + "Content-Type: " + mime + "\r\n"
-                    + "Content-Length: " + fileLen + "\r\n"
-                    + "Accept-Ranges: bytes\r\n"
-                    + "Connection: close\r\n\r\n";
-            } else {
-                respHeader = "HTTP/1.1 206 Partial Content\r\n"
-                    + "Content-Type: " + mime + "\r\n"
-                    + "Content-Range: bytes " + rangeStart + "-" + rangeEnd + "/" + fileLen + "\r\n"
-                    + "Content-Length: " + contentLen + "\r\n"
-                    + "Accept-Ranges: bytes\r\n"
-                    + "Connection: close\r\n\r\n";
-            }
-            out.write(respHeader.getBytes("UTF-8"));
-            if (headOnly) return;
-
-            final long finalRangeStart = rangeStart;
-            final long finalContentLen = contentLen;
-            try (RandomAccessFile raf = new RandomAccessFile(video, "r")) {
-                raf.seek(finalRangeStart);
-                byte[] buf = new byte[65536];
-                long left = finalContentLen;
-                while (isCurrent(operationId) && proxyRunning && left > 0) {
-                    if (requestHandle == null || !requestHandle.isValid()) break;
-
-                    long positionInFile = finalContentLen - left + finalRangeStart;
-                    long absoluteOffset = fs.fileOffset(fIdx) + positionInFile;
-                    int piece = (int) (absoluteOffset / pieceLen);
-                    if (!waitForPiece(piece, 180000, operationId, requestHandle)) break;
-
-                    long bytesToPieceEnd = pieceLen - (absoluteOffset % pieceLen);
-                    int toRead = (int) Math.min(Math.min(buf.length, left), bytesToPieceEnd);
-                    int read = raf.read(buf, 0, toRead);
-                    if (read == -1 || read == 0) {
-                        Thread.sleep(50);
-                        continue;
-                    }
-                    out.write(buf, 0, read);
-                    left -= read;
+            int length = policy.readLength(position, remaining, buffer.length);
+            long deadline = SystemClock.elapsedRealtime() + 15000;
+            while (isRequestCurrent(operationId, selectionId, requestHandle) && !socket.isClosed()) {
+                try {
+                    file.seek(position);
+                    int read = file.read(buffer, 0, length);
+                    if (read > 0) return read;
+                } catch (IOException failure) {
+                    throw new StreamFailure(R.string.torrent_manager_stream_storage_failed, failure);
                 }
+                // A verified piece with a persistent short physical file is a storage error,
+                // never send sparse/unverified bytes or spin indefinitely at EOF.
+                if (SystemClock.elapsedRealtime() >= deadline) {
+                    throw new StreamFailure(R.string.torrent_manager_stream_storage_failed, null);
+                }
+                Thread.sleep(80);
             }
-        } catch (Exception ignored) {}
-    }
-
-    private boolean waitForPiece(int piece, long timeoutMs, int operationId,
-                                 TorrentHandle activeHandle) throws InterruptedException {
-        if (activeHandle == null || !activeHandle.isValid()) return false;
-        try { activeHandle.piecePriority(piece, Priority.TOP_PRIORITY); }
-        catch (Exception ignored) {}
-
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (isCurrent(operationId) && proxyRunning && System.currentTimeMillis() < deadline) {
-            if (activeHandle == null || !activeHandle.isValid()) return false;
-            try {
-                if (activeHandle.havePiece(piece)) return true;
-            } catch (Exception e) {
-                return false;
-            }
-            Thread.sleep(80);
+            throw new StreamCancelled();
         }
-        return false;
+
+        @Override public void close() throws IOException { file.close(); }
     }
 
-    private void startMonitor(Callback cb, int operationId) {
+    private static final class StreamFailure extends IOException {
+        final int resource;
+        StreamFailure(int resource, Exception cause) {
+            super("Verified torrent read failed", cause);
+            this.resource = resource;
+        }
+    }
+
+    private static final class StreamCancelled extends Exception {
+    }
+
+    private void startMonitor(Callback cb, int operationId, int selectionId) {
         if (monitorTimer != null) monitorTimer.cancel();
         monitorTimer = new Timer();
         monitorTimer.scheduleAtFixedRate(new TimerTask() {
+            private long verifiedButUnreadableSince;
             @Override public void run() {
-                synchronized (CACHE_LOCK) {
-                if (!isCurrent(operationId)) return;
-                if (handle == null || !handle.isValid()) return;
+                if (!isSelectionCurrent(operationId, selectionId)) return;
+                TorrentHandle monitoredHandle = handle;
+                TorrentStreamPolicy policy = streamPolicy;
+                File video = selectedVideoFile;
+                if (monitoredHandle == null || !monitoredHandle.isValid() || lastError != null) return;
                 try {
-                    TorrentStatus st = handle.status();
+                    TorrentStatus st = !readyCalled && policy != null
+                        ? monitoredHandle.status(TorrentHandle.QUERY_PIECES) : monitoredHandle.status(true);
+                    if (!isSelectionCurrent(operationId, selectionId) || handle != monitoredHandle) return;
+                    if (st.errorCode().isError()) {
+                        Log.w("TorrentManager", "Torrent storage failed: " + st.errorCode().getMessage());
+                        cb.onError(text(R.string.torrent_manager_stream_storage_failed));
+                        return;
+                    }
                     int pct = (int) (st.progress() * 100);
                     float dlKb = st.downloadRate() / 1024f;
                     int peers = st.numPeers();
@@ -545,7 +818,7 @@ public class TorrentManager {
                     if (!lowStorageStopping && saveDir.getUsableSpace() > 0
                             && saveDir.getUsableSpace() < getReservedFreeSpace()) {
                         synchronized (CACHE_LOCK) {
-                            if (!isCurrent(operationId)) return;
+                            if (!isSelectionCurrent(operationId, selectionId)) return;
                             lowStorageStopping = true;
                             String message = text(autoCleanup
                                 ? R.string.torrent_manager_stopped_low_storage_deleted
@@ -561,22 +834,52 @@ public class TorrentManager {
                             state, pct, (int) dlKb, peers));
                     });
 
-                    if (!readyCalled && cachedInfo != null && selectedFileIndex >= 0) {
-                        int pieceLen = cachedInfo.pieceLength();
-                        if (pieceLen > 0) {
-                            long fileOffset = cachedInfo.files().fileOffset(selectedFileIndex);
-                            int firstPiece = (int) (fileOffset / pieceLen);
-                            if (handle.havePiece(firstPiece)) {
+                    if (!readyCalled && policy != null) {
+                        PieceIndexBitfield available = st.pieces();
+                        boolean buffered = policy.ready(
+                            piece -> piece < available.size() && available.getBit(piece), true);
+                        // QUERY_PIECES includes hash-passed pieces whose disk writes may
+                        // still be pending; havePiece is the completed-write gate.
+                        buffered = buffered && policy.ready(monitoredHandle::havePiece, true);
+                        if (buffered && readableStartupFile(video, policy)) {
+                            synchronized (CACHE_LOCK) {
+                                if (!isSelectionCurrent(operationId, selectionId)
+                                        || handle != monitoredHandle || !proxyRunning || lastError != null) return;
                                 readyCalled = true;
+                                synchronized (piecePlanLock) {
+                                    applyPiecePlan(operationId, selectionId, monitoredHandle);
+                                }
                                 String url = "http://127.0.0.1:" + proxyPort + "/stream";
                                 handler.post(() -> cb.onReady(url));
                             }
+                        } else if (buffered) {
+                            long now = SystemClock.elapsedRealtime();
+                            if (verifiedButUnreadableSince == 0) verifiedButUnreadableSince = now;
+                            if (now - verifiedButUnreadableSince >= 15000) {
+                                cb.onError(text(R.string.torrent_manager_stream_storage_failed));
+                            }
+                        } else {
+                            verifiedButUnreadableSince = 0;
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception failure) {
+                    if (isSelectionCurrent(operationId, selectionId)) {
+                        Log.w("TorrentManager", "Torrent buffer monitoring failed", failure);
+                    }
                 }
             }
         }, 500, 1000);
+    }
+
+    private static boolean readableStartupFile(File video, TorrentStreamPolicy policy) {
+        if (video == null || !video.isFile() || !video.canRead()) return false;
+        try (RandomAccessFile file = new RandomAccessFile(video, "r")) {
+            if (file.length() < policy.fileSize || file.read() < 0) return false;
+            file.seek(policy.fileSize - 1);
+            return file.read() >= 0;
+        } catch (IOException notReadableYet) {
+            return false;
+        }
     }
 
     private List<VideoFileEntry> listVideoFiles(TorrentInfo ti) {
@@ -603,14 +906,12 @@ public class TorrentManager {
     private int stopInternal() {
         synchronized (CACHE_LOCK) {
         lifecycleGeneration.incrementAndGet();
+        selectionGeneration.incrementAndGet();
         streamActive = false;
         playbackSessionId = null;
         streamSource = null;
         if (activeInstance == this) activeInstance = null;
-        proxyRunning = false;
-        if (monitorTimer != null) { monitorTimer.cancel(); monitorTimer = null; }
-        try { if (proxyServer != null && !proxyServer.isClosed()) proxyServer.close(); }
-        catch (Exception ignored) {}
+        closeProxy();
         readyCalled = false;
         lastError = null;
 
@@ -621,6 +922,7 @@ public class TorrentManager {
         cachedInfo = null;
         selectedFileIndex = -1;
         selectedVideoFile = null;
+        streamPolicy = null;
 
         if (oldHandle != null) {
             try {
